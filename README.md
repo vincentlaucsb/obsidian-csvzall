@@ -3,7 +3,7 @@
 Experimental Obsidian integration for `csvzall`.
 
 The plugin is intentionally thin: it launches the local `csvzall` helper
-process, asks it to serve a read-only CSV viewer, and embeds the local URL in an
+process, asks it to serve an editable CSV viewer, and embeds the local URL in an
 Obsidian pane.
 
 ## Development
@@ -29,6 +29,12 @@ The plugin launches:
 csvzall view <file.csv> --no-open --startup-json
 ```
 
+Current plugin builds launch the helper with `--edit` as well:
+
+```powershell
+csvzall view <file.csv> --edit --no-open --startup-json
+```
+
 The helper prints either a localhost URL or JSON containing a `url` field on
 stdout. The plugin accepts both, but JSON is preferred.
 
@@ -40,7 +46,7 @@ this MVP.
 ## Scope
 
 - Desktop only.
-- Read-only MVP.
-- No save endpoint.
+- Editable by default through the helper's `--edit` mode.
+- Save is handled by the helper process.
 - No bundled binary downloader yet.
 - Local helper should bind to `127.0.0.1` and use a session token.

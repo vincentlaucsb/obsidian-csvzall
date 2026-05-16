@@ -1,7 +1,7 @@
 {
   "name": "obsidian-csvzall",
   "version": "0.1.0",
-  "description": "Obsidian integration for the csvzall local CSV viewer.",
+  "description": "Obsidian integration for the editable csvzall local CSV viewer.",
   "main": "main.js",
   "type": "module",
   "scripts": {

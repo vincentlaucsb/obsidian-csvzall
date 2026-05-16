@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   extractViewerUrl,
@@ -49,6 +50,12 @@ test("formatProcessFailure includes command context and captured streams", () =>
   assert.match(message, /csvzall exited with code 1/);
   assert.match(message, /Command: csvzall view notes.csv --no-open/);
   assert.match(message, /unable to open input file/);
+});
+
+test("built plugin launches csvzall view in edit mode", () => {
+  const bundle = readFileSync(new URL("../main.js", import.meta.url), "utf8");
+  assert.match(bundle, /"--edit"/);
+  assert.match(bundle, /"--startup-json"/);
 });
 
 test("ViewerSessionRegistry closes leaf-bound processes and unload kills remaining", () => {

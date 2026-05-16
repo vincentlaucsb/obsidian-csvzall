@@ -3,7 +3,7 @@
   "name": "csvzall",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Open CSV files in a read-only local csvzall table viewer.",
+  "description": "Open CSV files in an editable local csvzall table viewer.",
   "author": "csvzall",
   "authorUrl": "https://github.com/",
   "isDesktopOnly": true

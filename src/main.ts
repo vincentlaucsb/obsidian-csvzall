@@ -274,7 +274,7 @@ export default class CsvzallPlugin extends Plugin {
 
   private async startViewer(filePath: string): Promise<CsvzallServerHandle> {
     const executable = stripOuterQuotes(this.settings.csvzallPath);
-    const args = ["view", filePath, "--no-open", "--startup-json"];
+    const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
     const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
     console.info("Starting csvzall viewer", { executable, args, cwd });
     const child = spawn(executable, args, {
