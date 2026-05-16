@@ -1,0 +1,27 @@
+{
+  "name": "obsidian-csvzall",
+  "version": "0.1.0",
+  "description": "Obsidian integration for the csvzall local CSV viewer.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "keywords": [
+    "obsidian",
+    "csv",
+    "csvzall"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "esbuild": "0.25.5",
+    "tslib": "2.4.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "obsidian": "latest"
+  }
+}
