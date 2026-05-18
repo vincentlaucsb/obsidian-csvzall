@@ -12,6 +12,14 @@ import {
   type WorkspaceLeaf,
 } from "obsidian";
 import {
+  ChartRunScheduler,
+  DEFAULT_CHART_CONFIG_PATH,
+  matchingRunOnSaveCharts,
+  normalizeVaultPath,
+  outputChartsForCsv,
+  parseChartConfigText,
+} from "./chartAutomation.js";
+import {
   extractViewerUrl,
   formatProcessFailure,
   stripOuterQuotes,
@@ -19,17 +27,27 @@ import {
 } from "./viewerHelpers.js";
 
 const VIEW_TYPE_CSVZALL = "csvzall-view";
+const MAX_EVENT_LOG_ENTRIES = 100;
+
+interface CsvzallEventLogEntry {
+  timestamp: string;
+  level: "info" | "error";
+  message: string;
+  detail?: string;
+}
 
 interface CsvzallPluginSettings {
   csvzallPath: string;
   openInObsidian: boolean;
   startupTimeoutMs: number;
+  eventLog: CsvzallEventLogEntry[];
 }
 
 const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   csvzallPath: "csvzall",
   openInObsidian: true,
   startupTimeoutMs: 10000,
+  eventLog: [],
 };
 
 interface CsvzallServerHandle {
@@ -37,6 +55,14 @@ interface CsvzallServerHandle {
   process: ChildProcessWithoutNullStreams;
   url: string;
   stopping: boolean;
+}
+
+interface ConfiguredChart {
+  id: string;
+  type: string;
+  input: string;
+  output: string;
+  runOnSave: boolean;
 }
 
 class CsvzallTableView extends FileView {
@@ -145,10 +171,15 @@ class CsvzallTableView extends FileView {
 export default class CsvzallPlugin extends Plugin {
   settings: CsvzallPluginSettings = DEFAULT_SETTINGS;
   private readonly sessions = new ViewerSessionRegistry();
+  private readonly chartScheduler = new ChartRunScheduler({
+    runner: (_inputPath: string, chartIds: string[]) => this.runConfiguredCharts(chartIds),
+  });
+  private charts: ConfiguredChart[] = [];
   private unloading = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    await this.reloadChartConfig();
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
     this.registerExtensions(["csv"], VIEW_TYPE_CSVZALL);
@@ -169,6 +200,50 @@ export default class CsvzallPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "regenerate-charts",
+      name: "Regenerate Charts",
+      callback: () => void this.runConfiguredCharts(this.charts.map((chart) => chart.id)),
+    });
+
+    this.addCommand({
+      id: "regenerate-charts-for-current-csv",
+      name: "Regenerate Charts for Current CSV",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.isCsv(file)) {
+          return false;
+        }
+        const charts = outputChartsForCsv(this.charts, file.path) as ConfiguredChart[];
+        if (charts.length === 0) {
+          return false;
+        }
+        if (!checking) {
+          void this.runConfiguredCharts(charts.map((chart) => chart.id));
+        }
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "open-generated-chart",
+      name: "Open Generated Chart",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.isCsv(file)) {
+          return false;
+        }
+        const [chart] = outputChartsForCsv(this.charts, file.path) as ConfiguredChart[];
+        if (!chart?.output) {
+          return false;
+        }
+        if (!checking) {
+          void this.app.workspace.openLinkText(chart.output, "", false);
+        }
+        return true;
+      },
+    });
+
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (!(file instanceof TFile) || !this.isCsv(file)) {
@@ -183,19 +258,63 @@ export default class CsvzallPlugin extends Plugin {
         });
       }),
     );
+
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (!(file instanceof TFile)) {
+          return;
+        }
+        const path = normalizeVaultPath(file.path);
+        if (path === DEFAULT_CHART_CONFIG_PATH) {
+          void this.reloadChartConfig();
+          return;
+        }
+        if (!this.isCsv(file)) {
+          return;
+        }
+        this.scheduleChartsForCsv(file.path);
+      }),
+    );
   }
 
   onunload(): void {
     this.unloading = true;
+    this.chartScheduler.clear();
     this.sessions.shutdownAll();
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    if (!Array.isArray(this.settings.eventLog)) {
+      this.settings.eventLog = [];
+    }
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  async clearEventLog(): Promise<void> {
+    this.settings.eventLog = [];
+    await this.saveSettings();
+  }
+
+  private async recordEvent(
+    level: CsvzallEventLogEntry["level"],
+    message: string,
+    detail?: string,
+  ): Promise<void> {
+    this.settings.eventLog = [
+      {
+        timestamp: new Date().toISOString(),
+        level,
+        message,
+        detail,
+      },
+      ...this.settings.eventLog,
+    ].slice(0, MAX_EVENT_LOG_ENTRIES);
+    await this.saveSettings();
   }
 
   private isCsv(file: TFile): boolean {
@@ -208,6 +327,131 @@ export default class CsvzallPlugin extends Plugin {
       return null;
     }
     return adapter.getFullPath(file.path);
+  }
+
+  private getVaultRoot(): string | null {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
+      return null;
+    }
+    return adapter.getBasePath();
+  }
+
+  private async reloadChartConfig(): Promise<void> {
+    try {
+      const exists = await this.app.vault.adapter.exists(DEFAULT_CHART_CONFIG_PATH);
+      if (!exists) {
+        this.charts = [];
+        return;
+      }
+      const text = await this.app.vault.adapter.read(DEFAULT_CHART_CONFIG_PATH);
+      this.charts = parseChartConfigText(text) as ConfiguredChart[];
+    } catch (error) {
+      this.charts = [];
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall failed to load chart config: ${message}`);
+      await this.recordEvent("error", "Failed to load chart config", message);
+      console.error("csvzall failed to load chart config", error);
+    }
+  }
+
+  private scheduleChartsForCsv(path: string): void {
+    const charts = matchingRunOnSaveCharts(this.charts, path) as ConfiguredChart[];
+    if (charts.length === 0) {
+      return;
+    }
+    this.chartScheduler.schedule(path, charts.map((chart) => chart.id));
+  }
+
+  private async runConfiguredCharts(chartIds: string[]): Promise<void> {
+    if (!Platform.isDesktopApp) {
+      const message = "csvzall chart generation requires the Obsidian desktop app.";
+      new Notice(message);
+      await this.recordEvent("error", message);
+      return;
+    }
+
+    const vaultRoot = this.getVaultRoot();
+    if (!vaultRoot) {
+      const message = "csvzall chart generation requires a local filesystem vault.";
+      new Notice(message);
+      await this.recordEvent("error", message);
+      return;
+    }
+
+    const ids = Array.from(new Set(chartIds)).filter(Boolean).sort();
+    if (ids.length === 0) {
+      new Notice("No csvzall charts are configured.");
+      return;
+    }
+
+    let failures = 0;
+    for (const id of ids) {
+      try {
+        await this.runCsvzallCommand(
+          ["charts", "run", id, "--config", DEFAULT_CHART_CONFIG_PATH],
+          vaultRoot,
+          `chart ${id}`,
+        );
+        const chart = this.charts.find((candidate) => candidate.id === id);
+        await this.recordEvent(
+          "info",
+          `Generated chart ${id}`,
+          chart?.output ? `Output: ${chart.output}` : undefined,
+        );
+      } catch {
+        failures += 1;
+      }
+    }
+    if (failures > 0) {
+      return;
+    }
+    new Notice(ids.length === 1 ? "csvzall chart regenerated." : `csvzall regenerated ${ids.length} charts.`);
+  }
+
+  private async runCsvzallCommand(args: string[], cwd: string, label: string): Promise<void> {
+    const executable = stripOuterQuotes(this.settings.csvzallPath);
+    const child = spawn(executable, args, {
+      cwd,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8");
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      child.on("error", reject);
+      child.on("exit", (code, signal) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(
+          new Error(
+            formatProcessFailure({
+              executable,
+              args,
+              cwd,
+              code,
+              signal,
+              stdout,
+              stderr,
+            }),
+          ),
+        );
+      });
+    }).catch(async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall failed to regenerate ${label}: ${message}`);
+      await this.recordEvent("error", `Failed to regenerate ${label}`, message);
+      console.error(`csvzall failed to regenerate ${label}`, error);
+      throw error;
+    });
   }
 
   private async openCsv(file: TFile): Promise<void> {
@@ -246,6 +490,7 @@ export default class CsvzallPlugin extends Plugin {
       const message = error instanceof Error ? error.message : String(error);
       this.showLeafErrorText(leaf, message);
       new Notice(`csvzall failed to open CSV: ${message}`);
+      await this.recordEvent("error", `Failed to open CSV ${file.path}`, message);
       console.error("csvzall failed to open CSV", error);
     }
   }
@@ -268,6 +513,7 @@ export default class CsvzallPlugin extends Plugin {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`csvzall failed to open CSV: ${message}`);
+      await this.recordEvent("error", `Failed to open CSV ${file.path}`, message);
       console.error("csvzall failed to open CSV", error);
     }
   }
@@ -455,5 +701,51 @@ class CsvzallSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    containerEl.createEl("h2", { text: "Log" });
+    new Setting(containerEl)
+      .setName("Chart and error log")
+      .setDesc(`Keeps the latest ${MAX_EVENT_LOG_ENTRIES} csvzall chart events and errors.`)
+      .addButton((button) =>
+        button
+          .setButtonText("Clear")
+          .setDisabled(this.plugin.settings.eventLog.length === 0)
+          .onClick(async () => {
+            await this.plugin.clearEventLog();
+            this.display();
+          }),
+      );
+
+    const log = containerEl.createDiv({ cls: "csvzall-settings-log" });
+    if (this.plugin.settings.eventLog.length === 0) {
+      log.createDiv({
+        cls: "csvzall-settings-log-empty",
+        text: "No csvzall events yet.",
+      });
+      return;
+    }
+
+    for (const entry of this.plugin.settings.eventLog) {
+      const item = log.createDiv({ cls: `csvzall-settings-log-entry is-${entry.level}` });
+      const header = item.createDiv({ cls: "csvzall-settings-log-entry-header" });
+      header.createSpan({
+        cls: "csvzall-settings-log-entry-level",
+        text: entry.level,
+      });
+      header.createSpan({
+        cls: "csvzall-settings-log-entry-time",
+        text: new Date(entry.timestamp).toLocaleString(),
+      });
+      item.createDiv({
+        cls: "csvzall-settings-log-entry-message",
+        text: entry.message,
+      });
+      if (entry.detail) {
+        item.createEl("pre", {
+          cls: "csvzall-settings-log-entry-detail",
+          text: entry.detail,
+        });
+      }
+    }
   }
 }

@@ -9,6 +9,12 @@ import {
   stripOuterQuotes,
   ViewerSessionRegistry,
 } from "../src/viewerHelpers.js";
+import {
+  ChartRunScheduler,
+  matchingRunOnSaveCharts,
+  normalizeVaultPath,
+  parseChartConfigText,
+} from "../src/chartAutomation.js";
 
 test("isAllowedViewerUrl requires tokenized localhost URLs", () => {
   assert.equal(isAllowedViewerUrl("http://127.0.0.1:43117/?token=abc"), true);
@@ -91,4 +97,60 @@ test("ViewerSessionRegistry closes leaf-bound processes and unload kills remaini
   assert.equal(handleB.stopping, true);
   assert.equal(handleB.process.killed, true);
   assert.equal(registry.list().length, 0);
+});
+
+test("chart config matching ignores generated outputs and non-runOnSave charts", () => {
+  const charts = parseChartConfigText(JSON.stringify({
+    charts: [
+      {
+        id: "gym",
+        type: "heatmap",
+        input: "Exercise/output/gym.csv",
+        output: "Exercise/output/gym.svg",
+        runOnSave: true,
+      },
+      {
+        id: "manual",
+        type: "heatmap",
+        input: "Exercise/output/gym.csv",
+        output: "Exercise/output/manual.svg",
+        runOnSave: false,
+      },
+    ],
+  }));
+
+  assert.equal(normalizeVaultPath(".\\Exercise\\output\\gym.csv"), "Exercise/output/gym.csv");
+  assert.deepEqual(
+    matchingRunOnSaveCharts(charts, "Exercise/output/gym.csv").map((chart) => chart.id),
+    ["gym"],
+  );
+  assert.deepEqual(matchingRunOnSaveCharts(charts, "Exercise/output/gym.svg"), []);
+  assert.deepEqual(matchingRunOnSaveCharts(charts, "Exercise/output/readme.md"), []);
+});
+
+test("ChartRunScheduler debounces repeated modify events for the same CSV", async () => {
+  const timers = [];
+  const cleared = new Set();
+  const runs = [];
+  const scheduler = new ChartRunScheduler({
+    delayMs: 25,
+    runner: async (inputPath, chartIds) => {
+      runs.push({ inputPath, chartIds });
+    },
+    setTimeoutFn: (callback, _delay) => {
+      timers.push(callback);
+      return timers.length - 1;
+    },
+    clearTimeoutFn: (id) => {
+      cleared.add(id);
+    },
+  });
+
+  scheduler.schedule("data/gym.csv", ["gym"]);
+  scheduler.schedule("data/gym.csv", ["gym"]);
+
+  assert.equal(cleared.has(0), true);
+  await timers[1]();
+
+  assert.deepEqual(runs, [{ inputPath: "data/gym.csv", chartIds: ["gym"] }]);
 });
