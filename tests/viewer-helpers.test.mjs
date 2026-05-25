@@ -10,7 +10,10 @@ import {
   ViewerSessionRegistry,
 } from "../src/viewerHelpers.js";
 import {
+  chartConfigRoot,
+  chartRunKey,
   ChartRunScheduler,
+  isChartConfigPath,
   matchingRunOnSaveCharts,
   normalizeVaultPath,
   parseChartConfigText,
@@ -58,10 +61,27 @@ test("formatProcessFailure includes command context and captured streams", () =>
   assert.match(message, /unable to open input file/);
 });
 
+test("formatProcessFailure summarizes empty CSV viewer errors", () => {
+  const message = formatProcessFailure({
+    executable: "csvzall",
+    args: ["view", "empty.csv", "--edit"],
+    cwd: undefined,
+    code: 1,
+    signal: null,
+    stdout: "",
+    stderr: "[error] view: CSV file is empty. Add a header row first, for example: column",
+  });
+
+  assert.match(message, /does not have a header row/);
+  assert.doesNotMatch(message, /Command:/);
+});
+
 test("built plugin launches csvzall view in edit mode", () => {
   const bundle = readFileSync(new URL("../main.js", import.meta.url), "utf8");
   assert.match(bundle, /"--edit"/);
   assert.match(bundle, /"--startup-json"/);
+  assert.match(bundle, /New CSV/);
+  assert.match(bundle, /column/);
 });
 
 test("ViewerSessionRegistry closes leaf-bound processes and unload kills remaining", () => {
@@ -126,6 +146,30 @@ test("chart config matching ignores generated outputs and non-runOnSave charts",
   );
   assert.deepEqual(matchingRunOnSaveCharts(charts, "Exercise/output/gym.svg"), []);
   assert.deepEqual(matchingRunOnSaveCharts(charts, "Exercise/output/readme.md"), []);
+});
+
+test("nested chart configs resolve paths relative to their folder", () => {
+  const charts = parseChartConfigText(JSON.stringify({
+    charts: [
+      {
+        id: "table",
+        type: "markdown-table",
+        input: "test.csv",
+        output: "charts/test.md",
+        runOnSave: true,
+      },
+    ],
+  }), "Truck/.csvzall/charts.json");
+
+  assert.equal(isChartConfigPath("Truck/.csvzall/charts.json"), true);
+  assert.equal(chartConfigRoot("Truck/.csvzall/charts.json"), "Truck");
+  assert.deepEqual(
+    matchingRunOnSaveCharts(charts, "Truck/test.csv").map((chart) => chart.id),
+    ["table"],
+  );
+  assert.equal(charts[0].input, "Truck/test.csv");
+  assert.equal(charts[0].output, "Truck/charts/test.md");
+  assert.equal(chartRunKey(charts[0]), "Truck/.csvzall/charts.json\u0000table");
 });
 
 test("ChartRunScheduler debounces repeated modify events for the same CSV", async () => {

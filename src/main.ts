@@ -9,11 +9,13 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
+  TFolder,
   type WorkspaceLeaf,
 } from "obsidian";
 import {
   ChartRunScheduler,
-  DEFAULT_CHART_CONFIG_PATH,
+  chartRunKey,
+  isChartConfigPath,
   matchingRunOnSaveCharts,
   normalizeVaultPath,
   outputChartsForCsv,
@@ -62,6 +64,7 @@ interface ConfiguredChart {
   type: string;
   input: string;
   output: string;
+  configPath: string;
   runOnSave: boolean;
 }
 
@@ -172,7 +175,7 @@ export default class CsvzallPlugin extends Plugin {
   settings: CsvzallPluginSettings = DEFAULT_SETTINGS;
   private readonly sessions = new ViewerSessionRegistry();
   private readonly chartScheduler = new ChartRunScheduler({
-    runner: (_inputPath: string, chartIds: string[]) => this.runConfiguredCharts(chartIds),
+    runner: (_inputPath: string, chartKeys: string[]) => this.runConfiguredCharts(chartKeys),
   });
   private charts: ConfiguredChart[] = [];
   private unloading = false;
@@ -203,7 +206,7 @@ export default class CsvzallPlugin extends Plugin {
     this.addCommand({
       id: "regenerate-charts",
       name: "Regenerate Charts",
-      callback: () => void this.runConfiguredCharts(this.charts.map((chart) => chart.id)),
+      callback: () => void this.runConfiguredCharts(this.charts.map((chart) => chartRunKey(chart))),
     });
 
     this.addCommand({
@@ -219,7 +222,7 @@ export default class CsvzallPlugin extends Plugin {
           return false;
         }
         if (!checking) {
-          void this.runConfiguredCharts(charts.map((chart) => chart.id));
+          void this.runConfiguredCharts(charts.map((chart) => chartRunKey(chart)));
         }
         return true;
       },
@@ -246,6 +249,16 @@ export default class CsvzallPlugin extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof TFolder) {
+          menu.addItem((item) => {
+            item
+              .setTitle("New CSV")
+              .setIcon("table")
+              .onClick(() => void this.createCsvInFolder(file));
+          });
+          return;
+        }
+
         if (!(file instanceof TFile) || !this.isCsv(file)) {
           return;
         }
@@ -265,14 +278,14 @@ export default class CsvzallPlugin extends Plugin {
           return;
         }
         const path = normalizeVaultPath(file.path);
-        if (path === DEFAULT_CHART_CONFIG_PATH) {
+        if (isChartConfigPath(path)) {
           void this.reloadChartConfig();
           return;
         }
         if (!this.isCsv(file)) {
           return;
         }
-        this.scheduleChartsForCsv(file.path);
+        void this.reloadChartConfig().then(() => this.scheduleChartsForCsv(file.path));
       }),
     );
   }
@@ -337,15 +350,43 @@ export default class CsvzallPlugin extends Plugin {
     return adapter.getBasePath();
   }
 
+  private async nextCsvPathInFolder(folder: TFolder): Promise<string> {
+    const folderPath = normalizeVaultPath(folder.path);
+    for (let index = 0; index < 10000; index += 1) {
+      const name = index === 0 ? "Untitled.csv" : `Untitled ${index}.csv`;
+      const path = folderPath ? `${folderPath}/${name}` : name;
+      if (!await this.app.vault.adapter.exists(path)) {
+        return path;
+      }
+    }
+    throw new Error("Could not find an available Untitled CSV filename.");
+  }
+
+  private async createCsvInFolder(folder: TFolder): Promise<void> {
+    try {
+      const path = await this.nextCsvPathInFolder(folder);
+      const file = await this.app.vault.create(path, "column\n");
+      await this.openCsv(file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall failed to create CSV: ${message}`);
+      await this.recordEvent("error", "Failed to create CSV", message);
+      console.error("csvzall failed to create CSV", error);
+    }
+  }
+
   private async reloadChartConfig(): Promise<void> {
     try {
-      const exists = await this.app.vault.adapter.exists(DEFAULT_CHART_CONFIG_PATH);
-      if (!exists) {
-        this.charts = [];
-        return;
+      const configFiles = this.app.vault.getFiles()
+        .map((file) => normalizeVaultPath(file.path))
+        .filter(isChartConfigPath)
+        .sort();
+      const charts: ConfiguredChart[] = [];
+      for (const configPath of configFiles) {
+        const text = await this.app.vault.adapter.read(configPath);
+        charts.push(...parseChartConfigText(text, configPath) as ConfiguredChart[]);
       }
-      const text = await this.app.vault.adapter.read(DEFAULT_CHART_CONFIG_PATH);
-      this.charts = parseChartConfigText(text) as ConfiguredChart[];
+      this.charts = charts;
     } catch (error) {
       this.charts = [];
       const message = error instanceof Error ? error.message : String(error);
@@ -360,10 +401,10 @@ export default class CsvzallPlugin extends Plugin {
     if (charts.length === 0) {
       return;
     }
-    this.chartScheduler.schedule(path, charts.map((chart) => chart.id));
+    this.chartScheduler.schedule(path, charts.map((chart) => chartRunKey(chart)));
   }
 
-  private async runConfiguredCharts(chartIds: string[]): Promise<void> {
+  private async runConfiguredCharts(chartKeys: string[]): Promise<void> {
     if (!Platform.isDesktopApp) {
       const message = "csvzall chart generation requires the Obsidian desktop app.";
       new Notice(message);
@@ -379,25 +420,30 @@ export default class CsvzallPlugin extends Plugin {
       return;
     }
 
-    const ids = Array.from(new Set(chartIds)).filter(Boolean).sort();
-    if (ids.length === 0) {
+    const keys = Array.from(new Set(chartKeys)).filter(Boolean).sort();
+    if (keys.length === 0) {
       new Notice("No csvzall charts are configured.");
       return;
     }
 
     let failures = 0;
-    for (const id of ids) {
+    for (const key of keys) {
+      const chart = this.charts.find((candidate) => chartRunKey(candidate) === key);
+      if (!chart) {
+        failures += 1;
+        await this.recordEvent("error", "Failed to regenerate chart", `Chart config entry not found: ${key}`);
+        continue;
+      }
       try {
         await this.runCsvzallCommand(
-          ["charts", "run", id, "--config", DEFAULT_CHART_CONFIG_PATH],
+          ["charts", "run", chart.id, "--config", chart.configPath],
           vaultRoot,
-          `chart ${id}`,
+          `chart ${chart.id}`,
         );
-        const chart = this.charts.find((candidate) => candidate.id === id);
         await this.recordEvent(
           "info",
-          `Generated chart ${id}`,
-          chart?.output ? `Output: ${chart.output}` : undefined,
+          `Generated chart ${chart.id}`,
+          chart.output ? `Output: ${chart.output}` : undefined,
         );
       } catch {
         failures += 1;
@@ -406,7 +452,7 @@ export default class CsvzallPlugin extends Plugin {
     if (failures > 0) {
       return;
     }
-    new Notice(ids.length === 1 ? "csvzall chart regenerated." : `csvzall regenerated ${ids.length} charts.`);
+    new Notice(keys.length === 1 ? "csvzall chart regenerated." : `csvzall regenerated ${keys.length} charts.`);
   }
 
   private async runCsvzallCommand(args: string[], cwd: string, label: string): Promise<void> {

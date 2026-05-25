@@ -8,7 +8,36 @@ export function normalizeVaultPath(path) {
     .replace(/\/+/g, "/");
 }
 
-export function parseChartConfigText(text) {
+export function isChartConfigPath(path) {
+  return normalizeVaultPath(path).endsWith("/.csvzall/charts.json") ||
+    normalizeVaultPath(path) === DEFAULT_CHART_CONFIG_PATH;
+}
+
+export function chartConfigRoot(configPath = DEFAULT_CHART_CONFIG_PATH) {
+  const normalized = normalizeVaultPath(configPath);
+  const suffix = "/.csvzall/charts.json";
+  if (normalized === DEFAULT_CHART_CONFIG_PATH) {
+    return "";
+  }
+  if (normalized.endsWith(suffix)) {
+    return normalized.slice(0, -suffix.length);
+  }
+  const lastSlash = normalized.lastIndexOf("/");
+  return lastSlash >= 0 ? normalized.slice(0, lastSlash) : "";
+}
+
+export function resolveChartPath(configPath, path) {
+  const normalized = normalizeVaultPath(path);
+  const root = chartConfigRoot(configPath);
+  return root ? normalizeVaultPath(`${root}/${normalized}`) : normalized;
+}
+
+export function chartRunKey(chart) {
+  return `${chart.configPath ?? DEFAULT_CHART_CONFIG_PATH}\u0000${chart.id}`;
+}
+
+export function parseChartConfigText(text, configPath = DEFAULT_CHART_CONFIG_PATH) {
+  const normalizedConfigPath = normalizeVaultPath(configPath);
   const parsed = JSON.parse(text);
   const charts = Array.isArray(parsed?.charts) ? parsed.charts : [];
   return charts
@@ -16,8 +45,9 @@ export function parseChartConfigText(text) {
     .map((chart) => ({
       id: typeof chart.id === "string" ? chart.id : "",
       type: typeof chart.type === "string" ? chart.type : "",
-      input: typeof chart.input === "string" ? normalizeVaultPath(chart.input) : "",
-      output: typeof chart.output === "string" ? normalizeVaultPath(chart.output) : "",
+      input: typeof chart.input === "string" ? resolveChartPath(normalizedConfigPath, chart.input) : "",
+      output: typeof chart.output === "string" ? resolveChartPath(normalizedConfigPath, chart.output) : "",
+      configPath: normalizedConfigPath,
       runOnSave: chart.runOnSave === true,
     }))
     .filter((chart) => chart.id && chart.input);

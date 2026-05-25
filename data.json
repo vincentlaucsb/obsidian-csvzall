@@ -1,5 +1,13 @@
 {
   "csvzallPath": "csvzall",
   "openInObsidian": true,
-  "startupTimeoutMs": 10000
+  "startupTimeoutMs": 10000,
+  "eventLog": [
+    {
+      "timestamp": "2026-05-25T05:31:29.535Z",
+      "level": "error",
+      "message": "Failed to open CSV Truck/test.csv",
+      "detail": "csvzall exited with code 1.\n\nCommand: csvzall view E:\\Obsidian\\Vince's Notebook\\Truck\\test.csv --edit --no-open --startup-json\n\nstderr:\n[error] view: Cannot open file E:\\Obsidian\\Vince's Notebook\\Truck\\test.csv"
+    }
+  ]
 }

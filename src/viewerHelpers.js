@@ -30,6 +30,11 @@ export function tailText(value, maxLength = 2000) {
 }
 
 export function formatProcessFailure({ executable, args, cwd, code, signal, stdout, stderr }) {
+  const combinedOutput = `${stderr}\n${stdout}`;
+  if (/CSV file is empty|no header row/i.test(combinedOutput)) {
+    return "This CSV does not have a header row yet. Add a first line with column names, or create a new CSV with csvzall to start from a one-column table.";
+  }
+
   const parts = [
     `csvzall exited with code ${code ?? "unknown"}${signal ? ` (signal ${signal})` : ""}.`,
     `Command: ${[executable, ...args].join(" ")}`,

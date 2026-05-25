@@ -48,5 +48,8 @@ this MVP.
 - Desktop only.
 - Editable by default through the helper's `--edit` mode.
 - Save is handled by the helper process.
+- `.csvzall/charts.json` entries with `runOnSave` are regenerated after CSV
+  saves. Besides SVG chart types, `type: "markdown-table"` can write generated
+  Markdown notes that users embed with Obsidian's `![[path/to/output]]` syntax.
 - No bundled binary downloader yet.
 - Local helper should bind to `127.0.0.1` and use a session token.
