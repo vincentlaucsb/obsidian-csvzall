@@ -1,4 +1,4 @@
-# csvzall Obsidian Plugin
+# obsidian-csvzall
 
 Experimental Obsidian integration for `csvzall`.
 
@@ -11,6 +11,7 @@ Obsidian pane.
 ```powershell
 npm install
 npm run dev
+npm test
 ```
 
 For local testing, place or symlink this folder under:

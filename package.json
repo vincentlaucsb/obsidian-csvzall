@@ -4,6 +4,10 @@
   "description": "Obsidian integration for the editable csvzall local CSV viewer.",
   "main": "main.js",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vincentlaucsb/obsidian-csvzall.git"
+  },
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
