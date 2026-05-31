@@ -1,0 +1,138 @@
+import { Platform, PluginSettingTab, Setting } from "obsidian";
+import type { Plugin } from "obsidian";
+import type { EventLog } from "../logging/EventLog.js";
+import type { InstallerService } from "../installer/InstallerService.js";
+import { stripOuterQuotes } from "../viewerHelpers.js";
+import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
+
+export interface CsvzallSettingTabServices {
+  getSettings(): CsvzallPluginSettings;
+  saveSettings(): Promise<void>;
+  eventLog: EventLog;
+  installer: InstallerService;
+}
+
+export class CsvzallSettingTab extends PluginSettingTab {
+  private installing = false;
+
+  constructor(
+    plugin: Plugin,
+    private readonly services: CsvzallSettingTabServices,
+  ) {
+    super(plugin.app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    const settings = this.services.getSettings();
+    containerEl.empty();
+
+    containerEl.createEl("h2", { text: "csvzall" });
+
+    new Setting(containerEl)
+      .setName("csvzall path")
+      .setDesc("Path to the csvzall executable. Use an absolute path if csvzall is not on PATH.")
+      .addText((text) =>
+        text
+          .setPlaceholder("csvzall")
+          .setValue(settings.csvzallPath)
+          .onChange(async (value) => {
+            this.services.getSettings().csvzallPath =
+              stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
+            await this.services.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Install csvzall")
+      .setDesc("Downloads the matching desktop binary from GitHub Releases, verifies its SHA-256 checksum, and updates the path above.")
+      .addButton((button) =>
+        button
+          .setButtonText(this.installing ? "Installing..." : "Install or update")
+          .setDisabled(this.installing || !Platform.isDesktopApp)
+          .onClick(async () => {
+            this.installing = true;
+            this.display();
+            try {
+              await this.services.installer.installDesktopCsvzall();
+            } finally {
+              this.installing = false;
+              this.display();
+            }
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Open inside Obsidian")
+      .setDesc("Embed the local csvzall viewer in an Obsidian pane instead of opening a browser.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(settings.openInObsidian)
+          .onChange(async (value) => {
+            this.services.getSettings().openInObsidian = value;
+            await this.services.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Startup timeout")
+      .setDesc("Milliseconds to wait for csvzall view to print its local URL.")
+      .addText((text) =>
+        text
+          .setPlaceholder(String(DEFAULT_SETTINGS.startupTimeoutMs))
+          .setValue(String(settings.startupTimeoutMs))
+          .onChange(async (value) => {
+            const parsed = Number.parseInt(value, 10);
+            this.services.getSettings().startupTimeoutMs =
+              Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.startupTimeoutMs;
+            await this.services.saveSettings();
+          }),
+      );
+
+    containerEl.createEl("h2", { text: "Log" });
+    new Setting(containerEl)
+      .setName("Chart and error log")
+      .setDesc(`Keeps the latest ${MAX_EVENT_LOG_ENTRIES} csvzall chart events and errors.`)
+      .addButton((button) =>
+        button
+          .setButtonText("Clear")
+          .setDisabled(settings.eventLog.length === 0)
+          .onClick(async () => {
+            await this.services.eventLog.clear();
+            this.display();
+          }),
+      );
+
+    const log = containerEl.createDiv({ cls: "csvzall-settings-log" });
+    if (settings.eventLog.length === 0) {
+      log.createDiv({
+        cls: "csvzall-settings-log-empty",
+        text: "No csvzall events yet.",
+      });
+      return;
+    }
+
+    for (const entry of settings.eventLog) {
+      const item = log.createDiv({ cls: `csvzall-settings-log-entry is-${entry.level}` });
+      const header = item.createDiv({ cls: "csvzall-settings-log-entry-header" });
+      header.createSpan({
+        cls: "csvzall-settings-log-entry-level",
+        text: entry.level,
+      });
+      header.createSpan({
+        cls: "csvzall-settings-log-entry-time",
+        text: new Date(entry.timestamp).toLocaleString(),
+      });
+      item.createDiv({
+        cls: "csvzall-settings-log-entry-message",
+        text: entry.message,
+      });
+      if (entry.detail) {
+        item.createEl("pre", {
+          cls: "csvzall-settings-log-entry-detail",
+          text: entry.detail,
+        });
+      }
+    }
+  }
+}
