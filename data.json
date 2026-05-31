@@ -1,13 +1,31 @@
 {
-  "csvzallPath": "csvzall",
+  "csvzallPath": "E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe",
   "openInObsidian": true,
   "startupTimeoutMs": 10000,
   "eventLog": [
     {
-      "timestamp": "2026-05-25T05:31:29.535Z",
+      "timestamp": "2026-05-31T00:07:53.806Z",
+      "level": "info",
+      "message": "Installed csvzall 0.1.0",
+      "detail": "Asset: csvzall-0.1.0-windows-x64.zip\nSHA-256: 71017110f6d26e47dab5e5efb3015ca497e67dabc32cddf70d1472536b7acc3a\nPath: E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe"
+    },
+    {
+      "timestamp": "2026-05-31T00:07:41.255Z",
       "level": "error",
-      "message": "Failed to open CSV Truck/test.csv",
-      "detail": "csvzall exited with code 1.\n\nCommand: csvzall view E:\\Obsidian\\Vince's Notebook\\Truck\\test.csv --edit --no-open --startup-json\n\nstderr:\n[error] view: Cannot open file E:\\Obsidian\\Vince's Notebook\\Truck\\test.csv"
+      "message": "Failed to open CSV Exercise/Untitled.csv",
+      "detail": "spawn csvzall ENOENT"
+    },
+    {
+      "timestamp": "2026-05-31T00:07:36.171Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Core/Untitled.csv",
+      "detail": "spawn csvzall ENOENT"
+    },
+    {
+      "timestamp": "2026-05-29T07:00:50.498Z",
+      "level": "error",
+      "message": "Failed to install csvzall",
+      "detail": "Download failed with HTTP 404 for https://api.github.com/repos/vincentlaucsb/csvzall/releases/latest."
     }
   ]
 }

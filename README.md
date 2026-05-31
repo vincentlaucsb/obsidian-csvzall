@@ -52,5 +52,8 @@ this MVP.
 - `.csvzall/charts.json` entries with `runOnSave` are regenerated after CSV
   saves. Besides SVG chart types, `type: "markdown-table"` can write generated
   Markdown notes that users embed with Obsidian's `![[path/to/output]]` syntax.
-- No bundled binary downloader yet.
+- The settings tab can install or update a desktop `csvzall` binary from GitHub
+  Releases. The downloaded asset must have a SHA-256 digest or checksum entry
+  before the plugin stores it under the plugin directory and updates
+  `csvzallPath`.
 - Local helper should bind to `127.0.0.1` and use a session token.

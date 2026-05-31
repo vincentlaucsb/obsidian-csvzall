@@ -1,3 +1,4 @@
+csvzall-bin/
 node_modules/
 *.log
 *.tmp

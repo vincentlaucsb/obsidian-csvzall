@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import { dirname, isAbsolute } from "path";
+import { dirname, isAbsolute, join } from "path";
 import {
   FileSystemAdapter,
   FileView,
@@ -27,6 +27,7 @@ import {
   stripOuterQuotes,
   ViewerSessionRegistry,
 } from "./viewerHelpers.js";
+import { installCsvzallBinary } from "./installer.js";
 
 const VIEW_TYPE_CSVZALL = "csvzall-view";
 const MAX_EVENT_LOG_ENTRIES = 100;
@@ -348,6 +349,53 @@ export default class CsvzallPlugin extends Plugin {
       return null;
     }
     return adapter.getBasePath();
+  }
+
+  private getPluginDataDir(): string | null {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
+      return null;
+    }
+
+    const manifest = this.manifest as { dir?: string; id: string };
+    if (manifest.dir) {
+      return adapter.getFullPath(manifest.dir);
+    }
+
+    const vault = this.app.vault as { configDir?: string };
+    return join(adapter.getBasePath(), vault.configDir ?? ".obsidian", "plugins", manifest.id);
+  }
+
+  async installDesktopCsvzall(): Promise<void> {
+    if (!Platform.isDesktopApp) {
+      const message = "csvzall installation requires the Obsidian desktop app.";
+      new Notice(message);
+      await this.recordEvent("error", message);
+      return;
+    }
+
+    try {
+      const pluginDir = this.getPluginDataDir();
+      if (!pluginDir) {
+        throw new Error("Could not resolve the plugin data directory.");
+      }
+      const result = await installCsvzallBinary({
+        pluginDir,
+      });
+      this.settings.csvzallPath = result.executablePath;
+      await this.saveSettings();
+      new Notice(`csvzall ${result.tagName} installed.`);
+      await this.recordEvent(
+        "info",
+        `Installed csvzall ${result.tagName}`,
+        `Asset: ${result.assetName}\nSHA-256: ${result.sha256}\nPath: ${result.executablePath}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall install failed: ${message}`);
+      await this.recordEvent("error", "Failed to install csvzall", message);
+      console.error("csvzall install failed", error);
+    }
   }
 
   private async nextCsvPathInFolder(folder: TFolder): Promise<string> {
@@ -697,6 +745,8 @@ export default class CsvzallPlugin extends Plugin {
 }
 
 class CsvzallSettingTab extends PluginSettingTab {
+  private installing = false;
+
   constructor(private readonly plugin: CsvzallPlugin) {
     super(plugin.app, plugin);
   }
@@ -718,6 +768,25 @@ class CsvzallSettingTab extends PluginSettingTab {
             this.plugin.settings.csvzallPath =
               stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
             await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Install csvzall")
+      .setDesc("Downloads the matching desktop binary from GitHub Releases, verifies its SHA-256 checksum, and updates the path above.")
+      .addButton((button) =>
+        button
+          .setButtonText(this.installing ? "Installing..." : "Install or update")
+          .setDisabled(this.installing || !Platform.isDesktopApp)
+          .onClick(async () => {
+            this.installing = true;
+            this.display();
+            try {
+              await this.plugin.installDesktopCsvzall();
+            } finally {
+              this.installing = false;
+              this.display();
+            }
           }),
       );
 
