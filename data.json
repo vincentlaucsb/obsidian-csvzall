@@ -4,6 +4,48 @@
   "startupTimeoutMs": 10000,
   "eventLog": [
     {
+      "timestamp": "2026-05-31T00:46:10.663Z",
+      "level": "info",
+      "message": "Installed csvzall 0.1.0",
+      "detail": "Asset: csvzall-0.1.0-windows-x64.zip\nSHA-256: 71017110f6d26e47dab5e5efb3015ca497e67dabc32cddf70d1472536b7acc3a\nPath: E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe"
+    },
+    {
+      "timestamp": "2026-05-31T00:46:02.215Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Untitled.csv",
+      "detail": "spawn E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe ENOENT"
+    },
+    {
+      "timestamp": "2026-05-31T00:45:55.861Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Untitled.csv",
+      "detail": "spawn E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe ENOENT"
+    },
+    {
+      "timestamp": "2026-05-31T00:45:34.415Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Untitled.csv",
+      "detail": "spawn E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe ENOENT"
+    },
+    {
+      "timestamp": "2026-05-31T00:45:33.845Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Untitled 1.csv",
+      "detail": "spawn E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe ENOENT"
+    },
+    {
+      "timestamp": "2026-05-31T00:45:32.999Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Untitled.csv",
+      "detail": "spawn E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe ENOENT"
+    },
+    {
+      "timestamp": "2026-05-31T00:41:50.838Z",
+      "level": "error",
+      "message": "Failed to open CSV Exercise/Untitled 1.csv",
+      "detail": "spawn E:\\Obsidian\\Vince's Notebook\\.obsidian\\plugins\\csvzall\\csvzall-bin\\0.1.0\\csvzall.exe ENOENT"
+    },
+    {
       "timestamp": "2026-05-31T00:07:53.806Z",
       "level": "info",
       "message": "Installed csvzall 0.1.0",

@@ -12,12 +12,12 @@ export class InstallerService {
     private readonly filesystem: ObsidianFilesystem,
   ) {}
 
-  async installDesktopCsvzall(): Promise<void> {
+  async installDesktopCsvzall(): Promise<boolean> {
     if (!Platform.isDesktopApp) {
       const message = "csvzall installation requires the Obsidian desktop app.";
       new Notice(message);
       await this.eventLog.record("error", message);
-      return;
+      return false;
     }
 
     try {
@@ -36,11 +36,13 @@ export class InstallerService {
         `Installed csvzall ${result.tagName}`,
         `Asset: ${result.assetName}\nSHA-256: ${result.sha256}\nPath: ${result.executablePath}`,
       );
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`csvzall install failed: ${message}`);
       await this.eventLog.record("error", "Failed to install csvzall", message);
       console.error("csvzall install failed", error);
+      return false;
     }
   }
 }

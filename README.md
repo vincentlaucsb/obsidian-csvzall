@@ -1,10 +1,40 @@
-# obsidian-csvzall
+# csvzall for Obsidian
 
-Experimental Obsidian integration for `csvzall`.
+<img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
-The plugin is intentionally thin: it launches the local `csvzall` helper
-process, asks it to serve an editable CSV viewer, and embeds the local URL in an
-Obsidian pane.
+Open, edit, create, and chart CSV files directly inside Obsidian.
+
+This plugin connects Obsidian to the local `csvzall` desktop helper. When you
+open a `.csv` file, csvzall starts a local viewer and the plugin embeds it in an
+Obsidian pane. Edits are saved by the helper process.
+
+## What It Does
+
+- Opens `.csv` files in an editable table view inside Obsidian.
+- Adds a **New CSV** action to folder context menus.
+- Adds an **Open with csvzall** action to CSV file menus.
+- Can install or update the matching `csvzall` binary from GitHub Releases.
+- Can regenerate configured charts when CSV files change.
+- Supports generated Markdown table notes from chart config entries.
+
+## Requirements
+
+- Obsidian desktop. Mobile is not supported.
+- A local filesystem vault.
+- The `csvzall` helper binary. The plugin can download this for you from its
+  settings tab, or from the missing-binary screen when opening a CSV.
+
+Downloaded binaries are verified with SHA-256 before they are installed under
+the plugin-managed directory.
+
+## Chart Automation
+
+Create `.csvzall/charts.json` in your vault, or inside a folder, to define chart
+jobs. Entries with `runOnSave: true` are regenerated after their input CSV is
+saved.
+
+Besides chart image outputs, `type: "markdown-table"` can write generated
+Markdown notes that you embed with Obsidian's `![[path/to/output]]` syntax.
 
 ## Development
 
@@ -14,7 +44,7 @@ npm run dev
 npm test
 ```
 
-For local testing, place or symlink this folder under:
+For local testing, copy or link this folder to:
 
 ```text
 <Vault>/.obsidian/plugins/csvzall/
@@ -22,38 +52,8 @@ For local testing, place or symlink this folder under:
 
 Then reload Obsidian and enable the plugin.
 
-## Expected Helper Protocol
+Release builds should include:
 
-The plugin launches:
-
-```powershell
-csvzall view <file.csv> --no-open --startup-json
-```
-
-Current plugin builds launch the helper with `--edit` as well:
-
-```powershell
-csvzall view <file.csv> --edit --no-open --startup-json
-```
-
-The helper prints either a localhost URL or JSON containing a `url` field on
-stdout. The plugin accepts both, but JSON is preferred.
-
-Each open csvzall pane owns one helper child process. Closing the pane or
-unloading the plugin kills the matching process. If Obsidian itself crashes,
-helper processes may survive until cleaned up manually; that is acceptable in
-this MVP.
-
-## Scope
-
-- Desktop only.
-- Editable by default through the helper's `--edit` mode.
-- Save is handled by the helper process.
-- `.csvzall/charts.json` entries with `runOnSave` are regenerated after CSV
-  saves. Besides SVG chart types, `type: "markdown-table"` can write generated
-  Markdown notes that users embed with Obsidian's `![[path/to/output]]` syntax.
-- The settings tab can install or update a desktop `csvzall` binary from GitHub
-  Releases. The downloaded asset must have a SHA-256 digest or checksum entry
-  before the plugin stores it under the plugin directory and updates
-  `csvzallPath`.
-- Local helper should bind to `127.0.0.1` and use a session token.
+- `manifest.json`
+- `main.js`
+- `styles.css`

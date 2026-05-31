@@ -63,8 +63,8 @@ export default class CsvzallPlugin extends Plugin {
     await this.eventLog.clear();
   }
 
-  async installDesktopCsvzall(): Promise<void> {
-    await this.installerService.installDesktopCsvzall();
+  async installDesktopCsvzall(): Promise<boolean> {
+    return await this.installerService.installDesktopCsvzall();
   }
 
   handleLeafClosed(leaf: WorkspaceLeaf): void {
@@ -73,6 +73,25 @@ export default class CsvzallPlugin extends Plugin {
 
   async openCsvInLeaf(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
     await this.csvService.openCsvInLeaf(file, leaf);
+  }
+
+  async installCsvzallFromView(file: TFile, leaf: WorkspaceLeaf): Promise<boolean> {
+    const installed = await this.installerService.installDesktopCsvzall();
+    if (installed) {
+      await this.csvService.openCsvInLeaf(file, leaf);
+    }
+    return installed;
+  }
+
+  openCsvzallSettings(): void {
+    const setting = (this.app as unknown as {
+      setting?: {
+        open(): void;
+        openTabById(id: string): void;
+      };
+    }).setting;
+    setting?.open();
+    setting?.openTabById(this.manifest.id);
   }
 
   private createServices(): void {

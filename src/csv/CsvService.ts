@@ -7,6 +7,10 @@ import { normalizeVaultPath } from "../chartAutomation.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
 import { isCsv } from "./csvFiles.js";
 
+function isMissingExecutableError(message: string): boolean {
+  return /\bENOENT\b/i.test(message) || /not found/i.test(message);
+}
+
 export class CsvService {
   constructor(
     private readonly app: App,
@@ -54,7 +58,11 @@ export class CsvService {
       server.process.kill();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.processService.showLeafErrorText(leaf, message);
+      if (leaf.view instanceof CsvzallTableView && isMissingExecutableError(message)) {
+        leaf.view.showMissingCsvzall(message);
+      } else {
+        this.processService.showLeafErrorText(leaf, message);
+      }
       new Notice(`csvzall failed to open CSV: ${message}`);
       await this.eventLog.record("error", `Failed to open CSV ${file.path}`, message);
       console.error("csvzall failed to open CSV", error);

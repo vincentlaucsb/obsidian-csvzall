@@ -3,8 +3,8 @@
   "name": "csvzall",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Open CSV files in an editable local csvzall table viewer.",
-  "author": "csvzall",
-  "authorUrl": "https://github.com/",
+  "description": "A fast CSV viewer, editor, and charting plugin for Obsidian.",
+  "author": "Vincent La",
+  "authorUrl": "https://vincela.com/",
   "isDesktopOnly": true
 }
