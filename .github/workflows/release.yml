@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]*.[0-9]*.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish assets to, for example 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and test
+        run: npm test
+
+      - name: Resolve release tag
+        id: release-tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify manifest version matches tag
+        shell: bash
+        run: |
+          tag="${{ steps.release-tag.outputs.tag }}"
+          version="$(node -p "require('./manifest.json').version")"
+          if [[ "${version}" != "${tag}" ]]; then
+            echo "manifest.json version (${version}) must match release tag (${tag})." >&2
+            exit 1
+          fi
+
+      - name: Publish Obsidian release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${{ steps.release-tag.outputs.tag }}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" manifest.json main.js styles.css --clobber
+          else
+            gh release create "${tag}" manifest.json main.js styles.css \
+              --title "${tag}" \
+              --notes "Release ${tag}"
+          fi
