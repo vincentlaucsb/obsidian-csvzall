@@ -11,7 +11,10 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run test:unit",
+    "test:unit": "npm run build && node --test tests/*.test.mjs",
+    "pretest:coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\"",
+    "test:coverage": "npm run build && node --test --experimental-test-coverage --test-coverage-include=src/**/*.js --test-coverage-exclude=tests/**/*.mjs --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info tests/*.test.mjs"
   },
   "keywords": [
     "obsidian",
