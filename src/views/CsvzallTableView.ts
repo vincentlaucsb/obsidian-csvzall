@@ -63,7 +63,20 @@ export class CsvzallTableView extends FileView {
   }
 
   async onRename(file: TFile): Promise<void> {
+    const shouldRestartViewer = Boolean(this.url || this.loading);
     this.titleText = file.basename;
+
+    if (shouldRestartViewer) {
+      this.owner.handleLeafClosed(this.leaf);
+      this.url = "";
+      this.errorText = "";
+      this.missingCsvzallText = "";
+      this.loading = true;
+      this.render();
+      await this.owner.openCsvInLeaf(file, this.leaf);
+      return;
+    }
+
     this.render();
   }
 
