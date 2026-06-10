@@ -29,6 +29,23 @@ export function tailText(value, maxLength = 2000) {
   return `...${value.slice(value.length - maxLength)}`;
 }
 
+export function isCsvzallDirtyStateMessage(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      value.source === "csvzall-viewer" &&
+      value.type === "dirty-state" &&
+      typeof value.dirty === "boolean",
+  );
+}
+
+export function csvzallDirtyStateFromMessageEvent(event, sourceWindow) {
+  if (!sourceWindow || event?.source !== sourceWindow || !isCsvzallDirtyStateMessage(event?.data)) {
+    return null;
+  }
+  return event.data.dirty;
+}
+
 export function formatProcessFailure({ executable, args, cwd, code, signal, stdout, stderr }) {
   const combinedOutput = `${stderr}\n${stdout}`;
   if (/CSV file is empty|no header row/i.test(combinedOutput)) {

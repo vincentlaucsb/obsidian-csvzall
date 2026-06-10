@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  csvzallDirtyStateFromMessageEvent,
   extractViewerUrl,
   formatProcessFailure,
+  isCsvzallDirtyStateMessage,
   isAllowedViewerUrl,
   stripOuterQuotes,
   ViewerSessionRegistry,
@@ -88,6 +90,44 @@ test("extractViewerUrl accepts JSON or plain tokenized URL output only", () => {
   assert.equal(extractViewerUrl("http://127.0.0.1:43117/"), null);
 });
 
+test("isCsvzallDirtyStateMessage accepts only the iframe dirty-state contract", () => {
+  assert.equal(
+    isCsvzallDirtyStateMessage({
+      source: "csvzall-viewer",
+      type: "dirty-state",
+      dirty: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isCsvzallDirtyStateMessage({
+      source: "csvzall-viewer",
+      type: "dirty-state",
+      dirty: false,
+    }),
+    true,
+  );
+  assert.equal(isCsvzallDirtyStateMessage({ source: "csvzall-viewer", type: "dirty-state" }), false);
+  assert.equal(isCsvzallDirtyStateMessage({ source: "csvzall-viewer", type: "dirty-state", dirty: 1 }), false);
+  assert.equal(isCsvzallDirtyStateMessage({ source: "other", type: "dirty-state", dirty: true }), false);
+  assert.equal(isCsvzallDirtyStateMessage(null), false);
+});
+
+test("csvzallDirtyStateFromMessageEvent accepts messages only from the current iframe window", () => {
+  const currentWindow = { name: "current" };
+  const staleWindow = { name: "stale" };
+  const data = {
+    source: "csvzall-viewer",
+    type: "dirty-state",
+    dirty: true,
+  };
+
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: currentWindow, data }, currentWindow), true);
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: staleWindow, data }, currentWindow), null);
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: currentWindow, data: { ...data, dirty: 1 } }, currentWindow), null);
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: currentWindow, data }, null), null);
+});
+
 test("stripOuterQuotes normalizes pasted executable paths", () => {
   assert.equal(stripOuterQuotes('"E:\\GitHub\\csvzall\\csvzall.exe"'), "E:\\GitHub\\csvzall\\csvzall.exe");
   assert.equal(stripOuterQuotes("'E:\\GitHub\\csvzall\\csvzall.exe'"), "E:\\GitHub\\csvzall\\csvzall.exe");
@@ -133,6 +173,10 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /installDesktopCsvzall/);
   assert.match(bundle, /New CSV/);
   assert.match(bundle, /column/);
+  assert.match(bundle, /csvzall-viewer/);
+  assert.match(bundle, /dirty-state/);
+  assert.match(bundle, /This CSV has unsaved changes\./);
+  assert.match(bundle, /Discard changes/);
 });
 
 test("installer selects the matching desktop binary asset", () => {

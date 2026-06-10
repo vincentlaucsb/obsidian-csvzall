@@ -1,4 +1,6 @@
 import { FileView, TFile, type WorkspaceLeaf } from "obsidian";
+import { csvzallDirtyStateFromMessageEvent } from "../viewerHelpers.js";
+import { UnsavedChangesModal } from "./UnsavedChangesModal.js";
 import { VIEW_TYPE_CSVZALL } from "./viewTypes.js";
 
 export interface CsvzallTableViewOwner {
@@ -8,12 +10,23 @@ export interface CsvzallTableViewOwner {
   openCsvzallSettings(): void;
 }
 
+type DetachableLeaf = WorkspaceLeaf & {
+  detach: () => Promise<void>;
+};
+
 export class CsvzallTableView extends FileView {
   private titleText = "csvzall";
   private url = "";
   private errorText = "";
   private missingCsvzallText = "";
   private loading = false;
+  private dirty = false;
+  private frame: HTMLIFrameElement | null = null;
+  private messageHandler: ((event: MessageEvent) => void) | null = null;
+  private originalDetach: (() => Promise<void>) | null = null;
+  private patchedDetach: (() => Promise<void>) | null = null;
+  private pendingDetachConfirmation: Promise<boolean> | null = null;
+  private detachingAfterConfirmation = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -35,15 +48,20 @@ export class CsvzallTableView extends FileView {
   }
 
   async onOpen(): Promise<void> {
+    this.patchLeafDetach();
     this.render();
   }
 
   async onClose(): Promise<void> {
+    this.setDirty(false);
+    this.removeMessageListener();
+    this.restoreLeafDetach();
     this.owner.handleLeafClosed(this.leaf);
   }
 
   async onLoadFile(file: TFile): Promise<void> {
     this.owner.handleLeafClosed(this.leaf);
+    this.setDirty(false);
     this.titleText = file.basename;
     this.url = "";
     this.errorText = "";
@@ -55,6 +73,7 @@ export class CsvzallTableView extends FileView {
 
   async onUnloadFile(_file: TFile): Promise<void> {
     this.owner.handleLeafClosed(this.leaf);
+    this.setDirty(false);
     this.url = "";
     this.errorText = "";
     this.missingCsvzallText = "";
@@ -66,8 +85,14 @@ export class CsvzallTableView extends FileView {
     const shouldRestartViewer = Boolean(this.url || this.loading);
     this.titleText = file.basename;
 
+    if (shouldRestartViewer && this.dirty) {
+      this.frame?.setAttr("title", this.titleText);
+      return;
+    }
+
     if (shouldRestartViewer) {
       this.owner.handleLeafClosed(this.leaf);
+      this.setDirty(false);
       this.url = "";
       this.errorText = "";
       this.missingCsvzallText = "";
@@ -81,6 +106,7 @@ export class CsvzallTableView extends FileView {
   }
 
   showViewer(title: string, url: string): void {
+    this.setDirty(false);
     this.titleText = title;
     this.url = url;
     this.errorText = "";
@@ -90,6 +116,7 @@ export class CsvzallTableView extends FileView {
   }
 
   showError(message: string): void {
+    this.setDirty(false);
     this.errorText = message;
     this.missingCsvzallText = "";
     this.url = "";
@@ -98,6 +125,7 @@ export class CsvzallTableView extends FileView {
   }
 
   showMissingCsvzall(message: string): void {
+    this.setDirty(false);
     this.errorText = "";
     this.missingCsvzallText = message;
     this.url = "";
@@ -107,6 +135,7 @@ export class CsvzallTableView extends FileView {
 
   private render(): void {
     const { containerEl } = this;
+    this.removeMessageListener();
     containerEl.empty();
     containerEl.addClass("csvzall-view-container");
 
@@ -140,6 +169,93 @@ export class CsvzallTableView extends FileView {
       },
     });
     frame.setAttr("title", this.titleText);
+    this.listenForDirtyState(frame);
+  }
+
+  private patchLeafDetach(): void {
+    if (this.patchedDetach) {
+      return;
+    }
+
+    const leaf = this.leaf as DetachableLeaf;
+    const originalDetach = leaf.detach;
+    const patchedDetach = async (): Promise<void> => {
+      if (this.detachingAfterConfirmation) {
+        await originalDetach.call(leaf);
+        return;
+      }
+
+      if (!this.dirty) {
+        await originalDetach.call(leaf);
+        return;
+      }
+
+      const discard = await this.confirmDiscardChanges();
+      if (!discard || this.detachingAfterConfirmation) {
+        return;
+      }
+
+      this.setDirty(false);
+      this.detachingAfterConfirmation = true;
+      try {
+        await originalDetach.call(leaf);
+      } finally {
+        this.detachingAfterConfirmation = false;
+      }
+    };
+
+    this.originalDetach = originalDetach;
+    this.patchedDetach = patchedDetach;
+    leaf.detach = patchedDetach;
+  }
+
+  private restoreLeafDetach(): void {
+    if (!this.originalDetach || !this.patchedDetach) {
+      return;
+    }
+
+    const leaf = this.leaf as DetachableLeaf;
+    if (leaf.detach === this.patchedDetach) {
+      leaf.detach = this.originalDetach;
+    }
+    this.originalDetach = null;
+    this.patchedDetach = null;
+    this.pendingDetachConfirmation = null;
+  }
+
+  private async confirmDiscardChanges(): Promise<boolean> {
+    if (!this.pendingDetachConfirmation) {
+      this.pendingDetachConfirmation = new UnsavedChangesModal(this.app)
+        .confirmDiscard()
+        .finally(() => {
+          this.pendingDetachConfirmation = null;
+        });
+    }
+    return await this.pendingDetachConfirmation;
+  }
+
+  private listenForDirtyState(frame: HTMLIFrameElement): void {
+    this.frame = frame;
+    this.messageHandler = (event) => {
+      const dirty = csvzallDirtyStateFromMessageEvent(event, this.frame?.contentWindow ?? null);
+      if (dirty === null) {
+        return;
+      }
+      this.setDirty(dirty);
+    };
+    window.addEventListener("message", this.messageHandler);
+  }
+
+  private removeMessageListener(): void {
+    if (this.messageHandler) {
+      window.removeEventListener("message", this.messageHandler);
+      this.messageHandler = null;
+    }
+    this.frame = null;
+  }
+
+  private setDirty(dirty: boolean): void {
+    this.dirty = dirty;
   }
 
   private renderMissingCsvzall(): void {
