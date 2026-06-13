@@ -37,4 +37,8 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 - `package.json`: npm package version.
 - `package-lock.json`: npm lockfile root package version.
 
+After every Obsidian validation failure fix, bump the plugin patch version before
+creating or retrying a release tag. The release tag, `manifest.json`,
+`versions.json`, `package.json`, and `package-lock.json` must all agree.
+
 When adding any new version-bearing file, metadata field, generated manifest, or release configuration, add it to this list in the same change.
