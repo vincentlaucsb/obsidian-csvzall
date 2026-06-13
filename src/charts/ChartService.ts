@@ -43,12 +43,12 @@ export class ChartService {
   async reloadChartConfig(): Promise<void> {
     try {
       const configFiles = this.app.vault.getFiles()
-        .map((file) => normalizeVaultPath(file.path))
-        .filter(isChartConfigPath)
-        .sort();
+        .filter((file) => isChartConfigPath(normalizeVaultPath(file.path)))
+        .sort((left, right) => left.path.localeCompare(right.path));
       const charts: ConfiguredChart[] = [];
-      for (const configPath of configFiles) {
-        const text = await this.app.vault.adapter.read(configPath);
+      for (const configFile of configFiles) {
+        const configPath = normalizeVaultPath(configFile.path);
+        const text = await this.app.vault.cachedRead(configFile);
         charts.push(...parseChartConfigText(text, configPath));
       }
       this.charts = charts;

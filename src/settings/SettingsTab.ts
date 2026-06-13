@@ -32,10 +32,6 @@ export class CsvzallSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("General")
-      .setHeading();
-
-    new Setting(containerEl)
       .setName("csvzall path")
       .setDesc("Path to the csvzall executable. Use an absolute path if csvzall is not on PATH.")
       .addText((text) =>

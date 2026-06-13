@@ -90,7 +90,6 @@ export class CsvzallProcessService {
     const executable = stripOuterQuotes(this.getSettings().csvzallPath);
     const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
     const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
-    console.info("Starting csvzall viewer", { executable, args, cwd });
     const child = spawn(executable, args, {
       cwd,
       windowsHide: true,

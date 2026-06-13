@@ -22,6 +22,14 @@
 
 Keep new behavior in the narrowest module that owns the concern. Do not add process, installer, chart, settings UI, or CSV workflow logic directly to `src/main.ts`; add or extend a focused service/module and wire it from `main.ts` instead.
 
+## Obsidian Review Rules
+
+- Follow the official Obsidian developer policies, plugin submission requirements, and plugin guidelines before cutting a release.
+- Settings tabs: keep general settings at the top without a heading. Do not use top-level headings like `General`, `Settings`, or the plugin name. If a settings section heading is needed, use `new Setting(containerEl).setName(...).setHeading()` and avoid the word `settings` in the heading.
+- UI text should use sentence case. Do not repeat the plugin name in command names; Obsidian already shows the plugin name next to commands.
+- Keep `manifest.json` `minAppVersion` at the lowest Obsidian version required by the APIs actually used.
+- If Node.js or Electron APIs are used, keep `isDesktopOnly` set to `true`.
+
 ## Version Locations
 
 - `manifest.json`: Obsidian plugin version and minimum supported Obsidian app version.

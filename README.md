@@ -27,6 +27,12 @@ This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) co
 Downloaded binaries are verified with SHA-256 before they are installed under
 the plugin-managed directory.
 
+## Privacy and Network Use
+
+The plugin does not collect telemetry. It contacts GitHub Releases only when
+you choose to install or update the managed `csvzall` helper. CSV viewing and
+charting run through the local helper process on your machine.
+
 ## Limitations
 
 - Currently CSVs larger than 200MB are read-only and not editable. This is to prevent materializing large CSVs entirely in memory.

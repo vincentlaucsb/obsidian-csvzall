@@ -110,7 +110,7 @@ export class CsvService {
     for (let index = 0; index < 10000; index += 1) {
       const name = index === 0 ? "Untitled.csv" : `Untitled ${index}.csv`;
       const path = folderPath ? `${folderPath}/${name}` : name;
-      if (!await this.app.vault.adapter.exists(path)) {
+      if (!this.app.vault.getAbstractFileByPath(path)) {
         return path;
       }
     }

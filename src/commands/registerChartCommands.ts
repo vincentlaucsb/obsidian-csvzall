@@ -6,13 +6,13 @@ import { chartRunKey } from "../chartAutomation.js";
 export function registerChartCommands(plugin: Plugin, charts: ChartService, csv: CsvService): void {
   plugin.addCommand({
     id: "regenerate-charts",
-    name: "Regenerate Charts",
+    name: "Regenerate charts",
     callback: () => void charts.runConfiguredCharts(charts.allChartKeys()),
   });
 
   plugin.addCommand({
     id: "regenerate-charts-for-current-csv",
-    name: "Regenerate Charts for Current CSV",
+    name: "Regenerate charts for current CSV",
     checkCallback: (checking) => {
       const file = plugin.app.workspace.getActiveFile();
       if (!file || !csv.isCsv(file)) {
@@ -31,7 +31,7 @@ export function registerChartCommands(plugin: Plugin, charts: ChartService, csv:
 
   plugin.addCommand({
     id: "open-generated-chart",
-    name: "Open Generated Chart",
+    name: "Open generated chart",
     checkCallback: (checking) => {
       const file = plugin.app.workspace.getActiveFile();
       if (!file || !csv.isCsv(file)) {
