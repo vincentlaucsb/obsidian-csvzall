@@ -1,4 +1,5 @@
 csvzall-bin/
+coverage/
 data.json
 node_modules/
 *.log
