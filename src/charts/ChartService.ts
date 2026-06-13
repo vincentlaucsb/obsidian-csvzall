@@ -33,7 +33,7 @@ export class ChartService {
   }
 
   outputChartsForCsv(path: string): ConfiguredChart[] {
-    return outputChartsForCsv(this.charts, path) as ConfiguredChart[];
+    return outputChartsForCsv(this.charts, path);
   }
 
   isChartConfigPath(path: string): boolean {
@@ -49,7 +49,7 @@ export class ChartService {
       const charts: ConfiguredChart[] = [];
       for (const configPath of configFiles) {
         const text = await this.app.vault.adapter.read(configPath);
-        charts.push(...parseChartConfigText(text, configPath) as ConfiguredChart[]);
+        charts.push(...parseChartConfigText(text, configPath));
       }
       this.charts = charts;
     } catch (error) {
@@ -62,7 +62,7 @@ export class ChartService {
   }
 
   scheduleChartsForCsv(path: string): void {
-    const charts = matchingRunOnSaveCharts(this.charts, path) as ConfiguredChart[];
+    const charts = matchingRunOnSaveCharts(this.charts, path);
     if (charts.length === 0) {
       return;
     }

@@ -32,7 +32,6 @@ export class ObsidianFilesystem {
       return adapter.getFullPath(this.manifest.dir);
     }
 
-    const vault = this.app.vault as { configDir?: string };
-    return join(adapter.getBasePath(), vault.configDir ?? ".obsidian", "plugins", this.manifest.id);
+    return join(adapter.getBasePath(), this.app.vault.configDir, "plugins", this.manifest.id);
   }
 }

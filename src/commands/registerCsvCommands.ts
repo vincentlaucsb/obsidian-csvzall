@@ -4,7 +4,7 @@ import type { CsvService } from "../csv/CsvService.js";
 export function registerCsvCommands(plugin: Plugin, csv: CsvService): void {
   plugin.addCommand({
     id: "open-active-csv",
-    name: "Open active CSV with csvzall",
+    name: "Open active CSV",
     checkCallback: (checking) => {
       const file = plugin.app.workspace.getActiveFile();
       if (!file || !csv.isCsv(file)) {

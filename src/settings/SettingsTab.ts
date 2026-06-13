@@ -23,12 +23,16 @@ export class CsvzallSettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.renderSettings();
+  }
+
+  private renderSettings(): void {
     const { containerEl } = this;
     const settings = this.services.getSettings();
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName("csvzall")
+      .setName("General")
       .setHeading();
 
     new Setting(containerEl)
@@ -54,12 +58,12 @@ export class CsvzallSettingTab extends PluginSettingTab {
           .setDisabled(this.installing || !Platform.isDesktopApp)
           .onClick(async () => {
             this.installing = true;
-            this.display();
+            this.renderSettings();
             try {
               await this.services.installer.installDesktopCsvzall();
             } finally {
               this.installing = false;
-              this.display();
+              this.renderSettings();
             }
           }),
       );
@@ -103,7 +107,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
           .setDisabled(settings.eventLog.length === 0)
           .onClick(async () => {
             await this.services.eventLog.clear();
-            this.display();
+            this.renderSettings();
           }),
       );
 
