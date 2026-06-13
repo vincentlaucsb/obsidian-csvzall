@@ -1,6 +1,6 @@
 {
   "name": "obsidian-csvzall",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A fast CSV viewer, editor, and charting tool.",
   "main": "main.js",
   "type": "module",
