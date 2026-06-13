@@ -78,6 +78,23 @@ export function extractViewerUrl(output) {
   return null;
 }
 
+export function isCsvzallDirtyStateMessage(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      value.source === "csvzall-viewer" &&
+      value.type === "dirty-state" &&
+      typeof value.dirty === "boolean",
+  );
+}
+
+export function csvzallDirtyStateFromMessageEvent(event, sourceWindow) {
+  if (!sourceWindow || event?.source !== sourceWindow || !isCsvzallDirtyStateMessage(event?.data)) {
+    return null;
+  }
+  return event.data.dirty;
+}
+
 export class ViewerSessionRegistry {
   constructor() {
     this.handles = [];

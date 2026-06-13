@@ -21,3 +21,12 @@
 ## Maintenance Rule
 
 Keep new behavior in the narrowest module that owns the concern. Do not add process, installer, chart, settings UI, or CSV workflow logic directly to `src/main.ts`; add or extend a focused service/module and wire it from `main.ts` instead.
+
+## Version Locations
+
+- `manifest.json`: Obsidian plugin version and minimum supported Obsidian app version.
+- `versions.json`: Obsidian plugin compatibility map from plugin version to minimum supported Obsidian app version.
+- `package.json`: npm package version.
+- `package-lock.json`: npm lockfile root package version.
+
+When adding any new version-bearing file, metadata field, generated manifest, or release configuration, add it to this list in the same change.

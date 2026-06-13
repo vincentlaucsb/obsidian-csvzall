@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  csvzallDirtyStateFromMessageEvent,
   extractViewerUrl,
   formatProcessFailure,
   isAllowedViewerUrl,
+  isCsvzallDirtyStateMessage,
   stripOuterQuotes,
   ViewerSessionRegistry,
 } from "../src/viewerHelpers.js";
@@ -94,6 +96,37 @@ test("stripOuterQuotes normalizes pasted executable paths", () => {
   assert.equal(stripOuterQuotes("csvzall"), "csvzall");
 });
 
+test("isCsvzallDirtyStateMessage validates viewer dirty-state payloads", () => {
+  assert.equal(isCsvzallDirtyStateMessage({
+    source: "csvzall-viewer",
+    type: "dirty-state",
+    dirty: true,
+  }), true);
+  assert.equal(isCsvzallDirtyStateMessage({
+    source: "csvzall-viewer",
+    type: "dirty-state",
+    dirty: false,
+  }), true);
+  assert.equal(isCsvzallDirtyStateMessage({ source: "csvzall-viewer", type: "dirty-state" }), false);
+  assert.equal(isCsvzallDirtyStateMessage({ source: "csvzall-viewer", type: "dirty-state", dirty: 1 }), false);
+  assert.equal(isCsvzallDirtyStateMessage({ source: "other", type: "dirty-state", dirty: true }), false);
+});
+
+test("csvzallDirtyStateFromMessageEvent accepts messages only from the current iframe window", () => {
+  const currentWindow = {};
+  const staleWindow = {};
+  const data = {
+    source: "csvzall-viewer",
+    type: "dirty-state",
+    dirty: true,
+  };
+
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: currentWindow, data }, currentWindow), true);
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: staleWindow, data }, currentWindow), null);
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: currentWindow, data: { ...data, dirty: 1 } }, currentWindow), null);
+  assert.equal(csvzallDirtyStateFromMessageEvent({ source: currentWindow, data }, null), null);
+});
+
 test("formatProcessFailure includes command context and captured streams", () => {
   const message = formatProcessFailure({
     executable: "csvzall",
@@ -133,6 +166,13 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /installDesktopCsvzall/);
   assert.match(bundle, /New CSV/);
   assert.match(bundle, /column/);
+  assert.match(bundle, /csvzall-viewer/);
+  assert.match(bundle, /dirty-state/);
+  assert.match(bundle, /Unsaved changes/);
+  assert.match(bundle, /This CSV has unsaved changes\./);
+  assert.match(bundle, /Discard changes/);
+  assert.match(bundle, /openFile/);
+  assert.match(bundle, /setViewState/);
 });
 
 test("installer selects the matching desktop binary asset", () => {

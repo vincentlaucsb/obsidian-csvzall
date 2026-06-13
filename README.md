@@ -1,20 +1,19 @@
 # csvzall for Obsidian
 
-<img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
+<img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
 Open, edit, create, and chart CSV files directly inside Obsidian.
 
-This plugin connects Obsidian to the local `csvzall` desktop helper. When you
-open a `.csv` file, csvzall starts a local viewer and the plugin embeds it in an
-Obsidian pane. Edits are saved by the helper process.
+This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) command line application, which can be downloaded through the plugin via GitHub Releases.
 
 ## What It Does
 
 - Opens `.csv` files in an editable table view inside Obsidian.
 - Adds a **New CSV** action to folder context menus.
 - Adds an **Open with csvzall** action to CSV file menus.
-- Can install or update the matching `csvzall` binary from GitHub Releases.
+- Can generate bar, line, and heatmap charts.
 - Can regenerate configured charts when CSV files change.
+- Can run SQLite queries over CSV files.
 - Supports generated Markdown table notes from chart config entries.
 
 ## Requirements
@@ -26,6 +25,11 @@ Obsidian pane. Edits are saved by the helper process.
 
 Downloaded binaries are verified with SHA-256 before they are installed under
 the plugin-managed directory.
+
+## Limitations
+
+- Currently CSVs larger than 200MB are read-only and not editable. This is to prevent materializing large CSVs entirely in memory.
+- Multi-value graphs configured through Obsidian are limited to two value columns.
 
 ## Chart Automation
 
@@ -51,9 +55,3 @@ For local testing, copy or link this folder to:
 ```
 
 Then reload Obsidian and enable the plugin.
-
-Release builds should include:
-
-- `manifest.json`
-- `main.js`
-- `styles.css`
