@@ -28,7 +28,7 @@ export class CsvService {
     if (this.getSettings().openInObsidian) {
       const leaf = this.app.workspace.getLeaf(true);
       await leaf.openFile(file);
-      this.app.workspace.revealLeaf(leaf);
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
       return;
     }
 

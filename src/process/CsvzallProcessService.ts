@@ -14,7 +14,7 @@ import {
 } from "../viewerHelpers.js";
 
 export class CsvzallProcessService {
-  readonly sessions = new ViewerSessionRegistry();
+  readonly sessions = new ViewerSessionRegistry<WorkspaceLeaf, CsvzallServerHandle>();
   private unloading = false;
 
   constructor(

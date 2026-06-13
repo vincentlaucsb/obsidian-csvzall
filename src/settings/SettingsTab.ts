@@ -27,7 +27,9 @@ export class CsvzallSettingTab extends PluginSettingTab {
     const settings = this.services.getSettings();
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "csvzall" });
+    new Setting(containerEl)
+      .setName("csvzall")
+      .setHeading();
 
     new Setting(containerEl)
       .setName("csvzall path")
@@ -89,7 +91,9 @@ export class CsvzallSettingTab extends PluginSettingTab {
           }),
       );
 
-    containerEl.createEl("h2", { text: "Log" });
+    new Setting(containerEl)
+      .setName("Log")
+      .setHeading();
     new Setting(containerEl)
       .setName("Chart and error log")
       .setDesc(`Keeps the latest ${MAX_EVENT_LOG_ENTRIES} csvzall chart events and errors.`)

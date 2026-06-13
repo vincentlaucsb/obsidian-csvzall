@@ -28,7 +28,15 @@ import {
   parseChartConfigText,
 } from "../src/chartAutomation.js";
 
-function createStoredZip(entryName, entryBytes) {
+type TestContextWithAfter = {
+  after(callback: () => unknown): void;
+};
+
+function afterTest(t: unknown, callback: () => unknown): void {
+  (t as TestContextWithAfter).after(callback);
+}
+
+function createStoredZip(entryName: string, entryBytes: Buffer): Buffer {
   const nameBytes = Buffer.from(entryName, "utf8");
   const localHeader = Buffer.alloc(30);
   localHeader.writeUInt32LE(0x04034b50, 0);
@@ -159,7 +167,7 @@ test("formatProcessFailure summarizes empty CSV viewer errors", () => {
 });
 
 test("built plugin launches csvzall view in edit mode", () => {
-  const bundle = readFileSync(new URL("../main.js", import.meta.url), "utf8");
+  const bundle = readFileSync("main.js", "utf8");
   assert.match(bundle, /"--edit"/);
   assert.match(bundle, /"--startup-json"/);
   assert.match(bundle, /Install or update/);
@@ -218,7 +226,7 @@ test("installer verifies and stores csvzall under plugin-managed data", async (t
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "obsidian-csvzall-test-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  afterTest(t, () => rm(dir, { recursive: true, force: true }));
 
   const result = await installCsvzallBinary({
     pluginDir: dir,
@@ -257,7 +265,7 @@ test("installer extracts a verified zip release asset before storing csvzall", a
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "obsidian-csvzall-test-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  afterTest(t, () => rm(dir, { recursive: true, force: true }));
 
   const result = await installCsvzallBinary({
     pluginDir: dir,
@@ -297,7 +305,7 @@ test("installer verifies with a release checksum asset when no digest is present
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "obsidian-csvzall-test-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  afterTest(t, () => rm(dir, { recursive: true, force: true }));
 
   const result = await installCsvzallBinary({
     pluginDir: dir,
@@ -319,9 +327,18 @@ test("installer verifies with a release checksum asset when no digest is present
 });
 
 test("ViewerSessionRegistry closes leaf-bound processes and unload kills remaining", () => {
-  const registry = new ViewerSessionRegistry();
+  type TestHandle = {
+    name: string;
+    stopping: boolean;
+    process: {
+      killed: boolean;
+      kill(): void;
+    };
+  };
 
-  const makeHandle = (name) => ({
+  const registry = new ViewerSessionRegistry<{ id: string }, TestHandle>();
+
+  const makeHandle = (name: string): TestHandle => ({
     name,
     stopping: false,
     process: {
@@ -401,26 +418,26 @@ test("nested chart configs resolve paths relative to their folder", () => {
     matchingRunOnSaveCharts(charts, "Truck/test.csv").map((chart) => chart.id),
     ["table"],
   );
-  assert.equal(charts[0].input, "Truck/test.csv");
-  assert.equal(charts[0].output, "Truck/charts/test.md");
-  assert.equal(chartRunKey(charts[0]), "Truck/.csvzall/charts.json\u0000table");
+  assert.equal(charts[0]?.input, "Truck/test.csv");
+  assert.equal(charts[0]?.output, "Truck/charts/test.md");
+  assert.equal(charts[0] ? chartRunKey(charts[0]) : "", "Truck/.csvzall/charts.json\u0000table");
 });
 
 test("ChartRunScheduler debounces repeated modify events for the same CSV", async () => {
-  const timers = [];
-  const cleared = new Set();
-  const runs = [];
+  const timers: Array<() => void> = [];
+  const cleared = new Set<number>();
+  const runs: Array<{ inputPath: string; chartIds: string[] }> = [];
   const scheduler = new ChartRunScheduler({
     delayMs: 25,
     runner: async (inputPath, chartIds) => {
       runs.push({ inputPath, chartIds });
     },
-    setTimeoutFn: (callback, _delay) => {
+    setTimeoutFn: (callback) => {
       timers.push(callback);
       return timers.length - 1;
     },
     clearTimeoutFn: (id) => {
-      cleared.add(id);
+      cleared.add(id as number);
     },
   });
 
@@ -428,7 +445,8 @@ test("ChartRunScheduler debounces repeated modify events for the same CSV", asyn
   scheduler.schedule("data/gym.csv", ["gym"]);
 
   assert.equal(cleared.has(0), true);
-  await timers[1]();
+  timers[1]?.();
+  await Promise.resolve();
 
   assert.deepEqual(runs, [{ inputPath: "data/gym.csv", chartIds: ["gym"] }]);
 });

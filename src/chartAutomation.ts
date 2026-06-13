@@ -1,6 +1,22 @@
+import type { ConfiguredChart } from "./types.js";
+
 export const DEFAULT_CHART_CONFIG_PATH = ".csvzall/charts.json";
 
-export function normalizeVaultPath(path) {
+type RawChartEntry = {
+  id?: unknown;
+  type?: unknown;
+  input?: unknown;
+  output?: unknown;
+  runOnSave?: unknown;
+};
+
+type RawChartConfig = {
+  charts?: unknown;
+};
+
+type TimerHandle = unknown;
+
+export function normalizeVaultPath(path: string): string {
   return path
     .replace(/\\/g, "/")
     .replace(/^\.\//, "")
@@ -8,12 +24,12 @@ export function normalizeVaultPath(path) {
     .replace(/\/+/g, "/");
 }
 
-export function isChartConfigPath(path) {
+export function isChartConfigPath(path: string): boolean {
   return normalizeVaultPath(path).endsWith("/.csvzall/charts.json") ||
     normalizeVaultPath(path) === DEFAULT_CHART_CONFIG_PATH;
 }
 
-export function chartConfigRoot(configPath = DEFAULT_CHART_CONFIG_PATH) {
+export function chartConfigRoot(configPath = DEFAULT_CHART_CONFIG_PATH): string {
   const normalized = normalizeVaultPath(configPath);
   const suffix = "/.csvzall/charts.json";
   if (normalized === DEFAULT_CHART_CONFIG_PATH) {
@@ -26,20 +42,23 @@ export function chartConfigRoot(configPath = DEFAULT_CHART_CONFIG_PATH) {
   return lastSlash >= 0 ? normalized.slice(0, lastSlash) : "";
 }
 
-export function resolveChartPath(configPath, path) {
+export function resolveChartPath(configPath: string, path: string): string {
   const normalized = normalizeVaultPath(path);
   const root = chartConfigRoot(configPath);
   return root ? normalizeVaultPath(`${root}/${normalized}`) : normalized;
 }
 
-export function chartRunKey(chart) {
+export function chartRunKey(chart: Pick<ConfiguredChart, "configPath" | "id">): string {
   return `${chart.configPath ?? DEFAULT_CHART_CONFIG_PATH}\u0000${chart.id}`;
 }
 
-export function parseChartConfigText(text, configPath = DEFAULT_CHART_CONFIG_PATH) {
+export function parseChartConfigText(
+  text: string,
+  configPath = DEFAULT_CHART_CONFIG_PATH,
+): ConfiguredChart[] {
   const normalizedConfigPath = normalizeVaultPath(configPath);
-  const parsed = JSON.parse(text);
-  const charts = Array.isArray(parsed?.charts) ? parsed.charts : [];
+  const parsed = JSON.parse(text) as RawChartConfig;
+  const charts = Array.isArray(parsed?.charts) ? parsed.charts as RawChartEntry[] : [];
   return charts
     .filter((chart) => chart && typeof chart === "object")
     .map((chart) => ({
@@ -53,7 +72,7 @@ export function parseChartConfigText(text, configPath = DEFAULT_CHART_CONFIG_PAT
     .filter((chart) => chart.id && chart.input);
 }
 
-export function matchingRunOnSaveCharts(charts, csvPath) {
+export function matchingRunOnSaveCharts(charts: ConfiguredChart[], csvPath: string): ConfiguredChart[] {
   const normalized = normalizeVaultPath(csvPath);
   if (!normalized.toLowerCase().endsWith(".csv")) {
     return [];
@@ -64,23 +83,38 @@ export function matchingRunOnSaveCharts(charts, csvPath) {
   return charts.filter((chart) => chart.runOnSave && chart.input === normalized);
 }
 
-export function outputChartsForCsv(charts, csvPath) {
+export function outputChartsForCsv(charts: ConfiguredChart[], csvPath: string): ConfiguredChart[] {
   const normalized = normalizeVaultPath(csvPath);
   return charts.filter((chart) => chart.input === normalized && chart.output);
 }
 
 export class ChartRunScheduler {
-  constructor({ delayMs = 500, runner, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout }) {
+  private readonly delayMs: number;
+  private readonly runner: (inputPath: string, chartIds: string[]) => void | Promise<void>;
+  private readonly setTimeoutFn: (callback: () => void, delayMs: number) => TimerHandle;
+  private readonly clearTimeoutFn: (timer: TimerHandle) => void;
+  private readonly timers = new Map<string, TimerHandle>();
+  private readonly running = new Set<string>();
+  private readonly queued = new Map<string, string[]>();
+
+  constructor({
+    delayMs = 500,
+    runner,
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+  }: {
+    delayMs?: number;
+    runner: (inputPath: string, chartIds: string[]) => void | Promise<void>;
+    setTimeoutFn?: (callback: () => void, delayMs: number) => TimerHandle;
+    clearTimeoutFn?: (timer: TimerHandle) => void;
+  }) {
     this.delayMs = delayMs;
     this.runner = runner;
     this.setTimeoutFn = setTimeoutFn;
     this.clearTimeoutFn = clearTimeoutFn;
-    this.timers = new Map();
-    this.running = new Set();
-    this.queued = new Map();
   }
 
-  schedule(inputPath, chartIds) {
+  schedule(inputPath: string, chartIds: string[]): void {
     const key = normalizeVaultPath(inputPath);
     const ids = Array.from(new Set(chartIds)).sort();
     const existing = this.timers.get(key);
@@ -93,7 +127,7 @@ export class ChartRunScheduler {
     );
   }
 
-  async fire(inputPath, chartIds) {
+  async fire(inputPath: string, chartIds: string[]): Promise<void> {
     const key = normalizeVaultPath(inputPath);
     this.timers.delete(key);
     const ids = Array.from(new Set(chartIds)).sort();
@@ -116,7 +150,7 @@ export class ChartRunScheduler {
     }
   }
 
-  clear() {
+  clear(): void {
     for (const timer of this.timers.values()) {
       this.clearTimeoutFn(timer);
     }

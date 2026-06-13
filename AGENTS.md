@@ -8,13 +8,13 @@
 - `src/csv/`: CSV file detection and CSV open/create workflows.
 - `src/charts/`: Chart configuration loading, chart command execution, and chart scheduling.
 - `src/process/`: `csvzall` child-process startup, command execution, viewer sessions, and process failure handling.
-- `src/installer.js`: Pure download, release asset selection, checksum verification, ZIP extraction, and binary install logic.
+- `src/installer.ts`: Pure download, release asset selection, checksum verification, ZIP extraction, and binary install logic.
 - `src/installer/`: Obsidian-facing installer service glue.
 - `src/logging/`: Event log mutation helpers.
 - `src/obsidian/`: Obsidian adapter and filesystem helpers.
 - `src/commands/`: Command and context-menu registration.
 - `src/watchers/`: Vault event registration.
-- `src/chartAutomation.js` and `src/viewerHelpers.js`: Pure helper modules covered directly by tests.
+- `src/chartAutomation.ts` and `src/viewerHelpers.ts`: Pure helper modules covered directly by tests.
 - `tests/`: Node test suite for pure helpers, installer behavior, and bundle-level assertions.
 - `main.js`: Generated bundle. Do not edit by hand; regenerate with `npm run build` or `npm test`.
 
