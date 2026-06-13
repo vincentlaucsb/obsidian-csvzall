@@ -6,10 +6,60 @@ import { inflateRawSync } from "zlib";
 
 export const CSVZALL_RELEASE_API_URL = "https://api.github.com/repos/vincentlaucsb/csvzall/releases/latest";
 
+type InstallTarget = {
+  platform: string;
+  arch: string;
+  platformLabels: string[];
+  archLabels: string[];
+  executableName: string;
+};
+
+type ReleaseAsset = {
+  name?: string;
+  browser_download_url?: string;
+  digest?: string;
+};
+
+type DownloadableReleaseAsset = ReleaseAsset & {
+  name: string;
+  browser_download_url: string;
+};
+
+type Release = {
+  assets?: unknown;
+  tag_name?: unknown;
+  name?: unknown;
+};
+
+type ZipEntry = {
+  name: string;
+  compressionMethod: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localHeaderOffset: number;
+};
+
+type InstallOptions = {
+  pluginDir?: string;
+  releaseApiUrl?: string;
+  platform?: string;
+  arch?: string;
+  fetchBuffer?: (url: string) => Promise<Buffer>;
+};
+
+export type InstallCsvzallResult = {
+  executablePath: string;
+  assetName: string;
+  checksumAssetName: string;
+  tagName: string;
+  sha256: string;
+  installedFromArchive: boolean;
+};
+
 const CHECKSUM_NAME_PATTERN = /(^|[-_.])(sha256|sha256sums|checksums?)([-_.]|$)/i;
 const UNSUPPORTED_ARCHIVE_NAME_PATTERN = /\.(tar\.gz|tgz|tar\.xz|txz|gz)$/i;
 
-const TARGETS = {
+const TARGETS: Record<string, Omit<InstallTarget, "platform" | "arch" | "archLabels">> = {
   win32: {
     platformLabels: ["windows", "win32", "win"],
     executableName: "csvzall.exe",
@@ -24,12 +74,12 @@ const TARGETS = {
   },
 };
 
-const ARCH_LABELS = {
+const ARCH_LABELS: Record<string, string[]> = {
   x64: ["x64", "amd64", "x86_64"],
   arm64: ["arm64", "aarch64"],
 };
 
-export function csvzallInstallTarget(platform = process.platform, arch = process.arch) {
+export function csvzallInstallTarget(platform: string = process.platform, arch: string = process.arch): InstallTarget {
   const target = TARGETS[platform];
   const archLabels = ARCH_LABELS[arch];
   if (!target || !archLabels) {
@@ -44,28 +94,28 @@ export function csvzallInstallTarget(platform = process.platform, arch = process
   };
 }
 
-export function isChecksumAssetName(name) {
+export function isChecksumAssetName(name: string): boolean {
   return CHECKSUM_NAME_PATTERN.test(name) || /\.(sha256|sha256sum|sha256sums|sig|asc)$/i.test(name);
 }
 
-export function isZipAssetName(name) {
+export function isZipAssetName(name: string): boolean {
   return /\.zip$/i.test(name);
 }
 
-export function sha256Hex(bytes) {
+export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export function checksumFromReleaseAssetDigest(asset) {
+export function checksumFromReleaseAssetDigest(asset: ReleaseAsset | null | undefined): string | null {
   const digest = typeof asset?.digest === "string" ? asset.digest.trim() : "";
   const match = digest.match(/^sha256:([a-f0-9]{64})$/i);
-  return match ? match[1].toLowerCase() : null;
+  return match?.[1] ? match[1].toLowerCase() : null;
 }
 
-export function parseSha256ChecksumText(text, assetName) {
+export function parseSha256ChecksumText(text: string, assetName: string): string | null {
   const normalizedAssetName = assetName.toLowerCase();
   const basename = normalizedAssetName.split(/[\\/]/).pop();
-  const hashes = [];
+  const hashes: string[] = [];
 
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -74,7 +124,7 @@ export function parseSha256ChecksumText(text, assetName) {
     }
 
     const opensslStyle = trimmed.match(/^SHA256\s*\(([^)]+)\)\s*=\s*([a-f0-9]{64})$/i);
-    if (opensslStyle) {
+    if (opensslStyle?.[1] && opensslStyle[2]) {
       const filename = opensslStyle[1].trim().toLowerCase();
       const hash = opensslStyle[2].toLowerCase();
       if (filename === normalizedAssetName || filename.split(/[\\/]/).pop() === basename) {
@@ -85,7 +135,7 @@ export function parseSha256ChecksumText(text, assetName) {
     }
 
     const standardStyle = trimmed.match(/^([a-f0-9]{64})\s+[* ]?(.+)$/i);
-    if (standardStyle) {
+    if (standardStyle?.[1] && standardStyle[2]) {
       const hash = standardStyle[1].toLowerCase();
       const filename = standardStyle[2].trim().toLowerCase();
       if (filename === normalizedAssetName || filename.split(/[\\/]/).pop() === basename) {
@@ -95,20 +145,25 @@ export function parseSha256ChecksumText(text, assetName) {
     }
   }
 
-  return hashes.length === 1 ? hashes[0] : null;
+  return hashes.length === 1 ? hashes[0] ?? null : null;
 }
 
-function assetList(release) {
-  return Array.isArray(release?.assets) ? release.assets : [];
+function assetList(release: Release): ReleaseAsset[] {
+  return Array.isArray(release.assets) ? release.assets as ReleaseAsset[] : [];
 }
 
-function hasAnyLabel(name, labels) {
+function hasAnyLabel(name: string, labels: string[]): boolean {
   return labels.some((label) => name.includes(label));
 }
 
-function scoreAsset(asset, target) {
+function scoreAsset(asset: ReleaseAsset, target: InstallTarget): number {
   const name = String(asset?.name ?? "").toLowerCase();
-  if (!asset?.browser_download_url || isChecksumAssetName(name) || UNSUPPORTED_ARCHIVE_NAME_PATTERN.test(name)) {
+  if (
+    typeof asset.browser_download_url !== "string" ||
+    !asset.browser_download_url ||
+    isChecksumAssetName(name) ||
+    UNSUPPORTED_ARCHIVE_NAME_PATTERN.test(name)
+  ) {
     return -1;
   }
   if (!name.includes("csvzall")) {
@@ -132,14 +187,20 @@ function scoreAsset(asset, target) {
   return score;
 }
 
-export function selectCsvzallReleaseAsset(release, target = csvzallInstallTarget()) {
+export function selectCsvzallReleaseAsset(
+  release: Release,
+  target = csvzallInstallTarget(),
+): DownloadableReleaseAsset {
   const candidates = assetList(release)
     .map((asset) => ({ asset, score: scoreAsset(asset, target) }))
     .filter((candidate) => candidate.score >= 0)
-    .sort((left, right) => right.score - left.score || String(left.asset.name).localeCompare(String(right.asset.name)));
+    .sort((left, right) => {
+      const score = right.score - left.score;
+      return score || String(left.asset.name).localeCompare(String(right.asset.name));
+    });
 
   if (candidates[0]) {
-    return candidates[0].asset;
+    return candidates[0].asset as DownloadableReleaseAsset;
   }
 
   const names = assetList(release).map((asset) => asset.name).filter(Boolean).join(", ");
@@ -149,8 +210,12 @@ export function selectCsvzallReleaseAsset(release, target = csvzallInstallTarget
   );
 }
 
-export function selectCsvzallChecksumAsset(release, binaryAsset) {
-  const checksumAssets = assetList(release).filter((asset) => isChecksumAssetName(String(asset.name ?? "")));
+export function selectCsvzallChecksumAsset(
+  release: Release,
+  binaryAsset: ReleaseAsset | null | undefined,
+): DownloadableReleaseAsset | null {
+  const checksumAssets = assetList(release)
+    .filter((asset) => isChecksumAssetName(String(asset.name ?? ""))) as DownloadableReleaseAsset[];
   const binaryName = String(binaryAsset?.name ?? "").toLowerCase();
 
   return checksumAssets.find((asset) => String(asset.name ?? "").toLowerCase() === `${binaryName}.sha256`) ??
@@ -159,7 +224,7 @@ export function selectCsvzallChecksumAsset(release, binaryAsset) {
     null;
 }
 
-export async function fetchUrlAsBuffer(url, redirectsRemaining = 5) {
+export async function fetchUrlAsBuffer(url: string, redirectsRemaining = 5): Promise<Buffer> {
   return await new Promise((resolve, reject) => {
     const request = get(url, {
       headers: {
@@ -185,19 +250,19 @@ export async function fetchUrlAsBuffer(url, redirectsRemaining = 5) {
         return;
       }
 
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
       response.on("end", () => resolve(Buffer.concat(chunks)));
     });
     request.on("error", reject);
   });
 }
 
-export function sanitizePathSegment(value) {
+export function sanitizePathSegment(value: string): string {
   return String(value || "latest").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "latest";
 }
 
-function findEndOfCentralDirectory(bytes) {
+function findEndOfCentralDirectory(bytes: Buffer): number {
   const minOffset = Math.max(0, bytes.length - 0xffff - 22);
   for (let offset = bytes.length - 22; offset >= minOffset; offset -= 1) {
     if (bytes.readUInt32LE(offset) === 0x06054b50) {
@@ -207,15 +272,15 @@ function findEndOfCentralDirectory(bytes) {
   throw new Error("ZIP archive is missing its central directory.");
 }
 
-function zipEntryBasename(name) {
+function zipEntryBasename(name: string): string {
   return name.replace(/\\/g, "/").split("/").pop() ?? "";
 }
 
-function readZipEntries(bytes) {
+function readZipEntries(bytes: Buffer): ZipEntry[] {
   const eocdOffset = findEndOfCentralDirectory(bytes);
   const entryCount = bytes.readUInt16LE(eocdOffset + 10);
   const centralDirectoryOffset = bytes.readUInt32LE(eocdOffset + 16);
-  const entries = [];
+  const entries: ZipEntry[] = [];
   let offset = centralDirectoryOffset;
 
   for (let index = 0; index < entryCount; index += 1) {
@@ -247,7 +312,7 @@ function readZipEntries(bytes) {
   return entries;
 }
 
-function readZipEntryBytes(archiveBytes, entry) {
+function readZipEntryBytes(archiveBytes: Buffer, entry: ZipEntry): Buffer {
   const offset = entry.localHeaderOffset;
   if (archiveBytes.readUInt32LE(offset) !== 0x04034b50) {
     throw new Error(`ZIP archive has an invalid local header for ${entry.name}.`);
@@ -273,7 +338,7 @@ function readZipEntryBytes(archiveBytes, entry) {
   throw new Error(`ZIP entry ${entry.name} uses unsupported compression method ${entry.compressionMethod}.`);
 }
 
-export function extractCsvzallExecutableFromZip(archiveBytes, executableName) {
+export function extractCsvzallExecutableFromZip(archiveBytes: Buffer, executableName: string): Buffer {
   const entries = readZipEntries(archiveBytes);
   const normalizedExecutableName = executableName.toLowerCase();
   const entry = entries.find((candidate) => zipEntryBasename(candidate.name).toLowerCase() === normalizedExecutableName);
@@ -285,28 +350,19 @@ export function extractCsvzallExecutableFromZip(archiveBytes, executableName) {
   return readZipEntryBytes(archiveBytes, entry);
 }
 
-/**
- * @param {{
- *   pluginDir: string,
- *   releaseApiUrl?: string,
- *   platform?: string,
- *   arch?: string,
- *   fetchBuffer?: (url: string) => Promise<Buffer>,
- * }} options
- */
 export async function installCsvzallBinary({
   pluginDir,
   releaseApiUrl = CSVZALL_RELEASE_API_URL,
   platform = process.platform,
   arch = process.arch,
   fetchBuffer = fetchUrlAsBuffer,
-} = {}) {
+}: InstallOptions = {}): Promise<InstallCsvzallResult> {
   if (!pluginDir) {
     throw new Error("Could not resolve the plugin data directory.");
   }
 
   const target = csvzallInstallTarget(platform, arch);
-  const release = JSON.parse((await fetchBuffer(releaseApiUrl)).toString("utf8"));
+  const release = JSON.parse((await fetchBuffer(releaseApiUrl)).toString("utf8")) as Release;
   const binaryAsset = selectCsvzallReleaseAsset(release, target);
   const downloadedBytes = await fetchBuffer(binaryAsset.browser_download_url);
   const actualSha256 = sha256Hex(downloadedBytes);
