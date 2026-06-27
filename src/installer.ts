@@ -47,6 +47,8 @@ type InstallOptions = {
   fetchBuffer?: (url: string) => Promise<Buffer>;
 };
 
+type ReleaseInfoOptions = Omit<InstallOptions, "pluginDir">;
+
 export type InstallCsvzallResult = {
   executablePath: string;
   assetName: string;
@@ -54,6 +56,11 @@ export type InstallCsvzallResult = {
   tagName: string;
   sha256: string;
   installedFromArchive: boolean;
+};
+
+export type CsvzallReleaseInfo = {
+  tagName: string;
+  assetName: string;
 };
 
 const CHECKSUM_NAME_PATTERN = /(^|[-_.])(sha256|sha256sums|checksums?)([-_.]|$)/i;
@@ -350,6 +357,26 @@ export function extractCsvzallExecutableFromZip(archiveBytes: Buffer, executable
   return readZipEntryBytes(archiveBytes, entry);
 }
 
+function releaseTagName(release: Release): string {
+  return String(release.tag_name || release.name || "latest");
+}
+
+export async function getLatestCsvzallReleaseInfo({
+  releaseApiUrl = CSVZALL_RELEASE_API_URL,
+  platform = process.platform,
+  arch = process.arch,
+  fetchBuffer = fetchUrlAsBuffer,
+}: ReleaseInfoOptions = {}): Promise<CsvzallReleaseInfo> {
+  const target = csvzallInstallTarget(platform, arch);
+  const release = JSON.parse((await fetchBuffer(releaseApiUrl)).toString("utf8")) as Release;
+  const binaryAsset = selectCsvzallReleaseAsset(release, target);
+
+  return {
+    tagName: releaseTagName(release),
+    assetName: binaryAsset.name,
+  };
+}
+
 export async function installCsvzallBinary({
   pluginDir,
   releaseApiUrl = CSVZALL_RELEASE_API_URL,
@@ -387,7 +414,7 @@ export async function installCsvzallBinary({
     );
   }
 
-  const tagName = String(release.tag_name || release.name || "latest");
+  const tagName = releaseTagName(release);
   const installDir = join(pluginDir, "csvzall-bin", sanitizePathSegment(tagName));
   const executablePath = join(installDir, target.executableName);
   const tempPath = `${executablePath}.download`;

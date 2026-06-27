@@ -12,6 +12,11 @@ export interface CsvzallSettingTabServices {
   installer: InstallerService;
 }
 
+function formatSettingsTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString();
+}
+
 export class CsvzallSettingTab extends PluginSettingTab {
   private installing = false;
 
@@ -29,6 +34,16 @@ export class CsvzallSettingTab extends PluginSettingTab {
   private renderSettings(): void {
     const { containerEl } = this;
     const settings = this.services.getSettings();
+    const hasManagedInstall = settings.installedCsvzallVersion.length > 0;
+    const csvzallInstallDesc = [
+      "Downloads the matching desktop binary from GitHub Releases, verifies its SHA-256 checksum, and updates the path above.",
+      `Current version: ${settings.installedCsvzallVersion || "not installed by this plugin"}.`,
+      `Last checked: ${
+        settings.csvzallLastUpdateCheckAt ?
+          formatSettingsTimestamp(settings.csvzallLastUpdateCheckAt) :
+          "never"
+      }.`,
+    ].join(" ");
     containerEl.empty();
 
     new Setting(containerEl)
@@ -39,18 +54,25 @@ export class CsvzallSettingTab extends PluginSettingTab {
           .setPlaceholder("csvzall")
           .setValue(settings.csvzallPath)
           .onChange(async (value) => {
-            this.services.getSettings().csvzallPath =
-              stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
+            const nextPath = stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
+            const nextSettings = this.services.getSettings();
+            if (nextPath !== nextSettings.csvzallPath) {
+              nextSettings.installedCsvzallVersion = "";
+              nextSettings.csvzallLastUpdateCheckAt = "";
+            }
+            nextSettings.csvzallPath = nextPath;
             await this.services.saveSettings();
           }),
       );
 
     new Setting(containerEl)
-      .setName("Install csvzall")
-      .setDesc("Downloads the matching desktop binary from GitHub Releases, verifies its SHA-256 checksum, and updates the path above.")
+      .setName(hasManagedInstall ? "csvzall updates" : "Install csvzall")
+      .setDesc(csvzallInstallDesc)
       .addButton((button) =>
         button
-          .setButtonText(this.installing ? "Installing..." : "Install or update")
+          .setButtonText(this.installing ?
+            (hasManagedInstall ? "Checking..." : "Installing...") :
+            (hasManagedInstall ? "Check for updates" : "Install"))
           .setDisabled(this.installing || !Platform.isDesktopApp)
           .onClick(async () => {
             this.installing = true;

@@ -1,0 +1,10 @@
+{
+  "id": "csvzall-mobile",
+  "name": "csvzall Mobile",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Open and edit CSV files on mobile with the csvzall WASM viewer.",
+  "author": "Vincent La",
+  "authorUrl": "https://vincela.com/",
+  "isDesktopOnly": false
+}

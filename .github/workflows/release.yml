@@ -73,10 +73,11 @@ jobs:
         shell: bash
         run: |
           tag="${{ steps.release-tag.outputs.tag }}"
+          assets=(manifest.json main.js styles.css)
           if gh release view "${tag}" >/dev/null 2>&1; then
-            gh release upload "${tag}" manifest.json main.js styles.css --clobber
+            gh release upload "${tag}" "${assets[@]}" --clobber
           else
-            gh release create "${tag}" manifest.json main.js styles.css \
+            gh release create "${tag}" "${assets[@]}" \
               --title "${tag}" \
               --notes "Release ${tag}"
           fi
