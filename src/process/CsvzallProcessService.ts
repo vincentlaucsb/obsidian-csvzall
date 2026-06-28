@@ -1,3 +1,5 @@
+import { spawn } from "child_process";
+import { dirname, isAbsolute } from "path";
 import type { WorkspaceLeaf } from "obsidian";
 import { Notice } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
@@ -40,7 +42,6 @@ export class CsvzallProcessService {
   }
 
   async runCommand(args: string[], cwd: string, label: string): Promise<void> {
-    const { spawn } = await import("child_process");
     const executable = stripOuterQuotes(this.getSettings().csvzallPath);
     const child = spawn(executable, args, {
       cwd,
@@ -86,11 +87,9 @@ export class CsvzallProcessService {
   }
 
   async startViewer(filePath: string): Promise<CsvzallServerHandle> {
-    const { spawn } = await import("child_process");
-    const path = await import("path");
     const executable = stripOuterQuotes(this.getSettings().csvzallPath);
     const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
-    const cwd = path.isAbsolute(executable) ? path.dirname(executable) : undefined;
+    const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
     const child = spawn(executable, args, {
       cwd,
       windowsHide: true,

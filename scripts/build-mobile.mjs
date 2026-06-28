@@ -129,7 +129,7 @@ function mobileReadme() {
 
 <img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
-Open and edit CSV files directly inside Obsidian mobile with the bundled
+Create, open, and edit CSV files directly inside Obsidian mobile with the bundled
 csvzall WASM viewer.
 
 csvzall Mobile is the phone and tablet companion to
@@ -142,6 +142,7 @@ support.
 
 ## What It Does
 
+- Creates new CSV files from the command palette, ribbon, or folder menu.
 - Opens \`.csv\` files in an Obsidian mobile pane.
 - Loads the bundled WASM viewer without installing a desktop helper binary.
 - Supports basic CSV editing and saving back to the vault file.
@@ -152,7 +153,7 @@ support.
 ## Requirements
 
 - Obsidian mobile.
-- A vault containing \`.csv\` files.
+- A local or synced Obsidian vault.
 - No external \`csvzall\` binary is required.
 
 ## Desktop Version
@@ -173,7 +174,7 @@ into the plugin directory when the plugin loads.
 
 ## Limitations
 
-- Mobile support is focused on CSV viewing and editing.
+- Mobile support is focused on CSV creating, viewing, and editing.
 - Charts, SQLite queries, and desktop helper-process features live in the
   desktop plugin.
 - Very large files may still exceed what a mobile device can comfortably hold in

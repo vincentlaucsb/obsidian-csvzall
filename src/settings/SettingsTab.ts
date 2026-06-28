@@ -5,6 +5,8 @@ import type { InstallerService } from "../installer/InstallerService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
 
+const BUG_REPORT_URL = "https://github.com/vincentlaucsb/obsidian-csvzall/issues/new";
+
 export interface CsvzallSettingTabServices {
   getSettings(): CsvzallPluginSettings;
   saveSettings(): Promise<void>;
@@ -110,6 +112,17 @@ export class CsvzallSettingTab extends PluginSettingTab {
             this.services.getSettings().startupTimeoutMs =
               Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.startupTimeoutMs;
             await this.services.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Report a bug")
+      .setDesc("Open the csvzall for Obsidian issue tracker.")
+      .addButton((button) =>
+        button
+          .setButtonText("Report a bug")
+          .onClick(() => {
+            window.open(BUG_REPORT_URL, "_blank", "noopener");
           }),
       );
 

@@ -173,6 +173,8 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /"--startup-json"/);
   assert.match(bundle, /Check for updates/);
   assert.match(bundle, /installDesktopCsvzall/);
+  assert.match(bundle, /Report a bug/);
+  assert.match(bundle, /obsidian-csvzall\/issues\/new/);
   assert.match(bundle, /New CSV/);
   assert.match(bundle, /column/);
   assert.match(bundle, /csvzall-viewer/);
@@ -189,6 +191,7 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /csvzall-mobile-toolbar/);
   assert.match(bundle, /panel-left/);
   assert.match(bundle, /viewport-resized/);
+  assert.doesNotMatch(bundle, /import\(["'](?:child_process|path)["']\)/);
   assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
   assert.doesNotMatch(bundle, /addEventListener\("load"/);
 });

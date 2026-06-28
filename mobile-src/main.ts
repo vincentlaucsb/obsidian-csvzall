@@ -1,4 +1,4 @@
-import { Notice, Platform, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import { Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { isCsv } from "../src/csv/csvFiles.js";
 import { CsvzallTableView } from "../src/views/CsvzallTableView.js";
 import {
@@ -7,6 +7,16 @@ import {
 } from "./WasmAssetInstaller.js";
 
 const VIEW_TYPE_CSVZALL_MOBILE = "csvzall-mobile-view";
+const DEFAULT_CSV_TEXT = "column\n";
+
+function normalizeVaultPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//u, "").replace(/^\/+/u, "").replace(/\/+/gu, "/");
+}
+
+function parentPathForFile(file: TFile): string {
+  const index = file.path.lastIndexOf("/");
+  return index >= 0 ? file.path.slice(0, index) : "";
+}
 
 export default class CsvzallMobilePlugin extends Plugin {
   private assetError = "";
@@ -28,6 +38,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       (leaf) => new CsvzallTableView(leaf, this, VIEW_TYPE_CSVZALL_MOBILE),
     );
     this.registerExtensions(["csv"], VIEW_TYPE_CSVZALL_MOBILE);
+    this.addRibbonIcon("table", "New CSV", () => void this.createCsvInActiveFolder());
     this.registerCsvCommands();
     this.registerCsvFileMenu();
   }
@@ -63,7 +74,53 @@ export default class CsvzallMobilePlugin extends Plugin {
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
+  private async createCsvInFolder(folder: TFolder): Promise<void> {
+    try {
+      const path = await this.nextCsvPathInFolder(folder.path);
+      const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
+      await this.openCsv(file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall Mobile failed to create CSV: ${message}`);
+      console.error("csvzall Mobile failed to create CSV", error);
+    }
+  }
+
+  private async createCsvInActiveFolder(): Promise<void> {
+    const activeFile = this.app.workspace.getActiveFile();
+    const folderPath = activeFile ? parentPathForFile(activeFile) : "";
+    try {
+      const path = await this.nextCsvPathInFolder(folderPath);
+      const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
+      await this.openCsv(file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall Mobile failed to create CSV: ${message}`);
+      console.error("csvzall Mobile failed to create CSV", error);
+    }
+  }
+
+  private async nextCsvPathInFolder(folderPath: string): Promise<string> {
+    const normalizedFolderPath = normalizeVaultPath(folderPath);
+    for (let index = 0; index < 10000; index += 1) {
+      const name = index === 0 ? "Untitled.csv" : `Untitled ${index}.csv`;
+      const path = normalizedFolderPath ? `${normalizedFolderPath}/${name}` : name;
+      if (!this.app.vault.getAbstractFileByPath(path)) {
+        return path;
+      }
+    }
+    throw new Error("Could not find an available Untitled CSV filename.");
+  }
+
   private registerCsvCommands(): void {
+    this.addCommand({
+      id: "new-csv",
+      name: "New CSV",
+      callback: () => {
+        void this.createCsvInActiveFolder();
+      },
+    });
+
     this.addCommand({
       id: "open-active-csv",
       name: "Open active CSV",
@@ -82,6 +139,16 @@ export default class CsvzallMobilePlugin extends Plugin {
 
   private registerCsvFileMenu(): void {
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (file instanceof TFolder) {
+        menu.addItem((item) => {
+          item
+            .setTitle("New CSV")
+            .setIcon("table")
+            .onClick(() => void this.createCsvInFolder(file));
+        });
+        return;
+      }
+
       if (!(file instanceof TFile) || !isCsv(file)) {
         return;
       }

@@ -8,9 +8,7 @@ Open, edit, create, and chart CSV files directly inside Obsidian.
 This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) command line application, which can be downloaded through the plugin via GitHub Releases.
 
 On phones and tablets, install
-[`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
-instead. It uses the bundled WASM viewer for basic mobile CSV viewing and
-editing without the desktop helper binary.
+[`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile).
 
 If csvzall saves you time, please star this repository. It helps other Obsidian
 users find the plugin and helps me gauge demand for continued development.
@@ -32,7 +30,7 @@ users find the plugin and helps me gauge demand for continued development.
 - The `csvzall` helper binary. The plugin can download this for you from its
   settings tab, or from the missing-binary screen when opening a CSV.
 
-For mobile viewing and editing, install the generated
+For mobile creating, viewing, and editing, install the generated
 [`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
 plugin instead. The mobile plugin uses the bundled WASM viewer and does not
 install or run the desktop helper binary.
@@ -48,8 +46,15 @@ charting run through the local helper process on your machine.
 
 ## Limitations
 
-- Currently CSVs larger than 200MB are read-only and not editable. This is to prevent materializing large CSVs entirely in memory.
-- Multi-value graphs configured through Obsidian are limited to two value columns.
+- This package is desktop-only. Use
+  [`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
+  for mobile CSV creating, viewing, and editing.
+- Desktop CSV viewing and editing require a local filesystem vault so the
+  plugin can launch the local `csvzall` helper process against real file paths.
+- In the mobile companion plugin, chart generation, SQLite queries, and helper
+  binary management are not available.
+- Multi-value graphs configured through Obsidian are limited to two value
+  columns.
 
 ## Chart Automation
 
@@ -82,22 +87,8 @@ generated release asset: commit it, but do not edit it by hand.
 The desktop release workflow publishes Obsidian's standard plugin assets:
 `manifest.json`, `main.js`, and `styles.css`.
 
-To build the generated mobile-only distribution:
-
-```powershell
-npm run test:mobile
-npm run sync:mobile-repo
-```
-
-The mobile distribution is generated into `.mobile-dist/` and synced to the
-sibling `obsidian-csvzall-mobile` repository. Its `main.js` embeds the
-`wasm-viewer/` assets and materializes them into the plugin folder at runtime,
-so the mobile release can use Obsidian's standard `main.js`, `manifest.json`,
-and `styles.css` asset model. The generated mobile bundle is checked to ensure
-that desktop-only Node.js and Electron APIs do not leak into the release, and
-that it only registers CSV ownership on Obsidian mobile. Mobile plugin metadata
-and versioning come from `mobile-src/manifest.json`, so mobile releases can use
-a separate version cadence from desktop releases.
+Maintainer notes for the generated mobile distribution live in
+[`docs/mobile-distribution.md`](docs/mobile-distribution.md).
 
 For local testing, copy or link this folder to:
 

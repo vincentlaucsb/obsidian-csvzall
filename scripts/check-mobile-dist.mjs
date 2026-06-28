@@ -57,8 +57,16 @@ if (manifest.isDesktopOnly !== false) {
 if (versions[manifest.version] !== manifest.minAppVersion) {
   fail(`versions.json is missing ${manifest.version}`);
 }
-if (!mobileSource.includes("class CsvzallMobilePlugin") || !mobileSource.includes("registerExtensions")) {
-  fail("mobile source snapshot is missing the mobile plugin entry point");
+for (const marker of [
+  "class CsvzallMobilePlugin",
+  "registerExtensions",
+  "createCsvInActiveFolder",
+  "Untitled.csv",
+  "New CSV",
+]) {
+  if (!mobileSource.includes(marker)) {
+    fail(`mobile source snapshot is missing marker: ${marker}`);
+  }
 }
 if (!tableViewSource.includes("showWasmViewer") || !tableViewSource.includes("wasmViewerMessageFromData")) {
   fail("mobile source snapshot is missing the WASM viewer bridge implementation");
@@ -83,6 +91,8 @@ for (const marker of [
   "wasm-viewer/index.html",
   "csvzall-mobile-view",
   "isMobileApp",
+  "New CSV",
+  "Untitled.csv",
 ]) {
   if (!main.includes(marker)) {
     fail(`main.js is missing marker: ${marker}`);

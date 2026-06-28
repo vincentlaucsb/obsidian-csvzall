@@ -22,6 +22,14 @@
 
 Keep new behavior in the narrowest module that owns the concern. Do not add process, installer, chart, settings UI, or CSV workflow logic directly to `src/main.ts`; add or extend a focused service/module and wire it from `main.ts` instead.
 
+## Runtime Import Rule
+
+- Do not use dynamic or async imports such as `await import(...)` in Obsidian runtime code under `src/` or `mobile-src/`.
+- For desktop runtime Node.js dependencies such as `child_process`, `path`, `fs`, or Electron APIs, use static top-level imports so esbuild emits Obsidian-compatible CommonJS `require(...)` calls in `main.js`.
+- Keep mobile runtime code free of Node.js built-ins and Electron APIs entirely.
+- Dynamic imports are acceptable in build scripts and tests where Node.js is the actual runtime.
+- When changing runtime imports, add or update bundle-level assertions so `main.js` cannot ship with browser-style dynamic imports for Node.js modules.
+
 ## Mobile WASM Viewer Notes
 
 - Android keyboard handling inside Obsidian's mobile WebView is fragile. Do not reflow, hide, or resize the WASM viewer layout while an AG Grid cell editor is active.
