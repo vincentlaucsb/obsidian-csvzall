@@ -22,6 +22,10 @@
 
 Keep new behavior in the narrowest module that owns the concern. Do not add process, installer, chart, settings UI, or CSV workflow logic directly to `src/main.ts`; add or extend a focused service/module and wire it from `main.ts` instead.
 
+`README.md` is consumer-facing copy for the Obsidian Community plugin page. Do
+not put maintainer-only release, generated asset, sync, packaging, or workflow
+notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
+
 ## Runtime Import Rule
 
 - Do not use dynamic or async imports such as `await import(...)` in Obsidian runtime code under `src/` or `mobile-src/`.
