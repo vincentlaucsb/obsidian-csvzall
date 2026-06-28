@@ -10,11 +10,62 @@ export interface CsvzallTableViewOwner {
   openCsvzallSettings(): void;
 }
 
+type WasmViewerMessage =
+  | { source: "csvzall-wasm-viewer"; type: "ready" }
+  | { source: "csvzall-wasm-viewer"; type: "dirty-state"; dirty: boolean }
+  | {
+    source: "csvzall-wasm-viewer";
+    type: "save-file";
+    buffer: ArrayBuffer;
+    byteOffset?: number;
+    byteLength?: number;
+  };
+
 type ProtectedLeaf = WorkspaceLeaf & {
   detach: () => void | Promise<void>;
   openFile: (file: TFile, openState?: OpenViewState) => Promise<void>;
   setViewState: (viewState: ViewState, eState?: unknown) => Promise<void>;
 };
+
+function wasmViewerMessageFromData(data: unknown): WasmViewerMessage | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const candidate = data as Record<string, unknown>;
+  if (candidate.source !== "csvzall-wasm-viewer") {
+    return null;
+  }
+
+  if (candidate.type === "ready") {
+    return {
+      source: "csvzall-wasm-viewer",
+      type: "ready",
+    };
+  }
+
+  if (candidate.type === "dirty-state" && typeof candidate.dirty === "boolean") {
+    return {
+      source: "csvzall-wasm-viewer",
+      type: "dirty-state",
+      dirty: candidate.dirty,
+    };
+  }
+
+  if (candidate.type === "save-file" && candidate.buffer instanceof ArrayBuffer) {
+    const byteOffset = typeof candidate.byteOffset === "number" ? candidate.byteOffset : undefined;
+    const byteLength = typeof candidate.byteLength === "number" ? candidate.byteLength : undefined;
+    return {
+      source: "csvzall-wasm-viewer",
+      type: "save-file",
+      buffer: candidate.buffer,
+      byteOffset,
+      byteLength,
+    };
+  }
+
+  return null;
+}
 
 export class CsvzallTableView extends FileView {
   private titleText = "csvzall";
@@ -445,17 +496,19 @@ export class CsvzallTableView extends FileView {
   }
 
   private handleWasmViewerMessage(event: MessageEvent): boolean {
-    const data = event.data;
-    if (!data || typeof data !== "object" || data.source !== "csvzall-wasm-viewer") {
+    const data = wasmViewerMessageFromData(event.data);
+    if (!data) {
       return false;
     }
 
-    if (data.type === "ready" && this.frame) {
-      void this.postWasmFileToFrame(this.frame);
+    if (data.type === "ready") {
+      if (this.frame) {
+        void this.postWasmFileToFrame(this.frame);
+      }
       return true;
     }
 
-    if (data.type === "dirty-state" && typeof data.dirty === "boolean") {
+    if (data.type === "dirty-state") {
       this.setDirty(data.dirty);
       return true;
     }

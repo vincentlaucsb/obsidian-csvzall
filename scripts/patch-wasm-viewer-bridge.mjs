@@ -1,19 +1,18 @@
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const viewerDir = "wasm-viewer";
 const assetsDir = join("wasm-viewer", "assets");
+const indexPath = join(viewerDir, "index.html");
 const bundleName = readdirSync(assetsDir).find((name) => /^index-.*\.js$/.test(name));
 const stylesheetName = readdirSync(assetsDir).find((name) => /^index-.*\.css$/.test(name));
 
 if (!bundleName) {
   throw new Error("WASM viewer bridge patch failed: missing index JavaScript bundle");
 }
-if (!stylesheetName) {
-  throw new Error("WASM viewer bridge patch failed: missing index stylesheet bundle");
-}
 
 const bundlePath = join(assetsDir, bundleName);
-const stylesheetPath = join(assetsDir, stylesheetName);
+const stylesheetPath = stylesheetName ? join(assetsDir, stylesheetName) : null;
 let text = readFileSync(bundlePath, "utf8");
 const compactStyleId = "csvzall-obsidian-host-compact-v1";
 const mobileBehaviorId = "csvzall-obsidian-mobile-behavior-v1";
@@ -80,16 +79,46 @@ body[data-host-mode] #grid {
 }
 `.replace(/\s+/g, " ").trim();
 const hostModeHelpers = `const csvzallObsidianHostStyleId="${compactStyleId}";let csvzallKeyboardInsetInstalled=!1;function csvzallInstallKeyboardInsets(){if(csvzallKeyboardInsetInstalled)return;csvzallKeyboardInsetInstalled=!0;const e=window.visualViewport,t=()=>{const i=e?e.height:window.innerHeight;document.documentElement.style.setProperty("--csvzall-visual-height",Math.max(240,Math.floor(i))+"px")};e&&(e.addEventListener("resize",t),e.addEventListener("scroll",t)),window.addEventListener("resize",t),t()}function csvzallEnableObsidianHostMode(){document.documentElement.classList.add("csvzall-obsidian-host");csvzallInstallKeyboardInsets();if(!document.getElementById(csvzallObsidianHostStyleId)){const e=document.createElement("style");e.id=csvzallObsidianHostStyleId,e.textContent=${JSON.stringify(compactStyle)},document.head.append(e)}}`;
+const inlineStyleAttr = "data-csvzall-inline-viewer-style";
+
+function readPackagedStylesheet() {
+  if (stylesheetPath) {
+    return readFileSync(stylesheetPath, "utf8");
+  }
+  const html = readFileSync(indexPath, "utf8");
+  const match = html.match(new RegExp(`<style ${inlineStyleAttr}>\\n?([\\s\\S]*?)\\n?</style>`));
+  if (match?.[1]) {
+    return match[1];
+  }
+  throw new Error("WASM viewer bridge patch failed: missing index stylesheet bundle");
+}
+
+function writeInlineStylesheet(css) {
+  let html = readFileSync(indexPath, "utf8");
+  const inlineStyle = `<style ${inlineStyleAttr}>\n${css}\n</style>`;
+  if (stylesheetName) {
+    const linkPattern = new RegExp(`\\n?\\s*<link[^>]+href=["']\\./assets/${stylesheetName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>`);
+    html = html.replace(linkPattern, `\n  ${inlineStyle}`);
+  } else if (html.includes(`<style ${inlineStyleAttr}>`)) {
+    html = html.replace(new RegExp(`<style ${inlineStyleAttr}>[\\s\\S]*?</style>`), inlineStyle);
+  } else {
+    html = html.replace("</head>", `  ${inlineStyle}\n</head>`);
+  }
+  writeFileSync(indexPath, html);
+  if (stylesheetPath) {
+    rmSync(stylesheetPath, { force: true });
+  }
+}
 
 function patchCompactStylesheet() {
-  let css = readFileSync(stylesheetPath, "utf8");
+  let css = readPackagedStylesheet();
   if (css.includes(compactStyleId)) {
     css = css.replace(/\/\* csvzall-obsidian-host-compact-v1 \*\/[\s\S]*$/u, `/* ${compactStyleId} */\n${compactStyle}\n`);
-    writeFileSync(stylesheetPath, css);
+    writeInlineStylesheet(css);
     return true;
   }
   css = `${css}\n/* ${compactStyleId} */\n${compactStyle}\n`;
-  writeFileSync(stylesheetPath, css);
+  writeInlineStylesheet(css);
   return true;
 }
 
@@ -198,7 +227,7 @@ if (text.includes("obsidian-csvzall")) {
   const compactPatched = patchCompactStylesheet();
   console.log(`WASM viewer bridge already present in ${bundleName}.`);
   if (compactPatched) {
-    console.log(`Patched compact Obsidian host styles into ${stylesheetName}.`);
+    console.log("Patched compact Obsidian host styles into wasm-viewer/index.html.");
   }
   process.exit(0);
 }

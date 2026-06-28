@@ -87,10 +87,10 @@ export class CsvzallProcessService {
 
   async startViewer(filePath: string): Promise<CsvzallServerHandle> {
     const { spawn } = await import("child_process");
-    const { dirname, isAbsolute } = await import("path");
+    const path = await import("path");
     const executable = stripOuterQuotes(this.getSettings().csvzallPath);
     const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
-    const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
+    const cwd = path.isAbsolute(executable) ? path.dirname(executable) : undefined;
     const child = spawn(executable, args, {
       cwd,
       windowsHide: true,

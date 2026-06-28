@@ -28,14 +28,13 @@ requireFile(metadataPath);
 
 const assets = readdirSync(assetsDir);
 const hasJavaScript = assets.some((name) => name.endsWith(".js"));
-const hasStylesheet = assets.some((name) => name.endsWith(".css"));
 const wasmAssets = assets.filter((name) => name.endsWith(".wasm"));
 
 if (!hasJavaScript) {
   fail("assets directory does not contain a JavaScript bundle");
 }
-if (!hasStylesheet) {
-  fail("assets directory does not contain a stylesheet bundle");
+if (assets.some((name) => name.endsWith(".css"))) {
+  fail("stylesheet bundles should be inlined into index.html so Obsidian's source scanner does not lint generated AG Grid CSS");
 }
 if (wasmAssets.length !== 1) {
   fail(`expected exactly one .wasm file, found ${wasmAssets.length}`);
@@ -66,9 +65,6 @@ if (!indexBundleName) {
   fail("assets directory does not contain an index JavaScript bundle");
 }
 const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name));
-if (!stylesheetBundleName) {
-  fail("assets directory does not contain an index stylesheet bundle");
-}
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
 for (const marker of ["obsidian-csvzall", "csvzall-wasm-viewer", "open-file", "save-file"]) {
@@ -76,7 +72,12 @@ for (const marker of ["obsidian-csvzall", "csvzall-wasm-viewer", "open-file", "s
     fail(`index bundle is missing Obsidian bridge marker: ${marker}`);
   }
 }
-const stylesheetBundle = readFileSync(join(assetsDir, stylesheetBundleName), "utf8");
+const stylesheetBundle = stylesheetBundleName ?
+  readFileSync(join(assetsDir, stylesheetBundleName), "utf8") :
+  (indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "");
+if (!stylesheetBundle) {
+  fail("index.html is missing the inline viewer stylesheet");
+}
 if (!indexBundle.includes("csvzall-obsidian-host-compact-v1") && !stylesheetBundle.includes("csvzall-obsidian-host-compact-v1")) {
   fail("packaged viewer is missing compact Obsidian host styles");
 }

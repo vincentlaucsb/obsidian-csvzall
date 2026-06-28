@@ -14,7 +14,7 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
 
   const assets = readdirSync(assetsDir);
   assert.equal(assets.some((name) => name.endsWith(".js")), true);
-  assert.equal(assets.some((name) => name.endsWith(".css")), true);
+  assert.equal(assets.some((name) => name.endsWith(".css")), false);
   assert.equal(assets.filter((name) => name.endsWith(".wasm")).length, 1);
 
   const indexHtml = readFileSync(join(viewerDir, "index.html"), "utf8");
@@ -29,11 +29,10 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   }
 
   const indexBundleName = assets.find((name) => /^index-.*\.js$/.test(name));
-  const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name));
   assert.equal(typeof indexBundleName, "string");
-  assert.equal(typeof stylesheetBundleName, "string");
   const indexBundle = readFileSync(join(assetsDir, indexBundleName ?? ""), "utf8");
-  const stylesheetBundle = readFileSync(join(assetsDir, stylesheetBundleName ?? ""), "utf8");
+  const stylesheetBundle = indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "";
+  assert.notEqual(stylesheetBundle.length, 0);
   assert.match(indexBundle, /obsidian-csvzall/);
   assert.match(indexBundle, /csvzall-wasm-viewer/);
   assert.match(`${indexBundle}\n${stylesheetBundle}`, /csvzall-obsidian-host-compact-v1/);
