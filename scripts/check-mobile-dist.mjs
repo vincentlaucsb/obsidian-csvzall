@@ -6,12 +6,21 @@ const requiredFiles = [
   "AGENTS.md",
   "LICENSE",
   "README.md",
+  "SOURCE.md",
   "main.js",
   "manifest.json",
   "styles.css",
   "versions.json",
   ".github/workflows/release.yml",
   ".github/workflows/validate.yml",
+  "mobile-src/main.ts",
+  "mobile-src/WasmAssetInstaller.ts",
+  "mobile-src/manifest.json",
+  "src/csv/csvFiles.ts",
+  "src/views/CsvzallTableView.ts",
+  "src/views/UnsavedChangesModal.ts",
+  "src/views/viewTypes.ts",
+  "src/viewerHelpers.ts",
 ];
 
 function fail(message) {
@@ -30,6 +39,8 @@ const sourceManifest = JSON.parse(readFileSync("mobile-src/manifest.json", "utf8
 const versions = JSON.parse(readFileSync(join(distDir, "versions.json"), "utf8"));
 const main = readFileSync(join(distDir, "main.js"), "utf8");
 const releaseWorkflow = readFileSync(join(distDir, ".github/workflows/release.yml"), "utf8");
+const mobileSource = readFileSync(join(distDir, "mobile-src/main.ts"), "utf8");
+const tableViewSource = readFileSync(join(distDir, "src/views/CsvzallTableView.ts"), "utf8");
 
 if (manifest.id !== "csvzall-mobile") {
   fail(`unexpected manifest id: ${manifest.id}`);
@@ -45,6 +56,12 @@ if (manifest.isDesktopOnly !== false) {
 }
 if (versions[manifest.version] !== manifest.minAppVersion) {
   fail(`versions.json is missing ${manifest.version}`);
+}
+if (!mobileSource.includes("class CsvzallMobilePlugin") || !mobileSource.includes("registerExtensions")) {
+  fail("mobile source snapshot is missing the mobile plugin entry point");
+}
+if (!tableViewSource.includes("showWasmViewer") || !tableViewSource.includes("wasmViewerMessageFromData")) {
+  fail("mobile source snapshot is missing the WASM viewer bridge implementation");
 }
 
 const bannedPatterns = [
