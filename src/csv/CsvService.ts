@@ -37,7 +37,7 @@ export class CsvService {
 
   async openCsvInLeaf(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
     if (!Platform.isDesktopApp) {
-      this.processService.showLeafErrorText(leaf, "csvzall requires the Obsidian desktop app.");
+      await this.openCsvInWasmViewer(file, leaf);
       return;
     }
 
@@ -84,7 +84,9 @@ export class CsvService {
 
   private async openCsvInBrowser(file: TFile): Promise<void> {
     if (!Platform.isDesktopApp) {
-      new Notice("csvzall requires the Obsidian desktop app.");
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.openFile(file);
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
       return;
     }
 
@@ -115,5 +117,20 @@ export class CsvService {
       }
     }
     throw new Error("Could not find an available Untitled CSV filename.");
+  }
+
+  private async openCsvInWasmViewer(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
+    const url = this.filesystem.getPluginResourcePath("wasm-viewer/index.html");
+    if (!url) {
+      this.processService.showLeafErrorText(leaf, "The bundled WASM viewer could not be resolved.");
+      return;
+    }
+
+    if (leaf.view instanceof CsvzallTableView) {
+      leaf.view.showWasmViewer(file.basename, url, file);
+      return;
+    }
+
+    this.processService.showLeafErrorText(leaf, "The CSV view is not ready.");
   }
 }

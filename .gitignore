@@ -1,7 +1,11 @@
 csvzall-bin/
+.codex-remote-attachments/
+.mobile-build/
+.mobile-dist/
 .test-build/
 coverage/
 data.json
+mobile-src/wasmViewerAssets.generated.ts
 node_modules/
 *.log
 *.tmp

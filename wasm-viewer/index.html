@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>csvzall WASM viewer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231f6f5b'/%3E%3Cpath d='M14 18h36v28H14z' fill='white'/%3E%3Cpath d='M14 26h36M14 34h36M24 18v28M36 18v28' stroke='%231f6f5b' stroke-width='3'/%3E%3C/svg%3E">
+  <script type="module" crossorigin src="./assets/index-DD5CYX2F.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Dmk3K9aS.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>csvzall WASM viewer</h1>
+      <p id="status">Loading WASM module...</p>
+    </div>
+    <div class="actions">
+      <label class="file-picker">
+        <span>Open CSV</span>
+        <input id="file-input" type="file" accept=".csv,text/csv">
+      </label>
+      <button id="insert-menu" class="menu-button" type="button" disabled>
+        <span>Insert</span>
+        <span class="dropdown-chevron" aria-hidden="true">v</span>
+      </button>
+      <button id="delete-menu" class="menu-button" type="button" disabled>
+        <span>Delete</span>
+        <span class="dropdown-chevron" aria-hidden="true">v</span>
+      </button>
+      <button id="reset" type="button" disabled>Reset</button>
+      <button id="save" type="button" disabled>Download CSV</button>
+    </div>
+  </header>
+  <main>
+    <div id="grid" class="ag-theme-quartz-auto-dark"></div>
+  </main>
+  <footer>
+    <span id="record-count"></span>
+  </footer>
+  <dialog id="loading-dialog" aria-labelledby="loading-title" aria-describedby="loading-detail">
+    <div class="loading-panel">
+      <div class="spinner" aria-hidden="true"></div>
+      <div>
+        <h2 id="loading-title">Loading CSV Engine</h2>
+        <p id="loading-detail">The parser is starting in a background worker.</p>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="insert-column-dialog" class="csvzall-dialog">
+    <form id="insert-column-form" class="dialog-form">
+      <h2>Insert column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="insert-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="insert-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-insert-column" type="button">Cancel</button>
+        <button type="submit">Insert</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="rename-column-dialog" class="csvzall-dialog">
+    <form id="rename-column-form" class="dialog-form">
+      <h2>Rename column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="rename-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="rename-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-rename-column" type="button">Cancel</button>
+        <button type="submit">Rename</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

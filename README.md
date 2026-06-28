@@ -7,6 +7,14 @@ Open, edit, create, and chart CSV files directly inside Obsidian.
 
 This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) command line application, which can be downloaded through the plugin via GitHub Releases.
 
+On phones and tablets, install
+[`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
+instead. It uses the bundled WASM viewer for basic mobile CSV viewing and
+editing without the desktop helper binary.
+
+If csvzall saves you time, please star this repository. It helps other Obsidian
+users find the plugin and helps me gauge demand for continued development.
+
 ## What It Does
 
 - Opens `.csv` files in an editable table view inside Obsidian.
@@ -19,10 +27,15 @@ This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) co
 
 ## Requirements
 
-- Obsidian desktop. Mobile is not supported.
+- Obsidian desktop.
 - A local filesystem vault.
 - The `csvzall` helper binary. The plugin can download this for you from its
   settings tab, or from the missing-binary screen when opening a CSV.
+
+For mobile viewing and editing, install the generated
+[`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
+plugin instead. The mobile plugin uses the bundled WASM viewer and does not
+install or run the desktop helper binary.
 
 Downloaded binaries are verified with SHA-256 before they are installed under
 the plugin-managed directory.
@@ -54,6 +67,37 @@ npm install
 npm run dev
 npm test
 ```
+
+To refresh the packaged WASM viewer from a local `csvzall` checkout:
+
+```powershell
+npm run sync:wasm-viewer
+npm run check:wasm-viewer
+```
+
+The sync script copies `..\csvzall\src\viewer_wasm\web\dist` into
+`wasm-viewer/` and writes provenance metadata. Treat `wasm-viewer/` like a
+generated release asset: commit it, but do not edit it by hand.
+
+The desktop release workflow publishes Obsidian's standard plugin assets:
+`manifest.json`, `main.js`, and `styles.css`.
+
+To build the generated mobile-only distribution:
+
+```powershell
+npm run test:mobile
+npm run sync:mobile-repo
+```
+
+The mobile distribution is generated into `.mobile-dist/` and synced to the
+sibling `obsidian-csvzall-mobile` repository. Its `main.js` embeds the
+`wasm-viewer/` assets and materializes them into the plugin folder at runtime,
+so the mobile release can use Obsidian's standard `main.js`, `manifest.json`,
+and `styles.css` asset model. The generated mobile bundle is checked to ensure
+that desktop-only Node.js and Electron APIs do not leak into the release, and
+that it only registers CSV ownership on Obsidian mobile. Mobile plugin metadata
+and versioning come from `mobile-src/manifest.json`, so mobile releases can use
+a separate version cadence from desktop releases.
 
 For local testing, copy or link this folder to:
 

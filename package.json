@@ -1,6 +1,6 @@
 {
   "name": "obsidian-csvzall",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A fast CSV viewer, editor, and charting tool.",
   "main": "main.js",
   "type": "module",
@@ -10,9 +10,16 @@
   },
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "test": "npm run test:unit",
+    "build": "tsc -noEmit -skipLibCheck && npm run check:wasm-viewer && node esbuild.config.mjs production",
+    "build:mobile": "node scripts/build-mobile.mjs",
+    "sync:wasm-viewer": "node scripts/sync-wasm-viewer.mjs && npm run patch:wasm-viewer",
+    "sync:mobile-repo": "node scripts/sync-mobile-repo.mjs",
+    "patch:wasm-viewer": "node scripts/patch-wasm-viewer-bridge.mjs",
+    "check:wasm-viewer": "node scripts/check-wasm-viewer.mjs",
+    "check:mobile": "node scripts/check-mobile-dist.mjs",
+    "test": "npm run test:unit && npm run test:mobile",
     "test:unit": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js",
+    "test:mobile": "npm run build:mobile && npm run check:mobile",
     "pretest:coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\"",
     "test:coverage": "npm run build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info .test-build/tests/*.test.js"
   },

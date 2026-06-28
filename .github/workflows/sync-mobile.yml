@@ -1,0 +1,73 @@
+name: Sync mobile distribution
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-mobile.yml"
+      - "mobile-src/**"
+      - "scripts/build-mobile.mjs"
+      - "scripts/check-mobile-dist.mjs"
+      - "scripts/sync-mobile-repo.mjs"
+      - "src/csv/csvFiles.ts"
+      - "src/views/**"
+      - "src/viewerHelpers.ts"
+      - "styles.css"
+      - "manifest.json"
+      - "versions.json"
+      - "wasm-viewer/**"
+
+permissions:
+  contents: read
+
+jobs:
+  sync-mobile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source repository
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Install dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Build mobile distribution
+        working-directory: source
+        run: npm run test:mobile
+
+      - name: Check out mobile distribution repository
+        uses: actions/checkout@v4
+        with:
+          repository: vincentlaucsb/obsidian-csvzall-mobile
+          token: ${{ secrets.MOBILE_REPO_TOKEN }}
+          path: mobile
+
+      - name: Sync generated files
+        shell: bash
+        run: |
+          rsync -a --delete --exclude '.git' source/.mobile-dist/ mobile/
+
+      - name: Open mobile distribution pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: mobile
+          token: ${{ secrets.MOBILE_REPO_TOKEN }}
+          branch: generated/from-obsidian-csvzall
+          commit-message: "Sync generated mobile distribution"
+          title: "Sync generated mobile distribution"
+          body: |
+            Generated from vincentlaucsb/obsidian-csvzall.
+
+            This PR was created by the source repository sync workflow.

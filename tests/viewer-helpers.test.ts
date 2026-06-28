@@ -13,6 +13,7 @@ import {
 } from "../src/viewerHelpers.js";
 import {
   csvzallInstallTarget,
+  getLatestCsvzallReleaseInfo,
   installCsvzallBinary,
   parseSha256ChecksumText,
   selectCsvzallReleaseAsset,
@@ -170,7 +171,7 @@ test("built plugin launches csvzall view in edit mode", () => {
   const bundle = readFileSync("main.js", "utf8");
   assert.match(bundle, /"--edit"/);
   assert.match(bundle, /"--startup-json"/);
-  assert.match(bundle, /Install or update/);
+  assert.match(bundle, /Check for updates/);
   assert.match(bundle, /installDesktopCsvzall/);
   assert.match(bundle, /New CSV/);
   assert.match(bundle, /column/);
@@ -181,6 +182,15 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /Discard changes/);
   assert.match(bundle, /openFile/);
   assert.match(bundle, /setViewState/);
+  assert.match(bundle, /wasm-viewer\/index\.html/);
+  assert.match(bundle, /showWasmViewer/);
+  assert.match(bundle, /readBinary/);
+  assert.match(bundle, /modifyBinary/);
+  assert.match(bundle, /csvzall-mobile-toolbar/);
+  assert.match(bundle, /panel-left/);
+  assert.match(bundle, /viewport-resized/);
+  assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
+  assert.doesNotMatch(bundle, /addEventListener\("load"/);
 });
 
 test("installer selects the matching desktop binary asset", () => {
@@ -195,6 +205,32 @@ test("installer selects the matching desktop binary asset", () => {
 
   const asset = selectCsvzallReleaseAsset(release, csvzallInstallTarget("win32", "x64"));
   assert.equal(asset.name, "csvzall-windows-x64.zip");
+});
+
+test("installer reads latest release info without downloading the binary", async () => {
+  const release = {
+    tag_name: "v1.2.3",
+    assets: [
+      { name: "csvzall-windows-x64.zip", browser_download_url: "https://example.test/win" },
+      { name: "SHA256SUMS.txt", browser_download_url: "https://example.test/sums" },
+    ],
+  };
+  const requestedUrls: string[] = [];
+
+  const info = await getLatestCsvzallReleaseInfo({
+    platform: "win32",
+    arch: "x64",
+    fetchBuffer: async (url) => {
+      requestedUrls.push(url);
+      return Buffer.from(JSON.stringify(release));
+    },
+  });
+
+  assert.deepEqual(info, {
+    tagName: "v1.2.3",
+    assetName: "csvzall-windows-x64.zip",
+  });
+  assert.deepEqual(requestedUrls, ["https://api.github.com/repos/vincentlaucsb/csvzall/releases/latest"]);
 });
 
 test("installer parses common SHA-256 checksum formats", () => {
