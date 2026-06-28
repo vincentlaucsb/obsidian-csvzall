@@ -60,6 +60,7 @@ jobs:
           rsync -a --delete --exclude '.git' source/.mobile-dist/ mobile/
 
       - name: Open mobile distribution pull request
+        id: mobile-pr
         uses: peter-evans/create-pull-request@v6
         with:
           path: mobile
@@ -71,3 +72,17 @@ jobs:
             Generated from vincentlaucsb/obsidian-csvzall.
 
             This PR was created by the source repository sync workflow.
+
+      - name: Enable auto-merge for generated pull request
+        if: steps.mobile-pr.outputs.pull-request-number != ''
+        working-directory: mobile
+        env:
+          GH_TOKEN: ${{ secrets.MOBILE_REPO_TOKEN }}
+          PR_NUMBER: ${{ steps.mobile-pr.outputs.pull-request-number }}
+        shell: bash
+        run: |
+          if gh pr merge "${PR_NUMBER}" --squash --auto --delete-branch; then
+            echo "Auto-merge enabled for mobile distribution PR #${PR_NUMBER}."
+          else
+            echo "::warning::Could not enable auto-merge for mobile distribution PR #${PR_NUMBER}. Check that auto-merge is enabled for the mobile repo and that MOBILE_REPO_TOKEN has contents and pull-request write permissions."
+          fi
