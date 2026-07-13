@@ -10,6 +10,7 @@ export interface CsvzallEventLogEntry {
 export interface CsvzallPluginSettings {
   csvzallPath: string;
   installedCsvzallVersion: string;
+  installedCsvzallAssetName: string;
   csvzallLastUpdateCheckAt: string;
   openInObsidian: boolean;
   startupTimeoutMs: number;
@@ -19,6 +20,7 @@ export interface CsvzallPluginSettings {
 export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   csvzallPath: "csvzall",
   installedCsvzallVersion: "",
+  installedCsvzallAssetName: "",
   csvzallLastUpdateCheckAt: "",
   openInObsidian: true,
   startupTimeoutMs: 10000,
@@ -33,6 +35,9 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
     installedCsvzallVersion: typeof candidate.installedCsvzallVersion === "string" ?
       candidate.installedCsvzallVersion :
       DEFAULT_SETTINGS.installedCsvzallVersion,
+    installedCsvzallAssetName: typeof candidate.installedCsvzallAssetName === "string" ?
+      candidate.installedCsvzallAssetName :
+      DEFAULT_SETTINGS.installedCsvzallAssetName,
     csvzallLastUpdateCheckAt: typeof candidate.csvzallLastUpdateCheckAt === "string" ?
       candidate.csvzallLastUpdateCheckAt :
       DEFAULT_SETTINGS.csvzallLastUpdateCheckAt,

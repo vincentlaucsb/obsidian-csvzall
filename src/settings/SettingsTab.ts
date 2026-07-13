@@ -40,6 +40,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
     const csvzallInstallDesc = [
       "Downloads the matching desktop binary from GitHub Releases, verifies its SHA-256 checksum, and updates the path above.",
       `Current version: ${settings.installedCsvzallVersion || "not installed by this plugin"}.`,
+      `Current asset: ${settings.installedCsvzallAssetName || "unknown"}.`,
       `Last checked: ${
         settings.csvzallLastUpdateCheckAt ?
           formatSettingsTimestamp(settings.csvzallLastUpdateCheckAt) :
@@ -60,6 +61,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
             const nextSettings = this.services.getSettings();
             if (nextPath !== nextSettings.csvzallPath) {
               nextSettings.installedCsvzallVersion = "";
+              nextSettings.installedCsvzallAssetName = "";
               nextSettings.csvzallLastUpdateCheckAt = "";
             }
             nextSettings.csvzallPath = nextPath;

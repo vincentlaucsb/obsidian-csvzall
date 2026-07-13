@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { chmod, mkdir, rename, rm, writeFile } from "fs/promises";
 import { get } from "https";
 import { join } from "path";
-import { inflateRawSync } from "zlib";
+import { gunzipSync, inflateRawSync } from "zlib";
 
 export const CSVZALL_RELEASE_API_URL = "https://api.github.com/repos/vincentlaucsb/csvzall/releases/latest";
 
@@ -39,6 +39,13 @@ type ZipEntry = {
   localHeaderOffset: number;
 };
 
+type TarEntry = {
+  name: string;
+  size: number;
+  dataOffset: number;
+  typeFlag: number;
+};
+
 type InstallOptions = {
   pluginDir?: string;
   releaseApiUrl?: string;
@@ -64,7 +71,7 @@ export type CsvzallReleaseInfo = {
 };
 
 const CHECKSUM_NAME_PATTERN = /(^|[-_.])(sha256|sha256sums|checksums?)([-_.]|$)/i;
-const UNSUPPORTED_ARCHIVE_NAME_PATTERN = /\.(tar\.gz|tgz|tar\.xz|txz|gz)$/i;
+const OBSIDIAN_ASSET_NAME_PATTERN = /(^|[-_.])obsidian([-_.]|$)/i;
 
 const TARGETS: Record<string, Omit<InstallTarget, "platform" | "arch" | "archLabels">> = {
   win32: {
@@ -107,6 +114,18 @@ export function isChecksumAssetName(name: string): boolean {
 
 export function isZipAssetName(name: string): boolean {
   return /\.zip$/i.test(name);
+}
+
+export function isTarGzAssetName(name: string): boolean {
+  return /\.(tar\.gz|tgz)$/i.test(name);
+}
+
+function isSupportedArchiveAssetName(name: string): boolean {
+  return isZipAssetName(name) || isTarGzAssetName(name);
+}
+
+function isUnsupportedArchiveAssetName(name: string): boolean {
+  return /\.(tar\.xz|txz)$/i.test(name) || (/\.gz$/i.test(name) && !isTarGzAssetName(name));
 }
 
 export function sha256Hex(bytes: Buffer): string {
@@ -169,7 +188,7 @@ function scoreAsset(asset: ReleaseAsset, target: InstallTarget): number {
     typeof asset.browser_download_url !== "string" ||
     !asset.browser_download_url ||
     isChecksumAssetName(name) ||
-    UNSUPPORTED_ARCHIVE_NAME_PATTERN.test(name)
+    isUnsupportedArchiveAssetName(name)
   ) {
     return -1;
   }
@@ -184,8 +203,11 @@ function scoreAsset(asset: ReleaseAsset, target: InstallTarget): number {
   if (target.platform === "win32" && name.endsWith(".exe")) {
     score += 3;
   }
-  if (isZipAssetName(name)) {
+  if (isSupportedArchiveAssetName(name)) {
     score += 1;
+  }
+  if (OBSIDIAN_ASSET_NAME_PATTERN.test(name)) {
+    score += 5;
   }
   if (name === target.executableName) {
     score += 2;
@@ -279,8 +301,14 @@ function findEndOfCentralDirectory(bytes: Buffer): number {
   throw new Error("ZIP archive is missing its central directory.");
 }
 
-function zipEntryBasename(name: string): string {
+function archiveEntryBasename(name: string): string {
   return name.replace(/\\/g, "/").split("/").pop() ?? "";
+}
+
+function archiveEntryDirname(name: string): string {
+  const normalized = name.replace(/\\/g, "/");
+  const lastSlash = normalized.lastIndexOf("/");
+  return lastSlash >= 0 ? normalized.slice(0, lastSlash + 1) : "";
 }
 
 function readZipEntries(bytes: Buffer): ZipEntry[] {
@@ -346,15 +374,128 @@ function readZipEntryBytes(archiveBytes: Buffer, entry: ZipEntry): Buffer {
 }
 
 export function extractCsvzallExecutableFromZip(archiveBytes: Buffer, executableName: string): Buffer {
+  return extractCsvzallFilesFromZip(archiveBytes, executableName).get(executableName) ??
+    (() => {
+      throw new Error(`ZIP archive did not contain ${executableName}.`);
+    })();
+}
+
+export function extractCsvzallFilesFromZip(archiveBytes: Buffer, executableName: string): Map<string, Buffer> {
   const entries = readZipEntries(archiveBytes);
   const normalizedExecutableName = executableName.toLowerCase();
-  const entry = entries.find((candidate) => zipEntryBasename(candidate.name).toLowerCase() === normalizedExecutableName);
+  const entry = entries.find((candidate) => archiveEntryBasename(candidate.name).toLowerCase() === normalizedExecutableName);
   if (!entry) {
     const names = entries.map((candidate) => candidate.name).join(", ");
     throw new Error(`ZIP archive did not contain ${executableName}.` + (names ? ` Entries: ${names}` : ""));
   }
 
-  return readZipEntryBytes(archiveBytes, entry);
+  const executableDir = archiveEntryDirname(entry.name);
+  const files = new Map<string, Buffer>();
+  for (const candidate of entries) {
+    const basename = archiveEntryBasename(candidate.name);
+    if (!basename || archiveEntryDirname(candidate.name) !== executableDir) {
+      continue;
+    }
+    files.set(basename, readZipEntryBytes(archiveBytes, candidate));
+  }
+
+  if (!files.has(executableName)) {
+    files.set(executableName, readZipEntryBytes(archiveBytes, entry));
+  }
+  return files;
+}
+
+function tarString(bytes: Buffer, start: number, end: number): string {
+  const zeroOffset = bytes.indexOf(0, start);
+  const actualEnd = zeroOffset >= start && zeroOffset < end ? zeroOffset : end;
+  return bytes.toString("utf8", start, actualEnd);
+}
+
+function tarOctal(bytes: Buffer, start: number, end: number): number {
+  const value = tarString(bytes, start, end).trim().replace(/\0+$/g, "");
+  return value ? Number.parseInt(value, 8) : 0;
+}
+
+function isZeroTarBlock(bytes: Buffer, offset: number): boolean {
+  for (let index = 0; index < 512; index += 1) {
+    if (bytes[offset + index] !== 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function readTarEntries(bytes: Buffer): TarEntry[] {
+  const entries: TarEntry[] = [];
+  let offset = 0;
+
+  while (offset + 512 <= bytes.length) {
+    if (isZeroTarBlock(bytes, offset)) {
+      break;
+    }
+
+    const name = tarString(bytes, offset, offset + 100);
+    const prefix = tarString(bytes, offset + 345, offset + 500);
+    const fullName = prefix ? `${prefix}/${name}` : name;
+    const size = tarOctal(bytes, offset + 124, offset + 136);
+    const typeFlag = bytes[offset + 156] ?? 0;
+    const dataOffset = offset + 512;
+
+    entries.push({
+      name: fullName,
+      size,
+      dataOffset,
+      typeFlag,
+    });
+
+    offset = dataOffset + Math.ceil(size / 512) * 512;
+  }
+
+  return entries;
+}
+
+function readTarEntryBytes(archiveBytes: Buffer, entry: TarEntry): Buffer {
+  return archiveBytes.subarray(entry.dataOffset, entry.dataOffset + entry.size);
+}
+
+export function extractCsvzallFilesFromTarGz(archiveBytes: Buffer, executableName: string): Map<string, Buffer> {
+  const tarBytes = gunzipSync(archiveBytes);
+  const entries = readTarEntries(tarBytes).filter((entry) => entry.typeFlag === 0 || entry.typeFlag === 48);
+  const normalizedExecutableName = executableName.toLowerCase();
+  const entry = entries.find((candidate) => archiveEntryBasename(candidate.name).toLowerCase() === normalizedExecutableName);
+  if (!entry) {
+    const names = entries.map((candidate) => candidate.name).join(", ");
+    throw new Error(`tar.gz archive did not contain ${executableName}.` + (names ? ` Entries: ${names}` : ""));
+  }
+
+  const executableDir = archiveEntryDirname(entry.name);
+  const files = new Map<string, Buffer>();
+  for (const candidate of entries) {
+    const basename = archiveEntryBasename(candidate.name);
+    if (!basename || archiveEntryDirname(candidate.name) !== executableDir) {
+      continue;
+    }
+    files.set(basename, readTarEntryBytes(tarBytes, candidate));
+  }
+
+  if (!files.has(executableName)) {
+    files.set(executableName, readTarEntryBytes(tarBytes, entry));
+  }
+  return files;
+}
+
+export function extractCsvzallFilesFromArchive(
+  archiveBytes: Buffer,
+  assetName: string,
+  executableName: string,
+): Map<string, Buffer> {
+  if (isZipAssetName(assetName)) {
+    return extractCsvzallFilesFromZip(archiveBytes, executableName);
+  }
+  if (isTarGzAssetName(assetName)) {
+    return extractCsvzallFilesFromTarGz(archiveBytes, executableName);
+  }
+  return new Map([[executableName, archiveBytes]]);
 }
 
 function releaseTagName(release: Release): string {
@@ -417,18 +558,19 @@ export async function installCsvzallBinary({
   const tagName = releaseTagName(release);
   const installDir = join(pluginDir, "csvzall-bin", sanitizePathSegment(tagName));
   const executablePath = join(installDir, target.executableName);
-  const tempPath = `${executablePath}.download`;
-  const executableBytes = isZipAssetName(binaryAsset.name) ?
-    extractCsvzallExecutableFromZip(downloadedBytes, target.executableName) :
-    downloadedBytes;
+  const filesToInstall = extractCsvzallFilesFromArchive(downloadedBytes, binaryAsset.name, target.executableName);
 
   await mkdir(installDir, { recursive: true });
-  await writeFile(tempPath, executableBytes);
-  if (platform !== "win32") {
-    await chmod(tempPath, 0o755);
+  for (const [fileName, fileBytes] of filesToInstall) {
+    const destinationPath = join(installDir, fileName);
+    const tempPath = `${destinationPath}.download`;
+    await writeFile(tempPath, fileBytes);
+    if (platform !== "win32" && fileName === target.executableName) {
+      await chmod(tempPath, 0o755);
+    }
+    await rm(destinationPath, { force: true });
+    await rename(tempPath, destinationPath);
   }
-  await rm(executablePath, { force: true });
-  await rename(tempPath, executablePath);
 
   return {
     executablePath,
@@ -436,6 +578,6 @@ export async function installCsvzallBinary({
     checksumAssetName,
     tagName,
     sha256: actualSha256,
-    installedFromArchive: isZipAssetName(binaryAsset.name),
+    installedFromArchive: isSupportedArchiveAssetName(binaryAsset.name),
   };
 }

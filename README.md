@@ -8,7 +8,7 @@ Open, edit, create, and chart CSV files directly inside Obsidian.
 This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) command line application, which can be downloaded through the plugin via GitHub Releases.
 
 On phones and tablets, install
-[`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile).
+[`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile).
 
 If csvzall saves you time, please star this repository. It helps other Obsidian
 users find the plugin and helps me gauge demand for continued development.
@@ -31,7 +31,7 @@ users find the plugin and helps me gauge demand for continued development.
   settings tab, or from the missing-binary screen when opening a CSV.
 
 For mobile creating, viewing, and editing, install the generated
-[`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
+[`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile)
 plugin instead. The mobile plugin uses the bundled WASM viewer and does not
 install or run the desktop helper binary.
 
@@ -47,7 +47,7 @@ charting run through the local helper process on your machine.
 ## Limitations
 
 - This package is desktop-only. Use
-  [`csvzall Mobile`](https://github.com/vincentlaucsb/obsidian-csvzall-mobile)
+  [`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile)
   for mobile CSV creating, viewing, and editing.
 - Desktop CSV viewing and editing require a local filesystem vault so the
   plugin can launch the local `csvzall` helper process against real file paths.

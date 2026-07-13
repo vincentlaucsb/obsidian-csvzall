@@ -1,7 +1,9 @@
 import { Notice, Platform } from "obsidian";
+import { getLatestCsvzallReleaseInfo, installCsvzallBinary } from "../installer.js";
 import type { EventLog } from "../logging/EventLog.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
 import type { CsvzallPluginSettings } from "../settings/settings.js";
+import { isManagedCsvzallCurrent } from "./managedInstall.js";
 
 export class InstallerService {
   constructor(
@@ -20,7 +22,6 @@ export class InstallerService {
     }
 
     try {
-      const { getLatestCsvzallReleaseInfo, installCsvzallBinary } = await import("../installer.js");
       const pluginDir = this.filesystem.getPluginDataDir();
       if (!pluginDir) {
         throw new Error("Could not resolve the plugin data directory.");
@@ -30,7 +31,7 @@ export class InstallerService {
       if (currentVersion) {
         const latest = await getLatestCsvzallReleaseInfo();
         this.getSettings().csvzallLastUpdateCheckAt = checkedAt;
-        if (latest.tagName === currentVersion) {
+        if (isManagedCsvzallCurrent(this.getSettings(), latest)) {
           await this.saveSettings();
           new Notice(`csvzall ${currentVersion} is up to date.`);
           await this.eventLog.record(
@@ -46,6 +47,7 @@ export class InstallerService {
       });
       this.getSettings().csvzallPath = result.executablePath;
       this.getSettings().installedCsvzallVersion = result.tagName;
+      this.getSettings().installedCsvzallAssetName = result.assetName;
       this.getSettings().csvzallLastUpdateCheckAt = checkedAt;
       await this.saveSettings();
       new Notice(`csvzall ${result.tagName} installed.`);
