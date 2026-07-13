@@ -20,6 +20,8 @@ import {
   selectCsvzallReleaseAsset,
   sha256Hex,
 } from "../src/installer.js";
+import { isManagedCsvzallCurrent } from "../src/installer/managedInstall.js";
+import { DEFAULT_SETTINGS, normalizeSettings } from "../src/settings/settings.js";
 import {
   chartConfigRoot,
   chartRunKey,
@@ -219,6 +221,7 @@ test("formatProcessFailure summarizes empty CSV viewer errors", () => {
 
 test("built plugin launches csvzall view in edit mode", () => {
   const bundle = readFileSync("main.js", "utf8");
+  const installerServiceSource = readFileSync("src/installer/InstallerService.ts", "utf8");
   assert.match(bundle, /"--edit"/);
   assert.match(bundle, /"--startup-json"/);
   assert.match(bundle, /Check for updates/);
@@ -242,8 +245,44 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /panel-left/);
   assert.match(bundle, /viewport-resized/);
   assert.doesNotMatch(bundle, /import\(["'](?:child_process|path)["']\)/);
+  assert.doesNotMatch(installerServiceSource, /import\(/);
   assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
   assert.doesNotMatch(bundle, /addEventListener\("load"/);
+});
+
+test("settings normalize missing managed csvzall asset name", () => {
+  const settings = normalizeSettings({
+    installedCsvzallVersion: "0.3.0",
+  });
+
+  assert.equal(settings.installedCsvzallVersion, "0.3.0");
+  assert.equal(settings.installedCsvzallAssetName, "");
+});
+
+test("managed csvzall install is current only when version and asset match", () => {
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    installedCsvzallVersion: "0.3.0",
+    installedCsvzallAssetName: "csvzall-0.3.0-windows-x64.zip",
+  };
+  const latest = {
+    tagName: "0.3.0",
+    assetName: "csvzall-0.3.0-windows-x64.zip",
+  };
+
+  assert.equal(isManagedCsvzallCurrent(settings, latest), true);
+  assert.equal(isManagedCsvzallCurrent({
+    ...settings,
+    installedCsvzallAssetName: "",
+  }, latest), false);
+  assert.equal(isManagedCsvzallCurrent(settings, {
+    ...latest,
+    assetName: "csvzall-0.3.0-obsidian-windows-x64.zip",
+  }), false);
+  assert.equal(isManagedCsvzallCurrent({
+    ...settings,
+    installedCsvzallVersion: "0.2.2",
+  }, latest), false);
 });
 
 test("installer selects the matching desktop binary asset", () => {
