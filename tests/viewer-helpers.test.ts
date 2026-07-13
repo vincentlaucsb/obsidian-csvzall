@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 
 import {
   csvzallDirtyStateFromMessageEvent,
@@ -37,46 +38,95 @@ function afterTest(t: unknown, callback: () => unknown): void {
   (t as TestContextWithAfter).after(callback);
 }
 
-function createStoredZip(entryName: string, entryBytes: Buffer): Buffer {
-  const nameBytes = Buffer.from(entryName, "utf8");
-  const localHeader = Buffer.alloc(30);
-  localHeader.writeUInt32LE(0x04034b50, 0);
-  localHeader.writeUInt16LE(20, 4);
-  localHeader.writeUInt16LE(0, 6);
-  localHeader.writeUInt16LE(0, 8);
-  localHeader.writeUInt32LE(0, 14);
-  localHeader.writeUInt32LE(entryBytes.length, 18);
-  localHeader.writeUInt32LE(entryBytes.length, 22);
-  localHeader.writeUInt16LE(nameBytes.length, 26);
+function createStoredZip(
+  entryNameOrEntries: string | Array<{ name: string; bytes: Buffer }>,
+  entryBytes?: Buffer,
+): Buffer {
+  const entries = typeof entryNameOrEntries === "string" ?
+    [{ name: entryNameOrEntries, bytes: entryBytes ?? Buffer.alloc(0) }] :
+    entryNameOrEntries;
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
 
-  const centralDirectory = Buffer.alloc(46);
-  centralDirectory.writeUInt32LE(0x02014b50, 0);
-  centralDirectory.writeUInt16LE(20, 4);
-  centralDirectory.writeUInt16LE(20, 6);
-  centralDirectory.writeUInt16LE(0, 8);
-  centralDirectory.writeUInt16LE(0, 10);
-  centralDirectory.writeUInt32LE(0, 16);
-  centralDirectory.writeUInt32LE(entryBytes.length, 20);
-  centralDirectory.writeUInt32LE(entryBytes.length, 24);
-  centralDirectory.writeUInt16LE(nameBytes.length, 28);
+  for (const entry of entries) {
+    const nameBytes = Buffer.from(entry.name, "utf8");
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt32LE(0, 14);
+    localHeader.writeUInt32LE(entry.bytes.length, 18);
+    localHeader.writeUInt32LE(entry.bytes.length, 22);
+    localHeader.writeUInt16LE(nameBytes.length, 26);
 
-  const centralDirectoryOffset = localHeader.length + nameBytes.length + entryBytes.length;
-  const centralDirectorySize = centralDirectory.length + nameBytes.length;
+    const centralDirectory = Buffer.alloc(46);
+    centralDirectory.writeUInt32LE(0x02014b50, 0);
+    centralDirectory.writeUInt16LE(20, 4);
+    centralDirectory.writeUInt16LE(20, 6);
+    centralDirectory.writeUInt16LE(0, 8);
+    centralDirectory.writeUInt16LE(0, 10);
+    centralDirectory.writeUInt32LE(0, 16);
+    centralDirectory.writeUInt32LE(entry.bytes.length, 20);
+    centralDirectory.writeUInt32LE(entry.bytes.length, 24);
+    centralDirectory.writeUInt16LE(nameBytes.length, 28);
+    centralDirectory.writeUInt32LE(offset, 42);
+
+    localParts.push(localHeader, nameBytes, entry.bytes);
+    centralParts.push(centralDirectory, nameBytes);
+    offset += localHeader.length + nameBytes.length + entry.bytes.length;
+  }
+
+  const centralDirectoryOffset = offset;
+  const centralDirectorySize = centralParts.reduce((size, part) => size + part.length, 0);
   const endOfCentralDirectory = Buffer.alloc(22);
   endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
-  endOfCentralDirectory.writeUInt16LE(1, 8);
-  endOfCentralDirectory.writeUInt16LE(1, 10);
+  endOfCentralDirectory.writeUInt16LE(entries.length, 8);
+  endOfCentralDirectory.writeUInt16LE(entries.length, 10);
   endOfCentralDirectory.writeUInt32LE(centralDirectorySize, 12);
   endOfCentralDirectory.writeUInt32LE(centralDirectoryOffset, 16);
 
   return Buffer.concat([
-    localHeader,
-    nameBytes,
-    entryBytes,
-    centralDirectory,
-    nameBytes,
+    ...localParts,
+    ...centralParts,
     endOfCentralDirectory,
   ]);
+}
+
+function writeTarString(header: Buffer, value: string, start: number, length: number): void {
+  header.write(value.slice(0, length), start, length, "utf8");
+}
+
+function writeTarOctal(header: Buffer, value: number, start: number, length: number): void {
+  const text = value.toString(8).padStart(length - 1, "0").slice(-(length - 1));
+  header.write(`${text}\0`, start, length, "ascii");
+}
+
+function createTarGz(entries: Array<{ name: string; bytes: Buffer }>): Buffer {
+  const parts: Buffer[] = [];
+  for (const entry of entries) {
+    const header = Buffer.alloc(512);
+    writeTarString(header, entry.name, 0, 100);
+    writeTarOctal(header, 0o755, 100, 8);
+    writeTarOctal(header, 0, 108, 8);
+    writeTarOctal(header, 0, 116, 8);
+    writeTarOctal(header, entry.bytes.length, 124, 12);
+    writeTarOctal(header, 0, 136, 12);
+    header.fill(0x20, 148, 156);
+    header.write("0", 156, 1, "ascii");
+    writeTarString(header, "ustar", 257, 6);
+    writeTarString(header, "00", 263, 2);
+
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    const checksumText = checksum.toString(8).padStart(6, "0");
+    header.write(`${checksumText}\0 `, 148, 8, "ascii");
+
+    const padding = Buffer.alloc((512 - (entry.bytes.length % 512)) % 512);
+    parts.push(header, entry.bytes, padding);
+  }
+
+  return gzipSync(Buffer.concat([...parts, Buffer.alloc(1024)]));
 }
 
 test("isAllowedViewerUrl requires tokenized localhost URLs", () => {
@@ -210,6 +260,19 @@ test("installer selects the matching desktop binary asset", () => {
   assert.equal(asset.name, "csvzall-windows-x64.zip");
 });
 
+test("installer prefers Obsidian-specific csvzall assets when available", () => {
+  const release = {
+    assets: [
+      { name: "csvzall-windows-x64.exe", browser_download_url: "https://example.test/win-exe" },
+      { name: "csvzall-windows-x64.zip", browser_download_url: "https://example.test/win-zip" },
+      { name: "csvzall-obsidian-windows-x64.zip", browser_download_url: "https://example.test/obsidian" },
+    ],
+  };
+
+  const asset = selectCsvzallReleaseAsset(release, csvzallInstallTarget("win32", "x64"));
+  assert.equal(asset.name, "csvzall-obsidian-windows-x64.zip");
+});
+
 test("installer reads latest release info without downloading the binary", async () => {
   const release = {
     tag_name: "v1.2.3",
@@ -288,7 +351,12 @@ test("installer verifies and stores csvzall under plugin-managed data", async (t
 
 test("installer extracts a verified zip release asset before storing csvzall", async (t) => {
   const binary = Buffer.from("fake zipped csvzall binary");
-  const archive = createStoredZip("csvzall/csvzall.exe", binary);
+  const dll = Buffer.from("fake runtime dll");
+  const archive = createStoredZip([
+    { name: "csvzall/csvzall.exe", bytes: binary },
+    { name: "csvzall/libwinpthread-1.dll", bytes: dll },
+    { name: "csvzall/nested/ignored.dll", bytes: Buffer.from("nested") },
+  ]);
   const hash = sha256Hex(archive);
   const release = {
     tag_name: "v1.2.4",
@@ -302,7 +370,7 @@ test("installer extracts a verified zip release asset before storing csvzall", a
   };
   const { mkdtemp, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
+  const { dirname, join } = await import("node:path");
   const dir = await mkdtemp(join(tmpdir(), "obsidian-csvzall-test-"));
   afterTest(t, () => rm(dir, { recursive: true, force: true }));
 
@@ -322,6 +390,54 @@ test("installer extracts a verified zip release asset before storing csvzall", a
   assert.equal(result.installedFromArchive, true);
   assert.equal(result.sha256, hash);
   assert.equal(await readFile(result.executablePath, "utf8"), "fake zipped csvzall binary");
+  assert.equal(await readFile(join(dirname(result.executablePath), "libwinpthread-1.dll"), "utf8"), "fake runtime dll");
+});
+
+test("installer extracts a verified tar.gz release asset before storing csvzall", async (t) => {
+  const binary = Buffer.from("fake tarred csvzall binary");
+  const sharedObject = Buffer.from("fake runtime so");
+  const dylib = Buffer.from("fake runtime dylib");
+  const archive = createTarGz([
+    { name: "csvzall/csvzall", bytes: binary },
+    { name: "csvzall/libcsvzall-runtime.so", bytes: sharedObject },
+    { name: "csvzall/libcsvzall-runtime.dylib", bytes: dylib },
+    { name: "csvzall/nested/ignored.so", bytes: Buffer.from("nested") },
+  ]);
+  const hash = sha256Hex(archive);
+  const release = {
+    tag_name: "v1.2.5",
+    assets: [
+      {
+        name: "csvzall-linux-x64.tar.gz",
+        browser_download_url: "https://example.test/csvzall.tar.gz",
+        digest: `sha256:${hash}`,
+      },
+    ],
+  };
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { dirname, join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "obsidian-csvzall-test-"));
+  afterTest(t, () => rm(dir, { recursive: true, force: true }));
+
+  const result = await installCsvzallBinary({
+    pluginDir: dir,
+    platform: "linux",
+    arch: "x64",
+    fetchBuffer: async (url) => {
+      if (url.endsWith("/latest")) {
+        return Buffer.from(JSON.stringify(release));
+      }
+      return archive;
+    },
+  });
+
+  assert.equal(result.assetName, "csvzall-linux-x64.tar.gz");
+  assert.equal(result.installedFromArchive, true);
+  assert.equal(result.sha256, hash);
+  assert.equal(await readFile(result.executablePath, "utf8"), "fake tarred csvzall binary");
+  assert.equal(await readFile(join(dirname(result.executablePath), "libcsvzall-runtime.so"), "utf8"), "fake runtime so");
+  assert.equal(await readFile(join(dirname(result.executablePath), "libcsvzall-runtime.dylib"), "utf8"), "fake runtime dylib");
 });
 
 test("installer verifies with a release checksum asset when no digest is present", async (t) => {
