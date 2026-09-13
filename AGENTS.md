@@ -54,6 +54,7 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - Settings tabs: keep general settings at the top without a heading. Do not use top-level headings like `General`, `Settings`, or the plugin name. If a settings section heading is needed, use `new Setting(containerEl).setName(...).setHeading()` and avoid the word `settings` in the heading.
 - UI text should use sentence case. Do not repeat the plugin name in command names; Obsidian already shows the plugin name next to commands.
 - Keep `manifest.json` `minAppVersion` at the lowest Obsidian version required by the APIs actually used.
+- When adopting a newer Obsidian API, raise `manifest.json` `minAppVersion` and the current release entry in `versions.json` to at least the API's introduction version in the same change. Runtime guards or feature detection are not substitutes for updating this metadata. For mobile APIs, update `mobile-src/manifest.json` instead. Keep the official `obsidianmd/no-unsupported-api` lint rule enabled for each distribution against its own manifest.
 - If Node.js or Electron APIs are used, keep `isDesktopOnly` set to `true`.
 
 ## Version Locations

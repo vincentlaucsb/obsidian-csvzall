@@ -1,5 +1,5 @@
-import { Platform, PluginSettingTab, Setting } from "obsidian";
-import type { Plugin, SettingDefinitionRender } from "obsidian";
+import { Platform, PluginSettingTab } from "obsidian";
+import type { Plugin, Setting, SettingDefinitionRender } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { InstallerService } from "../installer/InstallerService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
@@ -30,25 +30,11 @@ export class CsvzallSettingTab extends PluginSettingTab {
   }
 
   display(): void {
-    this.renderSettings();
+    this.update();
   }
 
   private refreshSettings(): void {
-    if (typeof this.update === "function") {
-      this.update();
-    } else {
-      this.renderSettings();
-    }
-  }
-
-  // Older hosts use the same row definitions as the searchable settings UI.
-  private renderSettings(): void {
-    this.containerEl.empty();
-    for (const definition of this.getSettingDefinitions()) {
-      const setting = new Setting(this.containerEl).setName(definition.name);
-      if (definition.desc) setting.setDesc(definition.desc);
-      definition.render(setting);
-    }
+    this.update();
   }
 
   getSettingDefinitions(): Array<Omit<SettingDefinitionRender, "render"> & { render: (setting: Setting) => void }> {

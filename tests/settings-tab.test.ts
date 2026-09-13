@@ -38,9 +38,9 @@ class Row extends Element {
   addButton(callback: (control: Control) => void) { return this.addText(callback); }
 }
 
-async function loadTab(modern: boolean) {
+async function loadTab() {
   class BaseTab { containerEl = new Element(); updates = 0; }
-  if (modern) Object.assign(BaseTab.prototype, {
+  Object.assign(BaseTab.prototype, {
     update(this: any) {
       this.updates++;
       this.containerEl.empty();
@@ -60,9 +60,9 @@ async function loadTab(modern: boolean) {
   return module.exports.CsvzallSettingTab;
 }
 
-for (const modern of [false, true]) {
-  test(`settings ${modern ? "declarative" : "legacy"} UI persists controls and refreshes install/log actions`, async () => {
-    const Tab = await loadTab(modern);
+for (const useDisplay of [false, true]) {
+  test(`settings ${useDisplay ? "display" : "declarative"} entry persists controls and refreshes install/log actions`, async () => {
+    const Tab = await loadTab();
     const settings = { ...DEFAULT_SETTINGS, eventLog: [{ level: "error" as const,
       timestamp: "2026-09-13T00:00:00Z", message: "Failed", detail: "Details" }],
       installedCsvzallVersion: "1.0", installedCsvzallAssetName: "binary.zip", csvzallLastUpdateCheckAt: "today" };
@@ -85,7 +85,7 @@ for (const modern of [false, true]) {
     assert.equal(tab.containerEl.children.length, 0, "indexing must not render or perform actions");
     assert.equal(installs + saves, 0);
     assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["csvzall path", "csvzall updates", "Open inside Obsidian", "Startup timeout", "Report a bug", "Log", "Chart and error log"]);
-    if (modern) { tab.display = () => { throw new Error("legacy display must be skipped"); }; tab.update(); }
+    if (!useDisplay) { tab.display = () => { throw new Error("legacy display must be skipped"); }; tab.update(); }
     else tab.display();
     const row = (name: string): Row => tab.containerEl.children.find((r: Row) => r.name === name);
     assert.equal(tab.containerEl.children.length, 7);
@@ -114,6 +114,6 @@ for (const modern of [false, true]) {
     assert.equal(row("Chart and error log").control!.disabled, true);
     assert.equal(row("Chart and error log").descEl.children[0]!.children[0]!.options.text, "No csvzall events yet.");
     assert.equal(tab.containerEl.children.length, 7, "refresh must not duplicate rows");
-    assert.equal(modern ? tab.updates > 1 : tab.updates === 0, true);
+    assert.ok(tab.updates > 1);
   });
 }

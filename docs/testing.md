@@ -47,6 +47,8 @@ Before publishing, check these interactions in a disposable vault:
 
 - Open a CSV and immediately switch files or close the pane while its viewer
   starts. Confirm the remaining pane shows the correct file.
+- On Obsidian 1.13.0 or later, find the plugin's controls through settings search
+  and confirm install/update and clear-log actions refresh the settings rows.
 - Disable the desktop plugin while a viewer is starting. Confirm its helper
   process exits.
 - Edit a desktop CSV, rename or move it, then restore its original path.

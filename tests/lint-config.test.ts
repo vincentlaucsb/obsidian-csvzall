@@ -52,3 +52,40 @@ test("production entry points gate bundling, including direct mobile sync builds
   assert.match(mobile, /runTypeSafetyChecks\(\);\s*generateEmbeddedAssetModule\(\);/);
   assert.match(sync, /runNodeScript\("build-mobile\.mjs"\)/);
 });
+
+test("Obsidian API lint rejects newer APIs even behind runtime guards", async () => {
+  const fixture = `import { PluginSettingTab } from "obsidian";
+    class Tab extends PluginSettingTab {
+      display(): void {
+        if (typeof this.update === "function") this.update();
+      }
+    }`;
+  for (const minAppVersion of ["1.5.0", "1.13.0"]) {
+    const eslint = new ESLint({ overrideConfig: {
+      languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },
+      rules: { "obsidianmd/no-unsupported-api": ["error", { minAppVersion }] },
+    } });
+    const results = await eslint.lintText(fixture, { filePath: "src/settings/SettingsTab.ts" });
+    const messages = results.flatMap(result => result.messages);
+    assert.equal(messages.some(message => message.fatal), false);
+    assert.equal(messages.some(message => message.ruleId === "obsidianmd/no-unsupported-api"),
+      minAppVersion === "1.5.0");
+  }
+});
+
+test("API compatibility checks use each distribution's declared minimum version", async () => {
+  const eslint = new ESLint();
+  for (const [filePath, manifestPath] of [["src/main.ts", "manifest.json"],
+    ["mobile-src/main.ts", "mobile-src/manifest.json"]]) {
+    const config = await eslint.calculateConfigForFile(filePath!);
+    const rule = config.rules["obsidianmd/no-unsupported-api"];
+    assert.equal(rule[0], 2);
+    const manifest = JSON.parse(readFileSync(manifestPath!, "utf8"));
+    if (manifestPath === "manifest.json") {
+      const versions = JSON.parse(readFileSync("versions.json", "utf8"));
+      assert.equal(versions[manifest.version], manifest.minAppVersion);
+    } else {
+      assert.equal(rule[1].minAppVersion, manifest.minAppVersion);
+    }
+  }
+});
