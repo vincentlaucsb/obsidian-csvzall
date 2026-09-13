@@ -124,6 +124,20 @@ function patchCompactStylesheet() {
 
 function patchMobileBundleBehavior() {
   let changed = false;
+  if (!text.includes('csvzall-save-ack-v1')) {
+    const patches = [
+      ['let r=!1,n=!1,l,a=Promise.resolve();', 'let r=!1,n=!1,l,a=Promise.resolve();const csvzallSaveAckId="csvzall-save-ack-v1",csvzallPendingSaves=new Map();let csvzallSaveId=0;'],
+      ['function g(p){const m=zw(p.data);m&&h(m)}', 'function g(p){if(p.source!==o)return;const d=p.data;if(d?.source===Vw&&d.type==="save-result"){const s=csvzallPendingSaves.get(d.requestId);if(s){csvzallPendingSaves.delete(d.requestId);d.success?s.resolve(!0):s.reject(new Error(d.error||"Save failed"))}return}const m=zw(d);m&&h(m)}'],
+      ['return c({type:"save-file",name:p,buffer:f,byteOffset:m.byteOffset??0,byteLength:m.byteLength??f.byteLength},[f]),!0', 'return new Promise((resolve,reject)=>{const requestId=++csvzallSaveId;csvzallPendingSaves.set(requestId,{resolve,reject});c({type:"save-file",requestId,name:p,buffer:f,byteOffset:m.byteOffset??0,byteLength:m.byteLength??f.byteLength},[f])})'],
+      ['function Bt(e,{force:t=!1}={}){', 'let csvzallEditRevision=0;function Bt(e,{force:t=!1}={}){e&&csvzallEditRevision++;'],
+      ['const e=await Se("save");if(await we.saveFile({name:Oe,result:e})){Bt(!1),Be(),B(`Saved ${Oe} to host.`);return}', 'const csvzallSaveRevision=csvzallEditRevision,e=await Se("save");if(await we.saveFile({name:Oe,result:e})){if(csvzallSaveRevision===csvzallEditRevision){Bt(!1),Be()}B(`Saved ${Oe} to host.`);return}'],
+    ];
+    if (!patches.every(([needle]) => text.includes(needle))) {
+      throw new Error("WASM viewer save acknowledgement patch failed: unsupported bundle shape");
+    }
+    for (const [needle, replacement] of patches) text = text.replace(needle, replacement);
+    changed = true;
+  }
   const legacyResizeHelper = `const csvzallObsidianViewportResizeId="csvzall-obsidian-viewport-resize-v1";function csvzallRefreshGridForViewport(){setTimeout(()=>{window.dispatchEvent(new Event("resize"));try{const e=J.getFocusedCell?J.getFocusedCell():null;e&&(Number.isInteger(e.rowIndex)&&J.ensureIndexVisible&&J.ensureIndexVisible(e.rowIndex,"middle"),e.column&&J.ensureColumnVisible&&J.ensureColumnVisible(e.column))}catch{}},60)}window.addEventListener("message",e=>{const t=e.data??{};t.source==="obsidian-csvzall"&&t.type==="viewport-resized"&&csvzallRefreshGridForViewport()});`;
   if (text.includes(legacyResizeHelper)) {
     text = text.replace(legacyResizeHelper, "");

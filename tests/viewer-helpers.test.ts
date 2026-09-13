@@ -244,7 +244,8 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /csvzall-mobile-toolbar/);
   assert.match(bundle, /panel-left/);
   assert.match(bundle, /viewport-resized/);
-  assert.doesNotMatch(bundle, /import\(["'](?:child_process|path)["']\)/);
+  assert.doesNotMatch(bundle, /import\(["'](?:node:)?(?:child_process|path|fs(?:\/promises)?|https|crypto|zlib|electron)["']\)/);
+  assert.match(bundle, /require\(["']fs\/promises["']\)/);
   assert.doesNotMatch(installerServiceSource, /import\(/);
   assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
   assert.doesNotMatch(bundle, /addEventListener\("load"/);

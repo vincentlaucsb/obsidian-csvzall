@@ -1,4 +1,4 @@
-import { FileView, Platform, setIcon, TFile, type OpenViewState, type ViewState, type WorkspaceLeaf } from "obsidian";
+import { FileView, Notice, Platform, setIcon, TFile, type OpenViewState, type ViewState, type WorkspaceLeaf } from "obsidian";
 import { csvzallDirtyStateFromMessageEvent } from "../viewerHelpers.js";
 import { UnsavedChangesModal } from "./UnsavedChangesModal.js";
 import { VIEW_TYPE_CSVZALL } from "./viewTypes.js";
@@ -19,6 +19,7 @@ type WasmViewerMessage =
     buffer: ArrayBuffer;
     byteOffset?: number;
     byteLength?: number;
+    requestId?: number;
   };
 
 type ProtectedLeaf = WorkspaceLeaf & {
@@ -61,6 +62,7 @@ function wasmViewerMessageFromData(data: unknown): WasmViewerMessage | null {
       buffer: candidate.buffer,
       byteOffset,
       byteLength,
+      requestId: typeof candidate.requestId === "number" ? candidate.requestId : undefined,
     };
   }
 
@@ -76,6 +78,10 @@ export class CsvzallTableView extends FileView {
   private dirty = false;
   private wasmFile: TFile | null = null;
   private wasmOpenPosted = false;
+  private saveQueue: Promise<void> = Promise.resolve();
+  private desktopSourcePath = "";
+  private renameWarning: HTMLElement | null = null;
+  private renderGeneration = 0;
   private frame: HTMLIFrameElement | null = null;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private mobileViewportCleanup: (() => void) | null = null;
@@ -114,6 +120,7 @@ export class CsvzallTableView extends FileView {
   }
 
   async onClose(): Promise<void> {
+    this.renderGeneration++;
     this.setDirty(false);
     this.removeMobileViewportHandler();
     this.removeMessageListener();
@@ -150,8 +157,29 @@ export class CsvzallTableView extends FileView {
   async onRename(file: TFile): Promise<void> {
     const viewerActive = Boolean(this.url || this.loading);
     this.titleText = file.basename;
+    // The vault updates this file object's path; host saves already use that object.
+    if (viewerActive && this.wasmFile === file) {
+      this.frame?.setAttr("title", this.titleText);
+      return;
+    }
     if (viewerActive && this.dirty) {
       this.frame?.setAttr("title", this.titleText);
+      if (!this.wasmFile && this.frame) {
+        this.renameWarning?.remove();
+        this.renameWarning = null;
+        const renamed = Boolean(this.desktopSourcePath && file.path !== this.desktopSourcePath);
+        this.frame.inert = renamed;
+        if (renamed) {
+          this.frame.blur();
+          const warning = this.containerEl.createDiv({ cls: "csvzall-view-error" });
+          this.renameWarning = warning;
+          warning.createEl("p", { text: `This CSV moved while it had unsaved edits. Editing is paused to protect the save destination. Move it back to “${this.desktopSourcePath}”, save your edits, then move it again.` });
+          warning.createEl("button", { text: "Discard edits and reopen" }).addEventListener("click", () => {
+            void this.runProtectedLeafAction(() => this.onLoadFile(file));
+          });
+          this.containerEl.prepend(warning);
+        }
+      }
       return;
     }
     if (viewerActive) {
@@ -169,6 +197,7 @@ export class CsvzallTableView extends FileView {
   }
 
   showViewer(title: string, url: string): void {
+    this.desktopSourcePath = this.file?.path ?? "";
     this.setDirty(false);
     this.titleText = title;
     this.url = url;
@@ -215,10 +244,12 @@ export class CsvzallTableView extends FileView {
   }
 
   private render(): void {
+    this.renderGeneration++;
     const { containerEl } = this;
     this.removeMobileViewportHandler();
     this.removeMessageListener();
     containerEl.empty();
+    this.renameWarning = null;
     containerEl.addClass("csvzall-view-container");
 
     if (this.missingCsvzallText) {
@@ -481,15 +512,18 @@ export class CsvzallTableView extends FileView {
     }
 
     this.wasmOpenPosted = true;
+    const file = this.wasmFile;
     try {
-      const buffer = await this.app.vault.readBinary(this.wasmFile);
+      const buffer = await this.app.vault.readBinary(file);
+      if (frame !== this.frame || file !== this.wasmFile) return;
       frame.contentWindow.postMessage({
         source: "obsidian-csvzall",
         type: "open-file",
-        name: this.wasmFile.name,
+        name: file.name,
         buffer,
       }, "*", [buffer]);
     } catch (error) {
+      if (frame !== this.frame || file !== this.wasmFile) return;
       const message = error instanceof Error ? error.message : String(error);
       this.showError(`Failed to load CSV for the WASM viewer: ${message}`);
     }
@@ -514,7 +548,10 @@ export class CsvzallTableView extends FileView {
     }
 
     if (data.type === "save-file") {
-      void this.saveWasmViewerFile(data);
+      this.setDirty(true);
+      const file = this.wasmFile;
+      const frame = this.frame;
+      this.saveQueue = this.saveQueue.then(() => this.saveWasmViewerFile(data, file, frame));
       return true;
     }
 
@@ -525,23 +562,32 @@ export class CsvzallTableView extends FileView {
     buffer?: ArrayBuffer;
     byteOffset?: number;
     byteLength?: number;
-  }): Promise<void> {
-    if (!this.wasmFile || !(data.buffer instanceof ArrayBuffer)) {
+    requestId?: number;
+  }, file: TFile | null, frame: HTMLIFrameElement | null): Promise<void> {
+    if (!file || !frame || file !== this.wasmFile || frame !== this.frame || !(data.buffer instanceof ArrayBuffer)) {
       return;
     }
 
-    const byteOffset = typeof data.byteOffset === "number" ? data.byteOffset : 0;
-    const byteLength = typeof data.byteLength === "number" ? data.byteLength : data.buffer.byteLength - byteOffset;
-    const bytes = new Uint8Array(data.buffer, byteOffset, byteLength);
-    const output = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ?
-      bytes.buffer :
-      bytes.slice().buffer;
+    const reply = (success: boolean, error?: string): void => {
+      if (frame !== this.frame || file !== this.wasmFile) return;
+      frame.contentWindow?.postMessage({source: "obsidian-csvzall", type: "save-result", requestId: data.requestId, success, error}, "*");
+    };
     try {
-      await this.app.vault.modifyBinary(this.wasmFile, output);
-      this.setDirty(false);
+      const byteOffset = typeof data.byteOffset === "number" ? data.byteOffset : 0;
+      const byteLength = typeof data.byteLength === "number" ? data.byteLength : data.buffer.byteLength - byteOffset;
+      const bytes = new Uint8Array(data.buffer, byteOffset, byteLength);
+      const output = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ?
+        bytes.buffer :
+        bytes.slice().buffer;
+      await this.app.vault.modifyBinary(file, output);
+      reply(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.showError(`Failed to save CSV from the WASM viewer: ${message}`);
+      reply(false, message);
+      if (frame === this.frame && file === this.wasmFile) {
+        this.setDirty(true);
+        new Notice(`Failed to save CSV: ${message}. Your edits are still open; retry saving.`);
+      }
     }
   }
 
@@ -564,13 +610,18 @@ export class CsvzallTableView extends FileView {
         return;
       }
       const message = this.missingCsvzallText;
+      const path = file.path;
       this.errorText = "";
       this.missingCsvzallText = "";
       this.loading = true;
       this.render();
+      const generation = this.renderGeneration;
       void this.owner.installCsvzallFromView(file, this.leaf).then((installed) => {
+        if (generation !== this.renderGeneration || this.file !== file || file.path !== path) return;
         if (!installed) {
           this.showMissingCsvzall(message);
+        } else {
+          void this.owner.openCsvInLeaf(file, this.leaf);
         }
       });
     });

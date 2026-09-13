@@ -51,6 +51,9 @@ charting run through the local helper process on your machine.
   for mobile CSV creating, viewing, and editing.
 - Desktop CSV viewing and editing require a local filesystem vault so the
   plugin can launch the local `csvzall` helper process against real file paths.
+- Save desktop edits before renaming or moving a CSV. If a file moves with
+  unsaved edits, the editor pauses until you restore its original path or
+  choose to discard the edits and reopen it.
 - In the mobile companion plugin, chart generation, SQLite queries, and helper
   binary management are not available.
 - Multi-value graphs configured through Obsidian are limited to two value

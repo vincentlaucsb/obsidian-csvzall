@@ -179,7 +179,7 @@ function assetList(release: Release): ReleaseAsset[] {
 }
 
 function hasAnyLabel(name: string, labels: string[]): boolean {
-  return labels.some((label) => name.includes(label));
+  return labels.some((label) => new RegExp(`(^|[-_.])${label}([-_.]|$)`).test(name));
 }
 
 function scoreAsset(asset: ReleaseAsset, target: InstallTarget): number {
@@ -253,9 +253,19 @@ export function selectCsvzallChecksumAsset(
     null;
 }
 
-export async function fetchUrlAsBuffer(url: string, redirectsRemaining = 5): Promise<Buffer> {
+export async function fetchUrlAsBuffer(
+  url: string,
+  redirectsRemaining = 5,
+  options: { request?: typeof get; timeoutMs?: number } = {},
+): Promise<Buffer> {
   return await new Promise((resolve, reject) => {
-    const request = get(url, {
+    let timer: ReturnType<typeof setTimeout>;
+    let followingRedirect = false;
+    const fail = (error: Error): void => {
+      clearTimeout(timer);
+      reject(error);
+    };
+    const request = (options.request ?? get)(url, {
       headers: {
         "Accept": "application/octet-stream, application/vnd.github+json",
         "User-Agent": "obsidian-csvzall",
@@ -264,26 +274,52 @@ export async function fetchUrlAsBuffer(url: string, redirectsRemaining = 5): Pro
       const statusCode = response.statusCode ?? 0;
       const location = response.headers.location;
       if (statusCode >= 300 && statusCode < 400 && location) {
-        response.resume();
+        // The redirect headers suffice; do not wait for an unused response body.
+        followingRedirect = true;
+        response.on("error", () => {});
+        response.destroy();
+        clearTimeout(timer);
         if (redirectsRemaining <= 0) {
-          reject(new Error(`Too many redirects while downloading ${url}.`));
+          fail(new Error(`Too many redirects while downloading ${url}.`));
           return;
         }
-        const nextUrl = new URL(location, url).toString();
-        fetchUrlAsBuffer(nextUrl, redirectsRemaining - 1).then(resolve, reject);
+        try {
+          const nextUrl = new URL(location, url).toString();
+          fetchUrlAsBuffer(nextUrl, redirectsRemaining - 1, options).then(resolve, fail);
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
         return;
       }
       if (statusCode < 200 || statusCode >= 300) {
-        response.resume();
-        reject(new Error(`Download failed with HTTP ${statusCode} for ${url}.`));
+        response.on("error", () => {});
+        response.destroy();
+        fail(new Error(`Download failed with HTTP ${statusCode} for ${url}.`));
         return;
       }
 
+      response.on("error", fail);
+      response.on("aborted", () => fail(new Error(`Download aborted for ${url}.`)));
+      response.on("close", () => {
+        if (!response.complete) fail(new Error(`Download closed before completion for ${url}.`));
+      });
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
-      response.on("end", () => resolve(Buffer.concat(chunks)));
+      response.on("end", () => {
+        clearTimeout(timer);
+        if (!response.complete) {
+          fail(new Error(`Incomplete download for ${url}.`));
+          return;
+        }
+        resolve(Buffer.concat(chunks));
+      });
     });
-    request.on("error", reject);
+    request.on("error", (error) => { if (!followingRedirect) fail(error); });
+    timer = setTimeout(() => {
+      const error = new Error(`Download timed out for ${url}.`);
+      fail(error);
+      request.destroy(error);
+    }, options.timeoutMs ?? 120000);
   });
 }
 

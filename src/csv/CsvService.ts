@@ -1,7 +1,7 @@
 import { Notice, Platform, TFile, TFolder, type App, type WorkspaceLeaf } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
-import type { CsvzallProcessService } from "../process/CsvzallProcessService.js";
+import { CsvzallProcessService, ViewerStartupCancelledError } from "../process/CsvzallProcessService.js";
 import type { CsvzallPluginSettings } from "../settings/settings.js";
 import { normalizeVaultPath } from "../chartAutomation.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
@@ -47,16 +47,23 @@ export class CsvService {
       return;
     }
 
+    const view = leaf.view;
+    const path = file.path;
+    const isCurrent = () => leaf.view === view && view instanceof CsvzallTableView &&
+      view.file === file && file.path === path;
+    if (!isCurrent()) return;
     try {
-      const server = await this.processService.startViewer(fullPath);
-      if (leaf.view instanceof CsvzallTableView) {
+      const server = await this.processService.startViewer(fullPath, leaf);
+      if (isCurrent() && !server.stopping && leaf.view instanceof CsvzallTableView) {
         leaf.view.showViewer(file.basename, server.url);
         this.processService.bindLeafToServer(leaf, server);
         return;
       }
       server.stopping = true;
       server.process.kill();
+      this.processService.sessions.detachHandle(server);
     } catch (error) {
+      if (error instanceof ViewerStartupCancelledError || !isCurrent()) return;
       const message = error instanceof Error ? error.message : String(error);
       if (leaf.view instanceof CsvzallTableView && isMissingExecutableError(message)) {
         leaf.view.showMissingCsvzall(message);
