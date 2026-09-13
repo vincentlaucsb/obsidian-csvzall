@@ -1,4 +1,5 @@
 import esbuild from "esbuild";
+import { runTypeSafetyChecks } from "./lint.mjs";
 import {
   copyFileSync,
   existsSync,
@@ -424,6 +425,7 @@ async function buildMobileBundle() {
   copyFileSync(resolve(repoRoot, "styles.css"), resolve(distDir, "styles.css"));
 }
 
+runTypeSafetyChecks();
 generateEmbeddedAssetModule();
 await buildMobileBundle();
 

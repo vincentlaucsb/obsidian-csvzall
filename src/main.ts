@@ -75,12 +75,8 @@ export default class CsvzallPlugin extends Plugin {
     await this.csvService.openCsvInLeaf(file, leaf);
   }
 
-  async installCsvzallFromView(file: TFile, leaf: WorkspaceLeaf): Promise<boolean> {
-    const installed = await this.installerService.installDesktopCsvzall();
-    if (installed) {
-      await this.csvService.openCsvInLeaf(file, leaf);
-    }
-    return installed;
+  async installCsvzallFromView(_file: TFile, _leaf: WorkspaceLeaf): Promise<boolean> {
+    return await this.installerService.installDesktopCsvzall();
   }
 
   openCsvzallSettings(): void {

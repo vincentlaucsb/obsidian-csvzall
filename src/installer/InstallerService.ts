@@ -1,4 +1,5 @@
 import { Notice, Platform } from "obsidian";
+import { stat } from "fs/promises";
 import { getLatestCsvzallReleaseInfo, installCsvzallBinary } from "../installer.js";
 import type { EventLog } from "../logging/EventLog.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
@@ -31,7 +32,9 @@ export class InstallerService {
       if (currentVersion) {
         const latest = await getLatestCsvzallReleaseInfo();
         this.getSettings().csvzallLastUpdateCheckAt = checkedAt;
-        if (isManagedCsvzallCurrent(this.getSettings(), latest)) {
+        const executableExists = await stat(this.getSettings().csvzallPath)
+          .then((entry) => entry.isFile(), () => false);
+        if (executableExists && isManagedCsvzallCurrent(this.getSettings(), latest)) {
           await this.saveSettings();
           new Notice(`csvzall ${currentVersion} is up to date.`);
           await this.eventLog.record(

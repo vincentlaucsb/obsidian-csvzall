@@ -1,4 +1,4 @@
-import { Notice, Platform, type App } from "obsidian";
+import { Notice, Platform, TFolder, type App } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
 import type { CsvzallProcessService } from "../process/CsvzallProcessService.js";
@@ -13,9 +13,13 @@ import {
   parseChartConfigText,
 } from "../chartAutomation.js";
 
+import { findChartConfigPaths } from "./chartConfigFiles.js";
+
 export class ChartService {
   readonly scheduler: ChartRunScheduler;
   private charts: ConfiguredChart[] = [];
+  private reloadPromise: Promise<void> | null = null;
+  private lastLoadError: string | null = null;
 
   constructor(
     private readonly app: App,
@@ -40,21 +44,31 @@ export class ChartService {
     return isChartConfigPath(normalizeVaultPath(path));
   }
 
-  async reloadChartConfig(): Promise<void> {
+  reloadChartConfig(): Promise<void> {
+    if (!this.reloadPromise) {
+      this.reloadPromise = this.loadChartConfig().finally(() => { this.reloadPromise = null; });
+    }
+    return this.reloadPromise;
+  }
+
+  private async loadChartConfig(): Promise<void> {
     try {
-      const configFiles = this.app.vault.getFiles()
-        .filter((file) => isChartConfigPath(normalizeVaultPath(file.path)))
-        .sort((left, right) => left.path.localeCompare(right.path));
+      const folders = this.app.vault.getAllLoadedFiles()
+        .filter((file) => file instanceof TFolder)
+        .map((folder) => folder.path);
+      const configPaths = await findChartConfigPaths(this.app.vault.adapter, folders);
       const charts: ConfiguredChart[] = [];
-      for (const configFile of configFiles) {
-        const configPath = normalizeVaultPath(configFile.path);
-        const text = await this.app.vault.cachedRead(configFile);
+      for (const configPath of configPaths) {
+        const text = await this.app.vault.adapter.read(configPath);
         charts.push(...parseChartConfigText(text, configPath));
       }
       this.charts = charts;
+      this.lastLoadError = null;
     } catch (error) {
       this.charts = [];
       const message = error instanceof Error ? error.message : String(error);
+      if (this.lastLoadError === message) return;
+      this.lastLoadError = message;
       new Notice(`csvzall failed to load chart config: ${message}`);
       await this.eventLog.record("error", "Failed to load chart config", message);
       console.error("csvzall failed to load chart config", error);

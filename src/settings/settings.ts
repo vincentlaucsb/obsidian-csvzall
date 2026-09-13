@@ -31,7 +31,13 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
   const candidate = data && typeof data === "object" ? data as Partial<CsvzallPluginSettings> : {};
   return {
     ...DEFAULT_SETTINGS,
-    ...candidate,
+    csvzallPath: typeof candidate.csvzallPath === "string" && candidate.csvzallPath.trim() ?
+      candidate.csvzallPath : DEFAULT_SETTINGS.csvzallPath,
+    openInObsidian: typeof candidate.openInObsidian === "boolean" ?
+      candidate.openInObsidian : DEFAULT_SETTINGS.openInObsidian,
+    startupTimeoutMs: typeof candidate.startupTimeoutMs === "number" &&
+      Number.isFinite(candidate.startupTimeoutMs) && candidate.startupTimeoutMs > 0 &&
+      candidate.startupTimeoutMs <= 2147483647 ? candidate.startupTimeoutMs : DEFAULT_SETTINGS.startupTimeoutMs,
     installedCsvzallVersion: typeof candidate.installedCsvzallVersion === "string" ?
       candidate.installedCsvzallVersion :
       DEFAULT_SETTINGS.installedCsvzallVersion,
@@ -41,6 +47,10 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
     csvzallLastUpdateCheckAt: typeof candidate.csvzallLastUpdateCheckAt === "string" ?
       candidate.csvzallLastUpdateCheckAt :
       DEFAULT_SETTINGS.csvzallLastUpdateCheckAt,
-    eventLog: Array.isArray(candidate.eventLog) ? candidate.eventLog : [],
+    eventLog: Array.isArray(candidate.eventLog) ? candidate.eventLog
+      .filter((entry): entry is CsvzallEventLogEntry => !!entry && typeof entry === "object" &&
+        typeof entry.timestamp === "string" && (entry.level === "info" || entry.level === "error") &&
+        typeof entry.message === "string" && (entry.detail === undefined || typeof entry.detail === "string"))
+      .slice(0, MAX_EVENT_LOG_ENTRIES) : [],
   };
 }

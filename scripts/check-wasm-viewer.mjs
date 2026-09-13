@@ -67,7 +67,7 @@ if (!indexBundleName) {
 const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name));
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
-for (const marker of ["obsidian-csvzall", "csvzall-wasm-viewer", "open-file", "save-file"]) {
+for (const marker of ["obsidian-csvzall", "csvzall-wasm-viewer", "open-file", "save-file", "csvzall-save-ack-v1", "save-result", "csvzallSaveRevision===csvzallEditRevision"]) {
   if (!indexBundle.includes(marker)) {
     fail(`index bundle is missing Obsidian bridge marker: ${marker}`);
   }
