@@ -16,7 +16,13 @@ void Promise.reject("not an Error");
 `;
 
 test("desktop and mobile lint reject every reported type-safety category", async () => {
-  const eslint = new ESLint();
+  const eslint = new ESLint({
+    // lintText replaces file contents in memory. CI's immutable-program
+    // optimization otherwise reuses the actual (safe) source from disk.
+    overrideConfig: {
+      languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },
+    },
+  });
   const rules = [
     "no-explicit-any", "no-unsafe-call", "no-unsafe-member-access",
     "no-unsafe-assignment", "no-unsafe-return", "no-unsafe-argument",
