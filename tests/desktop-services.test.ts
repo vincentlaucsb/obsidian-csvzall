@@ -44,6 +44,21 @@ function childProcess() {
   });
 }
 
+test("process failures reject with Error objects even for untyped event payloads", async () => {
+  for (const command of [false, true]) {
+    const child = childProcess();
+    const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);
+    const service = new CsvzallProcessService(
+      () => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }),
+      { record: async () => {} },
+    );
+    const pending = command ? service.runCommand([], ".", "test") : service.startViewer("a.csv");
+    child.emit("error", "untyped failure");
+    await assert.rejects(pending, { name: "Error", message: "untyped failure" });
+    service.unload();
+  }
+});
+
 test("adapter discovery finds root and nested hidden configs from indexed folders", async () => {
   const configs = new Set([".csvzall/charts.json", "reports/.csvzall/charts.json"]);
   const adapter = { exists: async (path: string) => configs.has(path) };

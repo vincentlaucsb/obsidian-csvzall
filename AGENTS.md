@@ -61,6 +61,7 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - `manifest.json`: Obsidian plugin version and minimum supported Obsidian app version.
 - `versions.json`: Obsidian plugin compatibility map from plugin version to minimum supported Obsidian app version.
 - `package.json`: npm package version.
+- `package.json` `engines.node`: supported Node.js versions for the lint/build toolchain.
 - `package-lock.json`: npm lockfile root package version.
 - `mobile-src/manifest.json`: generated mobile plugin version and minimum supported Obsidian app version.
 
@@ -72,3 +73,12 @@ For the generated mobile plugin, the mobile release tag and generated
 `versions.json` must agree with `mobile-src/manifest.json`.
 
 When adding any new version-bearing file, metadata field, generated manifest, or release configuration, add it to this list in the same change.
+
+## Type-safety checks
+
+`npm run lint` must type-check and lint both `src/` and `mobile-src/` with zero
+warnings. Keep it required by desktop and mobile builds so release workflows
+cannot bypass it. Do not disable the unsafe-value rules to silence unresolved
+Node or standard-library types; fix dependency/type resolution instead.
+Generated WASM data uses a checked-in declaration contract for clean-checkout
+type checking. Behavioral lint regressions live in `tests/lint-config.test.ts`.

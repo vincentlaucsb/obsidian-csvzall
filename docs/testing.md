@@ -5,6 +5,35 @@ runs the Node regression suite, then builds and validates the mobile
 distribution. CI runs the same command. Generated desktop `main.js` belongs in
 the commit; `.mobile-dist/` does not.
 
+## Type-safety gate
+
+Use Node 20.19+, 22.13+, or 24+ and install the lockfile dependencies with
+`npm ci` (including development dependencies). `npm run lint` type-checks
+desktop and mobile sources, then runs type-aware ESLint with zero warnings
+allowed. Both production build entry points invoke the same check directly,
+so `build`, `build:mobile`, and `sync:mobile-repo` cannot bypass it. The PR and
+release workflows run it through `npm test` before publishing assets.
+
+The enforced TypeScript ESLint rules are `no-unsafe-call`,
+`no-unsafe-member-access`, `no-unsafe-assignment`, `no-unsafe-return`,
+`no-unsafe-argument`, `no-redundant-type-constituents`,
+`prefer-promise-reject-errors`, and `no-explicit-any`. The regression suite
+injects invalid code for every category into both desktop and mobile lint
+contexts to verify that the gate rejects it.
+
+The lint project explicitly loads Node types and ES2018 standard library
+declarations (including `Promise.finally`). Keep dependencies available:
+unresolved declarations can cause an entire chain of Node calls to appear
+as unsafe `error` types. TypeScript compilation fails on missing declarations
+before ESLint runs. The checked-in asset declaration supplies the mobile
+generated-data contract before its implementation is built; it adds no runtime
+code and does not introduce Node APIs into the mobile bundle.
+
+The Community scorecard uses its own scan environment. A clean local lint
+result does not prove that a published scorecard has refreshed or that its
+environment resolved the same dependencies. Investigate unresolved types
+instead of disabling unsafe-value rules or adding untyped module shims.
+
 The service tests use mocked Obsidian and process boundaries to exercise
 asynchronous failures without installing a plugin into a real vault. The WASM
 tests also exercise the packaged save bridge. Asset marker checks supplement

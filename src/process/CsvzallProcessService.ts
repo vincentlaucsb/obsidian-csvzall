@@ -70,9 +70,9 @@ export class CsvzallProcessService {
       child.stderr.on("data", (chunk: Buffer) => {
         stderr += chunk.toString("utf8");
       });
-      child.on("error", (error) => {
+      child.on("error", (error: unknown) => {
         this.pending.delete(cancel);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       });
       child.on("exit", (code, signal) => {
         this.pending.delete(cancel);
@@ -168,13 +168,13 @@ export class CsvzallProcessService {
         stderr += chunk.toString("utf8");
       });
 
-      child.on("error", (error) => {
+      child.on("error", (error: unknown) => {
         if (settled) {
           return;
         }
         settled = true;
         cleanup();
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       });
 
       child.on("exit", (code, signal) => {
