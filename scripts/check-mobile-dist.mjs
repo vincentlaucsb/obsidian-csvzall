@@ -73,7 +73,7 @@ if (!tableViewSource.includes("showWasmViewer") || !tableViewSource.includes("wa
 }
 
 const bannedPatterns = [
-  /require\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\/promises|http|https|os|path|zlib)["']\)/,
+  /require\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\/promises|http|https|os|path|zlib|timers)["']\)/,
   /\bchild_process\b/,
   /\bfs\/promises\b/,
   /\bnode:/,

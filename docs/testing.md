@@ -21,6 +21,10 @@ The enforced TypeScript ESLint rules are `no-unsafe-call`,
 injects invalid code for every category into both desktop and mobile lint
 contexts to verify that the gate rejects it.
 
+Bare timer calls are also rejected. UI code uses its window's timers; the
+desktop-only installer imports Node timers explicitly so a download timeout
+does not depend on a popout window and remains testable without a DOM.
+
 The lint project explicitly loads Node types and ES2018 standard library
 declarations (including `Promise.finally`). Keep dependencies available:
 unresolved declarations can cause an entire chain of Node calls to appear

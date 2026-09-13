@@ -14,6 +14,10 @@ export default [
     },
     plugins: { "@typescript-eslint": tseslint.plugin },
     rules: {
+      "no-restricted-syntax": ["error", {
+        selector: "CallExpression[callee.type='Identifier'][callee.name=/^(setTimeout|clearTimeout|setInterval|clearInterval)$/]",
+        message: "Use window timers for UI work or explicit Node timers in desktop-only services.",
+      }],
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unsafe-call": "error",
       "@typescript-eslint/no-unsafe-member-access": "error",

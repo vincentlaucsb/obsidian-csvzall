@@ -285,7 +285,7 @@ jobs:
             throw new Error("csvzall Mobile must keep isDesktopOnly=false.");
           }
           const banned = [
-            /require\\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\\/promises|http|https|os|path|zlib)["']\\)/,
+            /require\\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\\/promises|http|https|os|path|zlib|timers)["']\\)/,
             /\\bchild_process\\b/,
             /\\bfs\\/promises\\b/,
             /\\bnode:/,
@@ -359,7 +359,7 @@ jobs:
             throw new Error("manifest.json is not a mobile csvzall manifest.");
           }
           const banned = [
-            /require\\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\\/promises|http|https|os|path|zlib)["']\\)/,
+            /require\\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\\/promises|http|https|os|path|zlib|timers)["']\\)/,
             /\\bchild_process\\b/,
             /\\bfs\\/promises\\b/,
             /\\bnode:/,

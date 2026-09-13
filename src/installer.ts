@@ -3,6 +3,8 @@ import { chmod, mkdir, rename, rm, writeFile } from "fs/promises";
 import { get } from "https";
 import { join } from "path";
 import { gunzipSync, inflateRawSync } from "zlib";
+// Downloads belong to the Node process, not the lifetime of a popout window.
+import * as nodeTimers from "timers";
 
 export const CSVZALL_RELEASE_API_URL = "https://api.github.com/repos/vincentlaucsb/csvzall/releases/latest";
 
@@ -259,10 +261,10 @@ export async function fetchUrlAsBuffer(
   options: { request?: typeof get; timeoutMs?: number } = {},
 ): Promise<Buffer> {
   return await new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof nodeTimers.setTimeout>;
     let followingRedirect = false;
     const fail = (error: Error): void => {
-      clearTimeout(timer);
+      nodeTimers.clearTimeout(timer);
       reject(error);
     };
     const request = (options.request ?? get)(url, {
@@ -278,7 +280,7 @@ export async function fetchUrlAsBuffer(
         followingRedirect = true;
         response.on("error", () => {});
         response.destroy();
-        clearTimeout(timer);
+        nodeTimers.clearTimeout(timer);
         if (redirectsRemaining <= 0) {
           fail(new Error(`Too many redirects while downloading ${url}.`));
           return;
@@ -306,7 +308,7 @@ export async function fetchUrlAsBuffer(
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
       response.on("end", () => {
-        clearTimeout(timer);
+        nodeTimers.clearTimeout(timer);
         if (!response.complete) {
           fail(new Error(`Incomplete download for ${url}.`));
           return;
@@ -315,7 +317,7 @@ export async function fetchUrlAsBuffer(
       });
     });
     request.on("error", (error) => { if (!followingRedirect) fail(error); });
-    timer = setTimeout(() => {
+    timer = nodeTimers.setTimeout(() => {
       const error = new Error(`Download timed out for ${url}.`);
       fail(error);
       request.destroy(error);

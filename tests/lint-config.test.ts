@@ -13,6 +13,8 @@ accept(unsafe);
 function result(): string { return unsafe; }
 type Union = any | string;
 void Promise.reject("not an Error");
+setTimeout(() => {}, 10);
+clearTimeout(1);
 `;
 
 test("desktop and mobile lint reject every reported type-safety category", async () => {
@@ -32,6 +34,8 @@ test("desktop and mobile lint reject every reported type-safety category", async
     const results = await eslint.lintText(unsafeFixture, { filePath });
     const messages = results.flatMap((result) => result.messages);
     assert.equal(messages.some((message) => message.fatal), false);
+    assert.ok(messages.some((message) => message.ruleId === "no-restricted-syntax" && message.severity === 2),
+      `${filePath} must reject ambiguous timer calls`);
     for (const rule of rules) {
       assert.ok(messages.some((message) => message.ruleId === `@typescript-eslint/${rule}` && message.severity === 2),
         `${filePath} must reject ${rule}`);

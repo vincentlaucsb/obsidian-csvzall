@@ -1,5 +1,5 @@
 import { Platform, PluginSettingTab, Setting } from "obsidian";
-import type { Plugin } from "obsidian";
+import type { Plugin, SettingDefinitionRender } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { InstallerService } from "../installer/InstallerService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
@@ -33,8 +33,25 @@ export class CsvzallSettingTab extends PluginSettingTab {
     this.renderSettings();
   }
 
+  private refreshSettings(): void {
+    if (typeof this.update === "function") {
+      this.update();
+    } else {
+      this.renderSettings();
+    }
+  }
+
+  // Older hosts use the same row definitions as the searchable settings UI.
   private renderSettings(): void {
-    const { containerEl } = this;
+    this.containerEl.empty();
+    for (const definition of this.getSettingDefinitions()) {
+      const setting = new Setting(this.containerEl).setName(definition.name);
+      if (definition.desc) setting.setDesc(definition.desc);
+      definition.render(setting);
+    }
+  }
+
+  getSettingDefinitions(): Array<Omit<SettingDefinitionRender, "render"> & { render: (setting: Setting) => void }> {
     const settings = this.services.getSettings();
     const hasManagedInstall = settings.installedCsvzallVersion.length > 0;
     const csvzallInstallDesc = [
@@ -47,103 +64,123 @@ export class CsvzallSettingTab extends PluginSettingTab {
           "never"
       }.`,
     ].join(" ");
-    containerEl.empty();
+    return [
+      {
+        name: "csvzall path",
+        desc: "Path to the csvzall executable. Use an absolute path if csvzall is not on PATH.",
+        render: (setting) => {
+          setting.addText((text) =>
+            text
+              .setPlaceholder("csvzall")
+              .setValue(settings.csvzallPath)
+              .onChange(async (value) => {
+                const nextPath = stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
+                const nextSettings = this.services.getSettings();
+                if (nextPath !== nextSettings.csvzallPath) {
+                  nextSettings.installedCsvzallVersion = "";
+                  nextSettings.installedCsvzallAssetName = "";
+                  nextSettings.csvzallLastUpdateCheckAt = "";
+                }
+                nextSettings.csvzallPath = nextPath;
+                await this.services.saveSettings();
+              }),
+          );
+        },
+      },
 
-    new Setting(containerEl)
-      .setName("csvzall path")
-      .setDesc("Path to the csvzall executable. Use an absolute path if csvzall is not on PATH.")
-      .addText((text) =>
-        text
-          .setPlaceholder("csvzall")
-          .setValue(settings.csvzallPath)
-          .onChange(async (value) => {
-            const nextPath = stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
-            const nextSettings = this.services.getSettings();
-            if (nextPath !== nextSettings.csvzallPath) {
-              nextSettings.installedCsvzallVersion = "";
-              nextSettings.installedCsvzallAssetName = "";
-              nextSettings.csvzallLastUpdateCheckAt = "";
-            }
-            nextSettings.csvzallPath = nextPath;
-            await this.services.saveSettings();
-          }),
-      );
+      {
+        name: hasManagedInstall ? "csvzall updates" : "Install csvzall",
+        desc: csvzallInstallDesc,
+        render: (setting) => {
+          setting.addButton((button) =>
+            button
+              .setButtonText(this.installing ?
+                (hasManagedInstall ? "Checking..." : "Installing...") :
+                (hasManagedInstall ? "Check for updates" : "Install"))
+              .setDisabled(this.installing || !Platform.isDesktopApp)
+              .onClick(async () => {
+                this.installing = true;
+                this.refreshSettings();
+                try {
+                  await this.services.installer.installDesktopCsvzall();
+                } finally {
+                  this.installing = false;
+                  this.refreshSettings();
+                }
+              }),
+          );
+        },
+      },
 
-    new Setting(containerEl)
-      .setName(hasManagedInstall ? "csvzall updates" : "Install csvzall")
-      .setDesc(csvzallInstallDesc)
-      .addButton((button) =>
-        button
-          .setButtonText(this.installing ?
-            (hasManagedInstall ? "Checking..." : "Installing...") :
-            (hasManagedInstall ? "Check for updates" : "Install"))
-          .setDisabled(this.installing || !Platform.isDesktopApp)
-          .onClick(async () => {
-            this.installing = true;
-            this.renderSettings();
-            try {
-              await this.services.installer.installDesktopCsvzall();
-            } finally {
-              this.installing = false;
-              this.renderSettings();
-            }
-          }),
-      );
+      {
+        name: "Open inside Obsidian",
+        desc: "Embed the local csvzall viewer in an Obsidian pane instead of opening a browser.",
+        render: (setting) => {
+          setting.addToggle((toggle) =>
+            toggle
+              .setValue(settings.openInObsidian)
+              .onChange(async (value) => {
+                this.services.getSettings().openInObsidian = value;
+                await this.services.saveSettings();
+              }),
+          );
+        },
+      },
 
-    new Setting(containerEl)
-      .setName("Open inside Obsidian")
-      .setDesc("Embed the local csvzall viewer in an Obsidian pane instead of opening a browser.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(settings.openInObsidian)
-          .onChange(async (value) => {
-            this.services.getSettings().openInObsidian = value;
-            await this.services.saveSettings();
-          }),
-      );
+      {
+        name: "Startup timeout",
+        desc: "Milliseconds to wait for csvzall view to print its local URL.",
+        render: (setting) => {
+          setting.addText((text) =>
+            text
+              .setPlaceholder(String(DEFAULT_SETTINGS.startupTimeoutMs))
+              .setValue(String(settings.startupTimeoutMs))
+              .onChange(async (value) => {
+                const parsed = Number.parseInt(value, 10);
+                this.services.getSettings().startupTimeoutMs =
+                  Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.startupTimeoutMs;
+                await this.services.saveSettings();
+              }),
+          );
+        },
+      },
 
-    new Setting(containerEl)
-      .setName("Startup timeout")
-      .setDesc("Milliseconds to wait for csvzall view to print its local URL.")
-      .addText((text) =>
-        text
-          .setPlaceholder(String(DEFAULT_SETTINGS.startupTimeoutMs))
-          .setValue(String(settings.startupTimeoutMs))
-          .onChange(async (value) => {
-            const parsed = Number.parseInt(value, 10);
-            this.services.getSettings().startupTimeoutMs =
-              Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.startupTimeoutMs;
-            await this.services.saveSettings();
-          }),
-      );
+      {
+        name: "Report a bug",
+        desc: "Open the csvzall for Obsidian issue tracker.",
+        render: (setting) => {
+          setting.addButton((button) =>
+            button
+              .setButtonText("Report a bug")
+              .onClick(() => {
+                window.open(BUG_REPORT_URL, "_blank", "noopener");
+              }),
+          );
+        },
+      },
 
-    new Setting(containerEl)
-      .setName("Report a bug")
-      .setDesc("Open the csvzall for Obsidian issue tracker.")
-      .addButton((button) =>
-        button
-          .setButtonText("Report a bug")
-          .onClick(() => {
-            window.open(BUG_REPORT_URL, "_blank", "noopener");
-          }),
-      );
+      { name: "Log", render: (setting) => { setting.setHeading(); } },
+      {
+        name: "Chart and error log",
+        desc: `Keeps the latest ${MAX_EVENT_LOG_ENTRIES} csvzall chart events and errors.`,
+        render: (setting) => {
+          setting.addButton((button) =>
+            button
+              .setButtonText("Clear")
+              .setDisabled(settings.eventLog.length === 0)
+              .onClick(async () => {
+                await this.services.eventLog.clear();
+                this.refreshSettings();
+              }),
+          );
+          this.renderLog(setting.descEl);
+        },
+      },
+    ];
+  }
 
-    new Setting(containerEl)
-      .setName("Log")
-      .setHeading();
-    new Setting(containerEl)
-      .setName("Chart and error log")
-      .setDesc(`Keeps the latest ${MAX_EVENT_LOG_ENTRIES} csvzall chart events and errors.`)
-      .addButton((button) =>
-        button
-          .setButtonText("Clear")
-          .setDisabled(settings.eventLog.length === 0)
-          .onClick(async () => {
-            await this.services.eventLog.clear();
-            this.renderSettings();
-          }),
-      );
-
+  private renderLog(containerEl: HTMLElement): void {
+    const settings = this.services.getSettings();
     const log = containerEl.createDiv({ cls: "csvzall-settings-log" });
     if (settings.eventLog.length === 0) {
       log.createDiv({
