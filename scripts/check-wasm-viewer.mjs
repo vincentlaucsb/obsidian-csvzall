@@ -67,6 +67,14 @@ if (!indexBundleName) {
 const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name));
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
+if (!indexBundle.includes("data-csvzall-dialog-dismiss-v1")) {
+  const dialogPath = join(assetsDir, "dialog-dismiss.mjs");
+  requireFile(dialogPath);
+  if (!indexHtml.includes('src="./assets/dialog-dismiss.mjs"') ||
+      readFileSync(dialogPath, "utf8") !== readFileSync("scripts/vendor/dialog-dismiss.mjs", "utf8")) {
+    fail("dialog dismissal module is missing from index.html or differs from the vendored source");
+  }
+}
 if (!indexBundle.includes("theme-ready")) {
   const themePath = join(assetsDir, "host-theme.mjs");
   requireFile(themePath);

@@ -28,6 +28,13 @@ not patch the minified bundle to implement the protocol. New WASM bundles that
 already contain `theme-ready` use their built-in receiver instead. Keep this
 snapshot synchronized with upstream until all packaged builds include it.
 
+`scripts/vendor/dialog-dismiss.mjs` similarly vendors the shared viewer dialog
+helper from `src/viewer/modules/dialog-dismiss.mjs`. Ordinary dialog backdrops
+cancel the dialog when a primary pointer press and click both occur outside its
+bounds. Content clicks and drags starting inside do not dismiss it. Closing uses
+the cancel/close lifecycle, so the unsaved-changes prompt resolves as Cancel.
+Progress dialogs remain controlled by the operation that opened them.
+
 The bridge transfers theme values, not Obsidian's stylesheets or font files.
 Custom themes and snippets that set these variables are supported. Arbitrary
 selectors targeting Obsidian components and document-local web fonts are not

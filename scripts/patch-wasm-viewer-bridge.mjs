@@ -14,17 +14,26 @@ if (!bundleName) {
 const bundlePath = join(assetsDir, bundleName);
 const stylesheetPath = stylesheetName ? join(assetsDir, stylesheetName) : null;
 let text = readFileSync(bundlePath, "utf8");
-// Older packaged WASM builds need the shared source receiver as a separate
-// module. New builds import it themselves; never install two listeners.
-const themeScript = '<script type="module" src="./assets/host-theme.mjs"></script>';
-let themeHtml = readFileSync(indexPath, "utf8").replace(themeScript, "").replace(/\s*<\/head>/, "\n</head>");
-if (!text.includes('theme-ready')) {
-  copyFileSync("scripts/vendor/host-theme.mjs", join(assetsDir, "host-theme.mjs"));
-  themeHtml = themeHtml.replace("</head>", `${themeScript}\n</head>`);
-} else {
-  rmSync(join(assetsDir, "host-theme.mjs"), { force: true });
+// Older WASM builds need these shared source modules separately. New builds
+// import them themselves; avoid duplicate listeners and keep patching idempotent.
+const sharedModules = [
+  { name: "host-theme.mjs", marker: "theme-ready" },
+  { name: "dialog-dismiss.mjs", marker: "data-csvzall-dialog-dismiss-v1" },
+];
+let hostHtml = readFileSync(indexPath, "utf8");
+for (const { name } of sharedModules) {
+  hostHtml = hostHtml.replace(`<script type="module" src="./assets/${name}"></script>`, "");
 }
-writeFileSync(indexPath, themeHtml);
+hostHtml = hostHtml.replace(/\s*<\/head>/, "\n</head>");
+for (const { name, marker } of sharedModules) {
+  if (!text.includes(marker)) {
+    copyFileSync(join("scripts/vendor", name), join(assetsDir, name));
+    hostHtml = hostHtml.replace("</head>", `<script type="module" src="./assets/${name}"></script>\n</head>`);
+  } else {
+    rmSync(join(assetsDir, name), { force: true });
+  }
+}
+writeFileSync(indexPath, hostHtml);
 const compactStyleId = "csvzall-obsidian-host-compact-v1";
 const mobileBehaviorId = "csvzall-obsidian-mobile-behavior-v1";
 const viewportResizeId = "csvzall-obsidian-viewport-resize-v2";

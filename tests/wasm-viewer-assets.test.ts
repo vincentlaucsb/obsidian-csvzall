@@ -32,6 +32,10 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   const indexBundleName = assets.find((name) => /^index-.*\.js$/.test(name));
   assert.equal(typeof indexBundleName, "string");
   const indexBundle = readFileSync(join(assetsDir, indexBundleName ?? ""), "utf8");
+  if (!indexBundle.includes("data-csvzall-dialog-dismiss-v1")) {
+    assert.match(indexHtml, /src="\.\/assets\/dialog-dismiss\.mjs"/);
+    assert.equal(readFileSync(join(assetsDir, "dialog-dismiss.mjs"), "utf8"), readFileSync("scripts/vendor/dialog-dismiss.mjs", "utf8"));
+  }
   if (!indexBundle.includes("theme-ready")) {
     assert.match(indexHtml, /src="\.\/assets\/host-theme\.mjs"/);
     assert.equal(readFileSync(join(assetsDir, "host-theme.mjs"), "utf8"), readFileSync("scripts/vendor/host-theme.mjs", "utf8"));
