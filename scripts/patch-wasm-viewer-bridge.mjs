@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const viewerDir = "wasm-viewer";
@@ -14,6 +14,17 @@ if (!bundleName) {
 const bundlePath = join(assetsDir, bundleName);
 const stylesheetPath = stylesheetName ? join(assetsDir, stylesheetName) : null;
 let text = readFileSync(bundlePath, "utf8");
+// Older packaged WASM builds need the shared source receiver as a separate
+// module. New builds import it themselves; never install two listeners.
+const themeScript = '<script type="module" src="./assets/host-theme.mjs"></script>';
+let themeHtml = readFileSync(indexPath, "utf8").replace(themeScript, "").replace(/\s*<\/head>/, "\n</head>");
+if (!text.includes('theme-ready')) {
+  copyFileSync("scripts/vendor/host-theme.mjs", join(assetsDir, "host-theme.mjs"));
+  themeHtml = themeHtml.replace("</head>", `${themeScript}\n</head>`);
+} else {
+  rmSync(join(assetsDir, "host-theme.mjs"), { force: true });
+}
+writeFileSync(indexPath, themeHtml);
 const compactStyleId = "csvzall-obsidian-host-compact-v1";
 const mobileBehaviorId = "csvzall-obsidian-mobile-behavior-v1";
 const viewportResizeId = "csvzall-obsidian-viewport-resize-v2";

@@ -67,6 +67,14 @@ if (!indexBundleName) {
 const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name));
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
+if (!indexBundle.includes("theme-ready")) {
+  const themePath = join(assetsDir, "host-theme.mjs");
+  requireFile(themePath);
+  if (!indexHtml.includes('src="./assets/host-theme.mjs"') ||
+      readFileSync(themePath, "utf8") !== readFileSync("scripts/vendor/host-theme.mjs", "utf8")) {
+    fail("host theme receiver is missing from index.html or differs from the vendored source");
+  }
+}
 for (const marker of ["obsidian-csvzall", "csvzall-wasm-viewer", "open-file", "save-file", "csvzall-save-ack-v1", "save-result", "csvzallSaveRevision===csvzallEditRevision"]) {
   if (!indexBundle.includes(marker)) {
     fail(`index bundle is missing Obsidian bridge marker: ${marker}`);
