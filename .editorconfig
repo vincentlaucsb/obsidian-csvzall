@@ -1,0 +1,8 @@
+root = true
+
+[*]
+end_of_line = lf
+
+# Imported build output must retain its exact bytes.
+[wasm-viewer/assets/*.js]
+end_of_line = unset

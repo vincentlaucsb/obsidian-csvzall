@@ -20,6 +20,12 @@
 
 ## Maintenance Rule
 
+Use LF line endings for repository text, enforced by `.gitattributes`,
+`.editorconfig`, and the required lint/build gate. Run `npm run fix:line-endings`
+to normalize existing working-tree files, then review the diff. Files marked
+`-text` (including imported viewer JavaScript) preserve exact upstream bytes;
+do not normalize them or change their recorded digest to silence a failure.
+
 Keep new behavior in the narrowest module that owns the concern. Do not add process, installer, chart, settings UI, or CSV workflow logic directly to `src/main.ts`; add or extend a focused service/module and wire it from `main.ts` instead.
 
 `README.md` is consumer-facing copy for the Obsidian Community plugin page. Do

@@ -7,6 +7,13 @@ the commit; `.mobile-dist/` does not.
 
 ## Type-safety gate
 
+The lint/build gate also checks tracked and non-ignored new text files for LF
+line endings. `.gitattributes` controls Git checkouts; `.editorconfig` guides
+editors. Run `npm run check:line-endings` independently, or
+`npm run fix:line-endings` to normalize existing local files and review the diff.
+Binary and explicitly byte-preserved imported assets are excluded. CI runs the
+same gate through `npm test`; no local Git hook installation is required.
+
 Use Node 20.19+, 22.13+, or 24+ and install the lockfile dependencies with
 `npm ci` (including development dependencies). `npm run lint` type-checks
 desktop and mobile sources, then runs type-aware ESLint with zero warnings

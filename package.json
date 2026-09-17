@@ -9,6 +9,8 @@
     "url": "https://github.com/vincentlaucsb/obsidian-csvzall.git"
   },
   "scripts": {
+    "check:line-endings": "node scripts/check-line-endings.mjs",
+    "fix:line-endings": "node scripts/check-line-endings.mjs --fix",
     "dev": "node esbuild.config.mjs",
     "build": "npm run check:wasm-viewer && node esbuild.config.mjs production",
     "build:mobile": "node scripts/build-mobile.mjs",
