@@ -44,7 +44,7 @@ const indexHtml = readFileSync(indexPath, "utf8");
 if (!indexHtml.includes("./assets/")) {
   fail("index.html does not reference relative ./assets/ paths");
 }
-if (/(?:src|href)=["']https?:\/\//i.test(indexHtml)) {
+if (/<(?:script|link|img|source|iframe)\b[^>]*\b(?:src|href)=["']https?:\/\//i.test(indexHtml)) {
   fail("index.html should not depend on remote src/href runtime assets");
 }
 

@@ -20,7 +20,7 @@ const sharedModules = [
   { name: "host-theme.mjs", marker: "theme-ready" },
   { name: "dialog-dismiss.mjs", marker: "data-csvzall-dialog-dismiss-v1" },
 ];
-let hostHtml = readFileSync(indexPath, "utf8");
+let hostHtml = readFileSync(indexPath, "utf8").replace(/\r\n?/g, "\n");
 for (const { name } of sharedModules) {
   hostHtml = hostHtml.replace(`<script type="module" src="./assets/${name}"></script>`, "");
 }
@@ -144,13 +144,15 @@ function patchCompactStylesheet() {
 
 function patchMobileBundleBehavior() {
   let changed = false;
+  // These checked fragments target the bundled viewer rebuilt with Popright
+  // 0.1.2. Keep the bundle-level save and editing tests in sync when rebuilding.
   if (!text.includes('csvzall-save-ack-v1')) {
     const patches = [
       ['let r=!1,n=!1,l,a=Promise.resolve();', 'let r=!1,n=!1,l,a=Promise.resolve();const csvzallSaveAckId="csvzall-save-ack-v1",csvzallPendingSaves=new Map();let csvzallSaveId=0;'],
-      ['function g(p){const m=zw(p.data);m&&h(m)}', 'function g(p){if(p.source!==o)return;const d=p.data;if(d?.source===Vw&&d.type==="save-result"){const s=csvzallPendingSaves.get(d.requestId);if(s){csvzallPendingSaves.delete(d.requestId);d.success?s.resolve(!0):s.reject(new Error(d.error||"Save failed"))}return}const m=zw(d);m&&h(m)}'],
+      ['function g(p){const m=oS(p.data);m&&u(m)}', 'function g(p){if(p.source!==o)return;const d=p.data;if(d?.source===tS&&d.type==="save-result"){const s=csvzallPendingSaves.get(d.requestId);if(s){csvzallPendingSaves.delete(d.requestId);d.success?s.resolve(!0):s.reject(new Error(d.error||"Save failed"))}return}const m=oS(d);m&&u(m)}'],
       ['return c({type:"save-file",name:p,buffer:f,byteOffset:m.byteOffset??0,byteLength:m.byteLength??f.byteLength},[f]),!0', 'return new Promise((resolve,reject)=>{const requestId=++csvzallSaveId;csvzallPendingSaves.set(requestId,{resolve,reject});c({type:"save-file",requestId,name:p,buffer:f,byteOffset:m.byteOffset??0,byteLength:m.byteLength??f.byteLength},[f])})'],
-      ['function Bt(e,{force:t=!1}={}){', 'let csvzallEditRevision=0;function Bt(e,{force:t=!1}={}){e&&csvzallEditRevision++;'],
-      ['const e=await Se("save");if(await we.saveFile({name:Oe,result:e})){Bt(!1),Be(),B(`Saved ${Oe} to host.`);return}', 'const csvzallSaveRevision=csvzallEditRevision,e=await Se("save");if(await we.saveFile({name:Oe,result:e})){if(csvzallSaveRevision===csvzallEditRevision){Bt(!1),Be()}B(`Saved ${Oe} to host.`);return}'],
+      ['function Wt(e,{force:t=!1}={}){', 'let csvzallEditRevision=0;function Wt(e,{force:t=!1}={}){e&&csvzallEditRevision++;'],
+      ['const e=await Se("save");if(await he.saveFile({name:xe,result:e})){Wt(!1),Be(),H(`Saved ${xe} to host.`);return}', 'const csvzallSaveRevision=csvzallEditRevision,e=await Se("save");if(await he.saveFile({name:xe,result:e})){if(csvzallSaveRevision===csvzallEditRevision){Wt(!1),Be()}H(`Saved ${xe} to host.`);return}'],
     ];
     if (!patches.every(([needle]) => text.includes(needle))) {
       throw new Error("WASM viewer save acknowledgement patch failed: unsupported bundle shape");
@@ -169,9 +171,9 @@ function patchMobileBundleBehavior() {
     text = text.replace(focusShimNeedle, "");
     changed = true;
   }
-  const hostModeViewportNeedle = "function tS(e){e&&csvzallInstallKeyboardInsets(),document.body.toggleAttribute";
+  const hostModeViewportNeedle = "function RS(e){e&&csvzallInstallKeyboardInsets(),document.body.toggleAttribute";
   if (text.includes(hostModeViewportNeedle)) {
-    text = text.replace(hostModeViewportNeedle, "function tS(e){document.body.toggleAttribute");
+    text = text.replace(hostModeViewportNeedle, "function RS(e){document.body.toggleAttribute");
     changed = true;
   }
 
@@ -184,8 +186,8 @@ function patchMobileBundleBehavior() {
 
   if (!text.includes(mobileBehaviorId)) {
     const keyboardHelper = `const csvzallObsidianMobileBehaviorId="${mobileBehaviorId}";let csvzallKeyboardInsetInstalled=!1;function csvzallInstallKeyboardInsets(){if(csvzallKeyboardInsetInstalled)return;csvzallKeyboardInsetInstalled=!0;const e=window.visualViewport,t=()=>{const i=e?e.height:window.innerHeight;document.documentElement.style.setProperty("--csvzall-visual-height",Math.max(240,Math.floor(i))+"px")};e&&(e.addEventListener("resize",t),e.addEventListener("scroll",t)),window.addEventListener("resize",t),t()}`;
-    const hostModeNeedle = 'function tS(e){document.body.toggleAttribute("data-host-mode",e),';
-    const hostModePatch = `${keyboardHelper}function tS(e){e&&csvzallInstallKeyboardInsets(),document.body.toggleAttribute("data-host-mode",e),`;
+    const hostModeNeedle = 'function RS(e){document.body.toggleAttribute("data-host-mode",e),';
+    const hostModePatch = `${keyboardHelper}${hostModeNeedle}`;
     if (text.includes(hostModeNeedle)) {
       text = text.replace(hostModeNeedle, hostModePatch);
       changed = true;
@@ -195,8 +197,8 @@ function patchMobileBundleBehavior() {
   if (!text.includes(viewportResizeId)) {
     const resizeHelper = `const csvzallObsidianViewportResizeId="${viewportResizeId}";function csvzallRefreshGridForViewport(){const e=()=>{window.dispatchEvent(new Event("resize"));try{const t=typeof csvzallActiveEditCell!="undefined"&&csvzallActiveEditCell?csvzallActiveEditCell:J.getFocusedCell?J.getFocusedCell():null;t&&(Number.isInteger(t.rowIndex)&&J.ensureIndexVisible&&J.ensureIndexVisible(t.rowIndex,"middle"),t.column&&J.ensureColumnVisible&&J.ensureColumnVisible(t.column))}catch{}};setTimeout(e,60)}window.addEventListener("message",e=>{const t=e.data??{};t.source==="obsidian-csvzall"&&t.type==="viewport-resized"&&csvzallRefreshGridForViewport()});`;
     const startNeedles = [
-      "we.start();Vt.disabled=!0;Uo();B(\"Loading CSV engine...\");fS();",
-      "Vt.disabled=!0;Uo();B(\"Loading CSV engine...\");fS();",
+      "he.start();ut.disabled=!0;$o();H(\"Loading CSV engine...\");GS();",
+      "ut.disabled=!0;$o();H(\"Loading CSV engine...\");GS();",
       "zi.disabled=!0;zo();_(\"Loading CSV engine...\");rS();",
       "mi.disabled=!0;ee(\"Loading CSV engine...\");Zm();",
     ];
@@ -212,8 +214,8 @@ function patchMobileBundleBehavior() {
     text = text.replace(legacyLifecycleHelper, "");
     changed = true;
   }
-  const legacyEditHook = 'onCellEditingStarted(){csvzallApplyKeyboardOpen(!0)},onCellEditingStopped(){setTimeout(()=>csvzallApplyKeyboardOpen(!1),180)},onCellValueChanged(e){!xe||!e.colDef.field||e.colDef.field==="_csvzallRowId"||sS(e)}}';
-  const valueChangedHook = 'onCellValueChanged(e){!xe||!e.colDef.field||e.colDef.field==="_csvzallRowId"||sS(e)}}';
+  const legacyEditHook = 'onCellEditingStarted(){csvzallApplyKeyboardOpen(!0)},onCellEditingStopped(){setTimeout(()=>csvzallApplyKeyboardOpen(!1),180)},onCellValueChanged(e){!Re||!e.colDef.field||e.colDef.field==="_csvzallRowId"||FS(e)}}';
+  const valueChangedHook = 'onCellValueChanged(e){!Re||!e.colDef.field||e.colDef.field==="_csvzallRowId"||FS(e)}}';
   if (text.includes(legacyEditHook)) {
     text = text.replace(legacyEditHook, valueChangedHook);
     changed = true;
@@ -221,14 +223,14 @@ function patchMobileBundleBehavior() {
 
   if (!text.includes(keyboardLifecycleId)) {
     const lifecycleHelper = `const csvzallObsidianKeyboardLifecycleId="${keyboardLifecycleId}";let csvzallActiveEditCell=null;function csvzallRefreshGridAfterKeyboard(){try{typeof csvzallRefreshGridForViewport=="function"?csvzallRefreshGridForViewport():window.dispatchEvent(new Event("resize"))}catch{}}function csvzallBeginCellEdit(e){csvzallActiveEditCell=e&&Number.isInteger(e.rowIndex)?{rowIndex:e.rowIndex,column:e.column}:null;[40,140,320,650].forEach(t=>setTimeout(csvzallRefreshGridAfterKeyboard,t))}function csvzallEndCellEdit(){setTimeout(()=>{csvzallActiveEditCell=null,csvzallRefreshGridAfterKeyboard()},180)}`;
-    const gridOptionsNeedle = "const Ko={";
+    const gridOptionsNeedle = "const qo={";
     if (text.includes(gridOptionsNeedle)) {
       text = text.replace(gridOptionsNeedle, `${lifecycleHelper}${gridOptionsNeedle}`);
       changed = true;
     }
 
     const editHookNeedle = valueChangedHook;
-    const editHookPatch = 'onCellEditingStarted(e){csvzallBeginCellEdit(e)},onCellEditingStopped(){csvzallEndCellEdit()},onCellValueChanged(e){!xe||!e.colDef.field||e.colDef.field==="_csvzallRowId"||sS(e)}}';
+    const editHookPatch = 'onCellEditingStarted(e){csvzallBeginCellEdit(e)},onCellEditingStopped(){csvzallEndCellEdit()},onCellValueChanged(e){!Re||!e.colDef.field||e.colDef.field==="_csvzallRowId"||FS(e)}}';
     if (text.includes(editHookNeedle)) {
       text = text.replace(editHookNeedle, editHookPatch);
       changed = true;

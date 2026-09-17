@@ -1,8 +1,8 @@
 {
   "sourceRepo": "vincentlaucsb/csvzall",
-  "sourceCommit": "0ad8d7396bfdb408325959206441c134c26a8ba4",
-  "sourceRef": "june-20-2026",
+  "sourceCommit": "c47b3d4f6b82bfc275986b4025cf2b737f45b6c8",
+  "sourceRef": "codex/obsidian-theme-sync",
   "sourcePath": "src/viewer_wasm/web/dist",
-  "sourceDist": "E:\\GitHub\\csvzall\\src\\viewer_wasm\\web\\dist",
-  "syncedAt": "2026-06-23T06:05:00.368Z"
+  "sourceDist": "E:\\GitHub\\obsidian-csvzall\\.work\\csvzall-theme\\src\\viewer_wasm\\web\\dist",
+  "syncedAt": "2026-09-17T02:29:31.405Z"
 }

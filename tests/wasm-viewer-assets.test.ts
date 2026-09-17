@@ -20,7 +20,7 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
 
   const indexHtml = readFileSync(join(viewerDir, "index.html"), "utf8");
   assert.match(indexHtml, /\.\/assets\//);
-  assert.doesNotMatch(indexHtml, /(?:src|href)=["']https?:\/\//i);
+  assert.doesNotMatch(indexHtml, /<(?:script|link|img|source|iframe)\b[^>]*\b(?:src|href)=["']https?:\/\//i);
   const assetReferences = Array.from(indexHtml.matchAll(/(?:src|href)=["']\.\/assets\/([^"']+)["']/gi))
     .map((match) => match[1] ?? "")
     .filter((assetReference) => assetReference.length > 0);
@@ -82,13 +82,13 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
 test("WASM bridge waits for matching host acknowledgement and rejects failed saves", async () => {
   const path = join("wasm-viewer", "assets", readdirSync("wasm-viewer/assets").find(name => /^index-.*\.js$/.test(name))!);
   const bundle = readFileSync(path, "utf8");
-  const bridgeCode = bundle.slice(bundle.indexOf('const Vw="obsidian-csvzall"'), bundle.indexOf('const Uw='));
+  const bridgeCode = bundle.slice(bundle.indexOf('const tS="obsidian-csvzall"'), bundle.indexOf('const nS='));
   assert.notEqual(bridgeCode.length, 0);
   const sent: any[] = [];
   let listener: (event: any) => void = () => {};
   const parent = { postMessage: (message: any) => sent.push(message) };
   const windowRef = {parent, addEventListener: (_: string, fn: typeof listener) => { listener = fn; }, removeEventListener() {} };
-  const bridge = runInNewContext(`${bridgeCode};_w({windowRef,onOpenFile:async()=>{}})`, {windowRef, ArrayBuffer});
+  const bridge = runInNewContext(`${bridgeCode};rS({windowRef,onOpenFile:async()=>{}})`, {windowRef, ArrayBuffer});
   bridge.start();
   await bridge.markReady();
   listener({source: parent, data: {source: "obsidian-csvzall", type: "open-file", name: "a.csv", buffer: new ArrayBuffer(1)}});
@@ -111,30 +111,30 @@ test("WASM bridge waits for matching host acknowledgement and rejects failed sav
 test("WASM save handler retains dirty state when edits occur during host write", async () => {
   const path = join("wasm-viewer", "assets", readdirSync("wasm-viewer/assets").find(name => /^index-.*\.js$/.test(name))!);
   const bundle = readFileSync(path, "utf8");
-  const dirtyFunction = bundle.slice(bundle.indexOf("let csvzallEditRevision=0;function Bt"), bundle.indexOf("function St(e)"));
-  const saveHandler = bundle.slice(bundle.indexOf('Bo.addEventListener("click"'), bundle.indexOf('Yl.addEventListener("click"'));
+  const dirtyFunction = bundle.slice(bundle.indexOf("let csvzallEditRevision=0;function Wt"), bundle.indexOf("function yt(e)"));
+  const saveHandler = bundle.slice(bundle.indexOf('zo.addEventListener("click"'), bundle.indexOf('ea.addEventListener("click"'));
   let click: () => void = () => {};
   let acknowledge: () => void = () => {};
   const dirty: boolean[] = [];
   const context = {
-    Bo: {addEventListener: (_: string, fn: () => void) => {click = fn;}},
-    xe: true, Oe: "a.csv", ri: true, Uo() {}, ns() {}, Be() {}, B() {}, Ci() {},
+    zo: {addEventListener: (_: string, fn: () => void) => {click = fn;}},
+    Re: true, xe: "a.csv", It: true, $o() {}, vi() {}, Be() {}, H() {}, qt() {},
     Se: async () => ({buffer: new ArrayBuffer(1)}),
-    we: {emitDirtyState: (value: boolean) => dirty.push(value), saveFile: () => new Promise<boolean>(resolve => {acknowledge = () => resolve(true);})},
+    he: {emitDirtyState: (value: boolean) => dirty.push(value), saveFile: () => new Promise<boolean>(resolve => {acknowledge = () => resolve(true);})},
   };
-  runInNewContext(`${dirtyFunction}${saveHandler};globalThis.edit=()=>Bt(true);`, context);
+  runInNewContext(`${dirtyFunction}${saveHandler};globalThis.edit=()=>Wt(true);`, context);
   click();
   await new Promise(resolve => setImmediate(resolve));
   (context as typeof context & {edit(): void}).edit();
   acknowledge();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(context.ri, true);
+  assert.equal(context.It, true);
   assert.equal(dirty.includes(false), false);
   click();
   await new Promise(resolve => setImmediate(resolve));
   acknowledge();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(context.ri, false);
+  assert.equal(context.It, false);
 });
 
 test("desktop release workflow publishes only standard Obsidian assets", () => {

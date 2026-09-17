@@ -1,0 +1,37 @@
+{
+  "id": "./",
+  "name": "csvzall Viewer",
+  "short_name": "csvzall",
+  "description": "A fast, local CSV viewer and editor powered by WebAssembly.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1f6f5b",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "text/csv": [".csv"],
+        "text/tab-separated-values": [".tsv"]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  }
+}

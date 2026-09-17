@@ -35,6 +35,13 @@ bounds. Content clicks and drags starting inside do not dismiss it. Closing uses
 the cancel/close lifecycle, so the unsaved-changes prompt resolves as Cancel.
 Progress dialogs remain controlled by the operation that opened them.
 
+The refreshed WASM bundle includes Popright 0.1.2 from the upstream vendored npm
+package. Its dropdown trigger handling preserves the pointer/focus events until
+the closing click, preventing an already-open menu from immediately reopening.
+Theme and dialog helpers are now built into this bundle; separate module copies
+are only added when patching older bundles. The save-acknowledgement and keyboard
+lifecycle adapters are validated against the refreshed minified bundle.
+
 The bridge transfers theme values, not Obsidian's stylesheets or font files.
 Custom themes and snippets that set these variables are supported. Arbitrary
 selectors targeting Obsidian components and document-local web fonts are not
