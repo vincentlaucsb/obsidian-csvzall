@@ -2,6 +2,7 @@ import { FileView, Notice, Platform, setIcon, TFile, type OpenViewState, type Vi
 import { csvzallDirtyStateFromMessageEvent } from "../viewerHelpers.js";
 import { UnsavedChangesModal } from "./UnsavedChangesModal.js";
 import { VIEW_TYPE_CSVZALL } from "./viewTypes.js";
+import { synchronizeViewerTheme } from "./viewerTheme.js";
 
 export interface CsvzallTableViewOwner {
   handleLeafClosed(leaf: WorkspaceLeaf): void;
@@ -83,6 +84,7 @@ export class CsvzallTableView extends FileView {
   private renameWarning: HTMLElement | null = null;
   private renderGeneration = 0;
   private frame: HTMLIFrameElement | null = null;
+  private themeCleanup: (() => void) | null = null;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private mobileViewportCleanup: (() => void) | null = null;
   private originalDetach: ProtectedLeaf["detach"] | null = null;
@@ -286,6 +288,7 @@ export class CsvzallTableView extends FileView {
     this.listenForDirtyState(frame);
     this.installMobileViewportHandler(containerEl, frame);
     frame.setAttr("src", this.url);
+    this.themeCleanup = synchronizeViewerTheme(containerEl, frame, this.app.workspace);
   }
 
   private installMobileViewportHandler(containerEl: HTMLElement, frame: HTMLIFrameElement): void {
@@ -495,6 +498,8 @@ export class CsvzallTableView extends FileView {
   }
 
   private removeMessageListener(): void {
+    this.themeCleanup?.();
+    this.themeCleanup = null;
     if (this.messageHandler) {
       window.removeEventListener("message", this.messageHandler);
       this.messageHandler = null;

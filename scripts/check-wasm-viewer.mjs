@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { requireHostIntegration } from "./wasm-viewer-contract.mjs";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -44,7 +46,7 @@ const indexHtml = readFileSync(indexPath, "utf8");
 if (!indexHtml.includes("./assets/")) {
   fail("index.html does not reference relative ./assets/ paths");
 }
-if (/(?:src|href)=["']https?:\/\//i.test(indexHtml)) {
+if (/<(?:script|link|img|source|iframe)\b[^>]*\b(?:src|href)=["']https?:\/\//i.test(indexHtml)) {
   fail("index.html should not depend on remote src/href runtime assets");
 }
 
@@ -67,11 +69,7 @@ if (!indexBundleName) {
 const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name));
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
-for (const marker of ["obsidian-csvzall", "csvzall-wasm-viewer", "open-file", "save-file", "csvzall-save-ack-v1", "save-result", "csvzallSaveRevision===csvzallEditRevision"]) {
-  if (!indexBundle.includes(marker)) {
-    fail(`index bundle is missing Obsidian bridge marker: ${marker}`);
-  }
-}
+requireHostIntegration(indexBundle);
 const stylesheetBundle = stylesheetBundleName ?
   readFileSync(join(assetsDir, stylesheetBundleName), "utf8") :
   (indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "");
@@ -86,9 +84,6 @@ if (!stylesheetBundle.includes("body[data-host-mode] .topbar p") || !stylesheetB
 }
 if (!indexBundle.includes("checkboxes:!1") || !indexBundle.includes("headerCheckbox:!1")) {
   fail("packaged viewer should disable AG Grid selection checkboxes");
-}
-if (!indexBundle.includes("csvzall-obsidian-mobile-behavior-v1") || !indexBundle.includes("visualViewport")) {
-  fail("packaged viewer is missing Android keyboard viewport handling");
 }
 if (!indexBundle.includes("csvzall-obsidian-viewport-resize-v2") || !indexBundle.includes("viewport-resized")) {
   fail("packaged viewer is missing parent viewport resize handling");
@@ -110,6 +105,9 @@ if (!stylesheetBundle.includes("body[data-host-mode] { height: 100vh; min-height
 }
 
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+if (metadata.javascriptSha256 !== createHash("sha256").update(indexBundle).digest("hex")) {
+  fail("compiled JavaScript differs from the imported upstream bundle; refresh from source instead of patching it");
+}
 for (const field of ["sourceRepo", "sourceCommit", "sourcePath", "syncedAt"]) {
   if (typeof metadata[field] !== "string" || metadata[field].length === 0) {
     fail(`metadata is missing ${field}`);

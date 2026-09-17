@@ -27,6 +27,7 @@ const sourceSnapshotFiles = [
   "src/views/CsvzallTableView.ts",
   "src/views/UnsavedChangesModal.ts",
   "src/views/viewTypes.ts",
+  "src/views/viewerTheme.ts",
   "src/viewerHelpers.ts",
 ];
 

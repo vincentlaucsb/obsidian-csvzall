@@ -1,0 +1,97 @@
+<svg aria-label="Productivity as a function of coffee consumption" role="img" viewBox="-8.0 -57.6 661.1 426.0" xmlns="http://www.w3.org/2000/svg">
+	<style type="text/css">
+		<![CDATA[
+			.bar {
+				fill: var(--svgplot-color);
+			}
+			.legend-label {
+				fill: var(--svgplot-text);
+			}
+			.legend-marker {
+				fill: var(--svgplot-color);
+			}
+			.legend-title {
+				fill: var(--svgplot-text);
+			}
+			.svgplot-color-0 {
+				--svgplot-color: #2563eb;
+			}
+			.svgplot-color-1 {
+				--svgplot-color: #ea580c;
+			}
+			:root {
+				--svgplot-axis: #374151;
+				--svgplot-background: #ffffff;
+				--svgplot-grid: #e5e7eb;
+				--svgplot-text: #111827;
+			}
+			svg {
+				background: var(--svgplot-background);
+			}
+			text {
+				fill: var(--svgplot-text);
+				font-family: Arial, sans-serif;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--svgplot-axis: #9ca3af;
+					--svgplot-background: #111827;
+					--svgplot-grid: #374151;
+					--svgplot-text: #f9fafb;
+				}
+			}
+		]]>
+	</style>
+	<g>
+		<svg height="331.6" viewBox="47.5 46.8 645.1 331.6" width="645.1" x="0" y="0">
+			<style type="text/css">
+				<![CDATA[
+					:root {
+					}
+				]]>
+			</style>
+			<line class="axis-line" stroke="var(--svgplot-axis)" stroke-width="1.2" x1="72.0" x2="692.0" y1="354.0" y2="354.0" />
+			<line class="axis-line" stroke="var(--svgplot-axis)" stroke-width="1.2" x1="72.0" x2="72.0" y1="54.0" y2="354.0" />
+			<line class="grid-line" stroke="var(--svgplot-grid)" stroke-width="1" x1="72.0" x2="692.0" y1="354.0" y2="354.0" />
+			<line class="tick-line" stroke="var(--svgplot-axis)" stroke-width="1" x1="67.0" x2="72.0" y1="354.0" y2="354.0" />
+			<text class="y-tick" font-size="11" text-anchor="end" x="62.0" y="358.0">0</text>
+			<line class="grid-line" stroke="var(--svgplot-grid)" stroke-width="1" x1="72.0" x2="692.0" y1="279.0" y2="279.0" />
+			<line class="tick-line" stroke="var(--svgplot-axis)" stroke-width="1" x1="67.0" x2="72.0" y1="279.0" y2="279.0" />
+			<text class="y-tick" font-size="11" text-anchor="end" x="62.0" y="283.0">5</text>
+			<line class="grid-line" stroke="var(--svgplot-grid)" stroke-width="1" x1="72.0" x2="692.0" y1="204.0" y2="204.0" />
+			<line class="tick-line" stroke="var(--svgplot-axis)" stroke-width="1" x1="67.0" x2="72.0" y1="204.0" y2="204.0" />
+			<text class="y-tick" font-size="11" text-anchor="end" x="62.0" y="208.0">10</text>
+			<line class="grid-line" stroke="var(--svgplot-grid)" stroke-width="1" x1="72.0" x2="692.0" y1="129.0" y2="129.0" />
+			<line class="tick-line" stroke="var(--svgplot-axis)" stroke-width="1" x1="67.0" x2="72.0" y1="129.0" y2="129.0" />
+			<text class="y-tick" font-size="11" text-anchor="end" x="62.0" y="133.0">15</text>
+			<line class="grid-line" stroke="var(--svgplot-grid)" stroke-width="1" x1="72.0" x2="692.0" y1="54.0" y2="54.0" />
+			<line class="tick-line" stroke="var(--svgplot-axis)" stroke-width="1" x1="67.0" x2="72.0" y1="54.0" y2="54.0" />
+			<text class="y-tick" font-size="11" text-anchor="end" x="62.0" y="58.0">20</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="90.0" width="29.3" x="84.4" y="264.0" />
+			<rect class="bar bar-grouped svgplot-color-1" height="105.0" width="29.3" x="118.8" y="249.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="116.3" y="374.0">6-7-2026</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="30.0" width="29.3" x="173.0" y="324.0" />
+			<rect class="bar bar-grouped svgplot-color-1" height="45.0" width="29.3" x="207.4" y="309.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="204.9" y="374.0">6-8-2026</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="45.0" width="29.3" x="261.5" y="309.0" />
+			<rect class="bar bar-grouped svgplot-color-1" height="60.0" width="29.3" x="296.0" y="294.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="293.4" y="374.0">6-9-2026</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="60.0" width="29.3" x="350.1" y="294.0" />
+			<rect class="bar bar-grouped svgplot-color-1" height="75.0" width="29.3" x="384.6" y="279.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="382.0" y="374.0">6-10-2026</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="15.0" width="29.3" x="438.7" y="339.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="470.6" y="374.0">6-11-2026</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="75.0" width="29.3" x="527.3" y="279.0" />
+			<rect class="bar bar-grouped svgplot-color-1" height="105.0" width="29.3" x="561.7" y="249.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="559.1" y="374.0">6-12-2026</text>
+			<rect class="bar bar-grouped svgplot-color-0" height="120.0" width="29.3" x="615.8" y="234.0" />
+			<rect class="bar bar-grouped svgplot-color-1" height="210.0" width="29.3" x="650.3" y="144.0" />
+			<text class="bar-label" font-size="11" text-anchor="middle" x="647.7" y="374.0">6-13-2026</text>
+		</svg>
+		<rect class="legend-marker svgplot-color-0" height="8.4" stroke="none" width="12.0" x="0.0" y="346.4" />
+		<text class="legend-label" font-size="12" text-anchor="start" x="22.0" y="355.6">Coffee Drank (Cups)</text>
+		<rect class="legend-marker svgplot-color-1" height="8.4" stroke="none" width="12.0" x="172.2" y="346.4" />
+		<text class="legend-label" font-size="12" text-anchor="start" x="194.2" y="355.6">KPIs Delivered</text>
+	</g>
+	<text class="chart-title" font-size="20" font-weight="700" text-anchor="middle" transform="translate(322.5 -27.6)" x="0.0" y="0.0">Productivity as a function of coffee consumption</text>
+</svg>

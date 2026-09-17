@@ -249,7 +249,10 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /require\(["']timers["']\)/);
   assert.doesNotMatch(installerServiceSource, /import\(/);
   assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
-  assert.doesNotMatch(bundle, /addEventListener\("load"/);
+  // Loading may resend the theme, but must not reinstall mobile viewport shims.
+  const viewSource = readFileSync("src/views/CsvzallTableView.ts", "utf8");
+  const viewportHandler = viewSource.slice(viewSource.indexOf("private installMobileViewportHandler"), viewSource.indexOf("private removeMobileViewportHandler"));
+  assert.doesNotMatch(viewportHandler, /addEventListener\("load"/);
 });
 
 test("settings normalize missing managed csvzall asset name", () => {

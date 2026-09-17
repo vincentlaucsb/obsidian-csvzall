@@ -1,6 +1,6 @@
 {
   "name": "obsidian-csvzall",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A fast CSV viewer, editor, and charting tool.",
   "main": "main.js",
   "type": "module",
@@ -9,10 +9,13 @@
     "url": "https://github.com/vincentlaucsb/obsidian-csvzall.git"
   },
   "scripts": {
+    "check:line-endings": "node scripts/check-line-endings.mjs",
+    "fix:line-endings": "node scripts/check-line-endings.mjs --fix",
     "dev": "node esbuild.config.mjs",
     "build": "npm run check:wasm-viewer && node esbuild.config.mjs production",
     "build:mobile": "node scripts/build-mobile.mjs",
     "sync:wasm-viewer": "node scripts/sync-wasm-viewer.mjs && npm run patch:wasm-viewer",
+    "refresh:wasm-viewer": "node scripts/refresh-wasm-viewer.mjs",
     "sync:mobile-repo": "node scripts/sync-mobile-repo.mjs",
     "patch:wasm-viewer": "node scripts/patch-wasm-viewer-bridge.mjs",
     "check:wasm-viewer": "node scripts/check-wasm-viewer.mjs",

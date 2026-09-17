@@ -4,11 +4,14 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { requireHostIntegration } from "./wasm-viewer-contract.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -57,6 +60,14 @@ if (!existsSync(sourceDir)) {
 requireFile(resolve(sourceDir, "index.html"));
 requireFile(resolve(sourceDir, "assets"));
 
+// Reject incompatible input before replacing the last known-good packaged viewer.
+const sourceBundleName = readdirSync(resolve(sourceDir, "assets")).find(name => /^index-.*\.js$/.test(name));
+if (!sourceBundleName) fail("missing source JavaScript bundle");
+const sourceBundle = readFileSync(resolve(sourceDir, "assets", sourceBundleName));
+requireHostIntegration(sourceBundle.toString("utf8"));
+const sourceHtml = readFileSync(resolve(sourceDir, "index.html"), "utf8");
+if (!sourceHtml.includes("./assets/")) fail("source index.html must use relative ./assets/ paths");
+
 if (!outputDir.startsWith(repoRoot) || basename(outputDir) !== "wasm-viewer") {
   fail(`refusing to replace unexpected output directory: ${outputDir}`);
 }
@@ -73,6 +84,8 @@ const metadata = {
   sourceRepo: "vincentlaucsb/csvzall",
   sourceCommit: runGit(["rev-parse", "HEAD"], sourceRepoRoot) || "unknown",
   sourceRef: runGit(["rev-parse", "--abbrev-ref", "HEAD"], sourceRepoRoot) || "unknown",
+  sourceDirty: Boolean(runGit(["status", "--porcelain", "--untracked-files=normal"], sourceRepoRoot)),
+  javascriptSha256: createHash("sha256").update(sourceBundle).digest("hex"),
   sourcePath: "src/viewer_wasm/web/dist",
   sourceDist: sourceDir,
   syncedAt: new Date().toISOString(),

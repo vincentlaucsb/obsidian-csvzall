@@ -7,6 +7,13 @@ the commit; `.mobile-dist/` does not.
 
 ## Type-safety gate
 
+The lint/build gate also checks tracked and non-ignored new text files for LF
+line endings. `.gitattributes` controls Git checkouts; `.editorconfig` guides
+editors. Run `npm run check:line-endings` independently, or
+`npm run fix:line-endings` to normalize existing local files and review the diff.
+Binary and explicitly byte-preserved imported assets are excluded. CI runs the
+same gate through `npm test`; no local Git hook installation is required.
+
 Use Node 20.19+, 22.13+, or 24+ and install the lockfile dependencies with
 `npm ci` (including development dependencies). `npm run lint` type-checks
 desktop and mobile sources, then runs type-aware ESLint with zero warnings
@@ -43,7 +50,9 @@ asynchronous failures without installing a plugin into a real vault. The WASM
 tests also exercise the packaged save bridge. Asset marker checks supplement
 these tests; they do not establish that an interaction works on a device.
 
-Before publishing, check these interactions in a disposable vault:
+Before publishing, check these interactions in the canonical `demo-vault/`
+([setup and fixture guidance](demo-vault.md)). Use a disposable copy for
+destructive scenarios:
 
 - Open a CSV and immediately switch files or close the pane while its viewer
   starts. Confirm the remaining pane shows the correct file.
