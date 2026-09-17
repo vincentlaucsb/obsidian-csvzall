@@ -26,6 +26,13 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 not put maintainer-only release, generated asset, sync, packaging, or workflow
 notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 
+## Viewer theme design
+
+- Matching the active Obsidian theme is intentional product behavior for embedded desktop and mobile CSV viewers. Use the host's resolved colors, accent, interface font, and light/dark mode, including live theme changes, rather than choosing the OS palette independently.
+- Keep synchronization in the versioned iframe `postMessage` bridge. Do not persist theme snapshots in the vault or require a CLI restart, CSV reload, or grid recreation for theme changes. Preserve active edits and focus.
+- Keep standalone csvzall usable without Obsidian: without a host theme message, the viewer retains its system-aware appearance. Maintain this fallback in the shared upstream receiver and packaged WASM assets.
+- See `docs/viewer-theme.md` for protocol, supported theme values, and upstream coordination.
+
 ## Runtime Import Rule
 
 - Do not use dynamic or async imports such as `await import(...)` in Obsidian runtime code under `src/` or `mobile-src/`.
