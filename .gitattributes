@@ -1,0 +1,2 @@
+# Preserve the imported bytes validated by javascriptSha256 on every platform.
+wasm-viewer/assets/*.js -text

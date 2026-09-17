@@ -21,15 +21,13 @@ ignore theme messages and retain their existing appearance. Release the csvzall
 change before shipping this integration as a desktop feature. The mobile plugin
 includes the receiver, so it does not depend on the installed desktop binary.
 
-`scripts/vendor/host-theme.mjs` is a verbatim snapshot of csvzall's
-[`src/viewer/modules/host-theme.mjs` at 903f2d1](https://github.com/vincentlaucsb/csvzall/blob/903f2d1/src/viewer/modules/host-theme.mjs). The asset patch step copies this source
-module into older WASM bundles and adds its module script to the HTML; it does
-not patch the minified bundle to implement the protocol. New WASM bundles that
-already contain `theme-ready` use their built-in receiver instead. Keep this
-snapshot synchronized with upstream until all packaged builds include it.
+The receiver lives in upstream `src/viewer/modules/host-theme.mjs` and is
+compiled into both viewers. Use the [source refresh workflow](wasm-viewer-refresh.md)
+to update packaged WASM assets. Older bundles without the required source host
+integration are rejected; there are no separate compatibility module snapshots.
 
-`scripts/vendor/dialog-dismiss.mjs` similarly vendors the shared viewer dialog
-helper from `src/viewer/modules/dialog-dismiss.mjs`. Ordinary dialog backdrops
+The shared `src/viewer/modules/dialog-dismiss.mjs` helper is also compiled into
+both viewers. Ordinary dialog backdrops
 cancel the dialog when a primary pointer press and click both occur outside its
 bounds. Content clicks and drags starting inside do not dismiss it. Closing uses
 the cancel/close lifecycle, so the unsaved-changes prompt resolves as Cancel.
@@ -38,9 +36,9 @@ Progress dialogs remain controlled by the operation that opened them.
 The refreshed WASM bundle includes Popright 0.1.2 from the upstream vendored npm
 package. Its dropdown trigger handling preserves the pointer/focus events until
 the closing click, preventing an already-open menu from immediately reopening.
-Theme and dialog helpers are now built into this bundle; separate module copies
-are only added when patching older bundles. The save-acknowledgement and keyboard
-lifecycle adapters are validated against the refreshed minified bundle.
+Theme, dialog, save-acknowledgement, and keyboard lifecycle behavior all come
+from upstream source and source-level tests. Packaging leaves the compiled
+JavaScript unchanged and validates its capabilities and imported digest.
 
 The bridge transfers theme values, not Obsidian's stylesheets or font files.
 Custom themes and snippets that set these variables are supported. Arbitrary

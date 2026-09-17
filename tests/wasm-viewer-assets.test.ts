@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { runInNewContext } from "node:vm";
+import { createHash } from "node:crypto";
 
 test("packaged WASM viewer assets are mobile-generation-ready", () => {
   const viewerDir = "wasm-viewer";
@@ -32,27 +32,19 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   const indexBundleName = assets.find((name) => /^index-.*\.js$/.test(name));
   assert.equal(typeof indexBundleName, "string");
   const indexBundle = readFileSync(join(assetsDir, indexBundleName ?? ""), "utf8");
-  if (!indexBundle.includes("data-csvzall-dialog-dismiss-v1")) {
-    assert.match(indexHtml, /src="\.\/assets\/dialog-dismiss\.mjs"/);
-    assert.equal(readFileSync(join(assetsDir, "dialog-dismiss.mjs"), "utf8"), readFileSync("scripts/vendor/dialog-dismiss.mjs", "utf8"));
-  }
-  if (!indexBundle.includes("theme-ready")) {
-    assert.match(indexHtml, /src="\.\/assets\/host-theme\.mjs"/);
-    assert.equal(readFileSync(join(assetsDir, "host-theme.mjs"), "utf8"), readFileSync("scripts/vendor/host-theme.mjs", "utf8"));
+  for (const marker of ["csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-edit-revision-v1", "theme-ready", "data-csvzall-dialog-dismiss-v1"]) {
+    assert.ok(indexBundle.includes(marker), marker);
   }
   const stylesheetBundle = indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "";
   assert.notEqual(stylesheetBundle.length, 0);
   assert.match(indexBundle, /obsidian-csvzall/);
   assert.match(indexBundle, /csvzall-wasm-viewer/);
   assert.match(indexBundle, /csvzall-save-ack-v1/);
-  assert.match(indexBundle, /csvzallSaveRevision===csvzallEditRevision/);
   assert.match(`${indexBundle}\n${stylesheetBundle}`, /csvzall-obsidian-host-compact-v1/);
   assert.match(stylesheetBundle, /body\[data-host-mode\] \.topbar p/);
   assert.match(stylesheetBundle, /display: none/);
   assert.match(indexBundle, /checkboxes:!1/);
   assert.match(indexBundle, /headerCheckbox:!1/);
-  assert.match(indexBundle, /csvzall-obsidian-mobile-behavior-v1/);
-  assert.match(indexBundle, /visualViewport/);
   assert.match(indexBundle, /csvzall-obsidian-viewport-resize-v2/);
   assert.match(indexBundle, /viewport-resized/);
   assert.doesNotMatch(indexBundle, /csvzall-obsidian-keyboard-focus-v1/);
@@ -61,11 +53,11 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   assert.doesNotMatch(indexBundle, /csvzallApplyKeyboardOpen/);
   assert.match(indexBundle, /csvzall-obsidian-keyboard-lifecycle-v2/);
   assert.match(indexBundle, /onCellEditingStarted/);
-  assert.match(indexBundle, /csvzallActiveEditCell/);
   assert.doesNotMatch(stylesheetBundle, /body\[data-host-mode\]\[data-keyboard-open\]/);
   assert.match(stylesheetBundle, /body\[data-host-mode\] \{ height: 100vh; min-height: 100vh/);
 
   const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+  assert.equal(metadata.javascriptSha256, createHash("sha256").update(indexBundle).digest("hex"));
   assert.equal(metadata.sourceRepo, "vincentlaucsb/csvzall");
   assert.equal(typeof metadata.sourceCommit, "string");
   assert.equal(typeof metadata.sourcePath, "string");
@@ -77,64 +69,6 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   for (const asset of assets) {
     assert.equal(existsSync(join(assetsDir, asset)), true);
   }
-});
-
-test("WASM bridge waits for matching host acknowledgement and rejects failed saves", async () => {
-  const path = join("wasm-viewer", "assets", readdirSync("wasm-viewer/assets").find(name => /^index-.*\.js$/.test(name))!);
-  const bundle = readFileSync(path, "utf8");
-  const bridgeCode = bundle.slice(bundle.indexOf('const tS="obsidian-csvzall"'), bundle.indexOf('const nS='));
-  assert.notEqual(bridgeCode.length, 0);
-  const sent: any[] = [];
-  let listener: (event: any) => void = () => {};
-  const parent = { postMessage: (message: any) => sent.push(message) };
-  const windowRef = {parent, addEventListener: (_: string, fn: typeof listener) => { listener = fn; }, removeEventListener() {} };
-  const bridge = runInNewContext(`${bridgeCode};rS({windowRef,onOpenFile:async()=>{}})`, {windowRef, ArrayBuffer});
-  bridge.start();
-  await bridge.markReady();
-  listener({source: parent, data: {source: "obsidian-csvzall", type: "open-file", name: "a.csv", buffer: new ArrayBuffer(1)}});
-  let finished = false;
-  const save = bridge.saveFile({name: "a.csv", result: {buffer: new ArrayBuffer(1)}}).then(() => {finished = true;});
-  await Promise.resolve();
-  assert.equal(finished, false);
-  const requestId = sent.at(-1).requestId;
-  listener({source: {}, data: {source: "obsidian-csvzall", type: "save-result", requestId, success: true}});
-  await Promise.resolve();
-  assert.equal(finished, false);
-  listener({source: parent, data: {source: "obsidian-csvzall", type: "save-result", requestId, success: true}});
-  await save;
-  assert.equal(finished, true);
-  const failed = bridge.saveFile({name: "a.csv", result: {buffer: new ArrayBuffer(1)}});
-  listener({source: parent, data: {source: "obsidian-csvzall", type: "save-result", requestId: sent.at(-1).requestId, success: false, error: "disk full"}});
-  await assert.rejects(failed, /disk full/);
-});
-
-test("WASM save handler retains dirty state when edits occur during host write", async () => {
-  const path = join("wasm-viewer", "assets", readdirSync("wasm-viewer/assets").find(name => /^index-.*\.js$/.test(name))!);
-  const bundle = readFileSync(path, "utf8");
-  const dirtyFunction = bundle.slice(bundle.indexOf("let csvzallEditRevision=0;function Wt"), bundle.indexOf("function yt(e)"));
-  const saveHandler = bundle.slice(bundle.indexOf('zo.addEventListener("click"'), bundle.indexOf('ea.addEventListener("click"'));
-  let click: () => void = () => {};
-  let acknowledge: () => void = () => {};
-  const dirty: boolean[] = [];
-  const context = {
-    zo: {addEventListener: (_: string, fn: () => void) => {click = fn;}},
-    Re: true, xe: "a.csv", It: true, $o() {}, vi() {}, Be() {}, H() {}, qt() {},
-    Se: async () => ({buffer: new ArrayBuffer(1)}),
-    he: {emitDirtyState: (value: boolean) => dirty.push(value), saveFile: () => new Promise<boolean>(resolve => {acknowledge = () => resolve(true);})},
-  };
-  runInNewContext(`${dirtyFunction}${saveHandler};globalThis.edit=()=>Wt(true);`, context);
-  click();
-  await new Promise(resolve => setImmediate(resolve));
-  (context as typeof context & {edit(): void}).edit();
-  acknowledge();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(context.It, true);
-  assert.equal(dirty.includes(false), false);
-  click();
-  await new Promise(resolve => setImmediate(resolve));
-  acknowledge();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(context.It, false);
 });
 
 test("desktop release workflow publishes only standard Obsidian assets", () => {

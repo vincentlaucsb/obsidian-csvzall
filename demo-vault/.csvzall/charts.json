@@ -1,0 +1,27 @@
+{
+  "charts": [
+    {
+      "id": "productivity-tracker-bar",
+      "type": "bar",
+      "input": "Productivity Tracker.csv",
+      "output": "charts/productivity-tracker_bar.svg",
+      "options": {
+        "label": "Date",
+        "values": [
+          {
+            "column": "Coffee Drank (Cups)",
+            "label": "Coffee Drank (Cups)"
+          },
+          {
+            "column": "KPIs Delivered",
+            "label": "KPIs Delivered"
+          }
+        ],
+        "title": "Productivity as a function of coffee consumption",
+        "colorScheme": "diverging",
+        "presentation": "grouped"
+      },
+      "runOnSave": true
+    }
+  ]
+}

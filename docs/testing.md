@@ -43,7 +43,9 @@ asynchronous failures without installing a plugin into a real vault. The WASM
 tests also exercise the packaged save bridge. Asset marker checks supplement
 these tests; they do not establish that an interaction works on a device.
 
-Before publishing, check these interactions in a disposable vault:
+Before publishing, check these interactions in the canonical `demo-vault/`
+([setup and fixture guidance](demo-vault.md)). Use a disposable copy for
+destructive scenarios:
 
 - Open a CSV and immediately switch files or close the pane while its viewer
   starts. Confirm the remaining pane shows the correct file.

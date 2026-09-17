@@ -1,15 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { viewerThemeMessage, viewerThemeVariables, synchronizeViewerTheme } from "../src/views/viewerTheme.js";
+import { viewerThemeMessage, synchronizeViewerTheme } from "../src/views/viewerTheme.js";
 
 test("theme snapshots include only supported, computed, nonempty variables", () => {
   const message = viewerThemeMessage({ getPropertyValue: name => name === "--text-normal" ? " rgb(1, 2, 3) " : "" }, true);
   assert.deepEqual(message, { source: "obsidian-csvzall", type: "theme", version: 1, mode: "dark", variables: { "--text-normal": "rgb(1, 2, 3)" } });
   assert.equal(viewerThemeMessage({ getPropertyValue: () => "" }, false).mode, "light");
-  const receiver = readFileSync("scripts/vendor/host-theme.mjs", "utf8");
-  const receiverVariables = [...receiver.slice(receiver.indexOf("export const HOST_THEME_VARIABLES"), receiver.indexOf("export function parseHostTheme")).matchAll(/'(--[^']+)'/g)].map(match => match[1]);
-  assert.deepEqual(receiverVariables, [...viewerThemeVariables]);
 });
 
 test("theme sync coalesces changes, resends on readiness/reload, uses the view window, and disposes", () => {

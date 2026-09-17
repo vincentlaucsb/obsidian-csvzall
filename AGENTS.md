@@ -33,6 +33,12 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - Keep standalone csvzall usable without Obsidian: without a host theme message, the viewer retains its system-aware appearance. Maintain this fallback in the shared upstream receiver and packaged WASM assets.
 - See `docs/viewer-theme.md` for protocol, supported theme values, and upstream coordination.
 
+## Canonical local test vault
+
+- `demo-vault/` is the canonical Obsidian test bed. Keep representative CSV fixtures, demo notes, and portable vault configuration in this repository so behavior can be reproduced from a clean checkout.
+- Keep local workspace state, caches, plugin installations/builds, helper binaries, credentials, and machine-specific plugin settings untracked. Never copy through plugin symlinks or junctions when importing vault content.
+- Development plugin files should resolve to this checkout's build outputs, with vault-local plugin settings isolated from other vaults. Keep setup instructions in `docs/`, and preserve local settings when refreshing the development build.
+
 ## Runtime Import Rule
 
 - Do not use dynamic or async imports such as `await import(...)` in Obsidian runtime code under `src/` or `mobile-src/`.
@@ -48,7 +54,8 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - Do not add `body[data-host-mode][data-keyboard-open]` CSS that changes `grid-template-rows`, hides the topbar/footer, or otherwise changes the grid container size during editing.
 - Keep the iframe and hosted viewer layout stable. The Obsidian parent may send `viewport-resized` as a refresh signal, but it should not clamp the parent container height from `visualViewport`.
 - To keep the edited cell visible on mobile, use AG Grid edit lifecycle hooks. Store the active edit cell from `onCellEditingStarted`, then call AG Grid visibility refreshes such as `ensureIndexVisible(rowIndex, "middle")` and `ensureColumnVisible(column)` after short delays while the Android keyboard settles.
-- When patching vendored WASM viewer assets, update `scripts/check-wasm-viewer.mjs` and `tests/wasm-viewer-assets.test.ts` so stale keyboard/layout patches cannot ship silently.
+- Never patch compiled/minified WASM viewer JavaScript. Implement runtime behavior in upstream source with explicit host hooks and source-level tests; use `npm run refresh:wasm-viewer` to rebuild, import, and validate it. See `docs/wasm-viewer-refresh.md`.
+- Keep `scripts/check-wasm-viewer.mjs` and `tests/wasm-viewer-assets.test.ts` aligned with required source capabilities and the imported JavaScript digest so unsupported or modified bundles cannot ship silently.
 - The mobile Community plugin is generated from `mobile-src/` with `npm run build:mobile`, validated with `npm run check:mobile`, and synced into the sibling `obsidian-csvzall-mobile` repo with `npm run sync:mobile-repo`.
 - Keep `mobile-src/` free of desktop services, installer code, child processes, Node.js built-ins, and Electron APIs. The generated mobile `main.js` must pass the no-Node marker scan in `scripts/check-mobile-dist.mjs`.
 - The mobile distribution embeds the WASM viewer assets into `main.js` and writes them into the plugin directory at runtime, because Obsidian Community installs only `main.js`, `manifest.json`, and optional `styles.css`.

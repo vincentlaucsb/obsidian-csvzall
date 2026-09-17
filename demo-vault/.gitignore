@@ -1,0 +1,11 @@
+# Obsidian state, plugins, downloaded binaries, and machine-local settings.
+/.obsidian/
+/.trash/
+/.git/
+/.csvzall/*
+!/.csvzall/charts.json
+# Keep the intentional chart fixture; ignore other generated chart output.
+/charts/*
+!/charts/productivity-tracker_bar.svg
+*.bak
+*.backup

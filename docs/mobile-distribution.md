@@ -37,6 +37,10 @@ copies it into the sibling `obsidian-csvzall-mobile` checkout.
 
 ## Generated Assets
 
+For changes to the embedded viewer, use the [source refresh workflow](wasm-viewer-refresh.md).
+It builds and validates upstream source before importing assets; runtime bundle
+patches are not supported.
+
 The mobile distribution is generated into `.mobile-dist/`. Its `main.js`
 embeds the packaged `wasm-viewer/` assets and materializes them into the plugin
 directory at runtime. This lets the mobile release use Obsidian's standard
