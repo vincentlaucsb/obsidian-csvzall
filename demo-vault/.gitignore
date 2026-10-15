@@ -3,6 +3,7 @@
 /.trash/
 /.git/
 /.csvzall/*
+!/.csvzall/exports.json
 !/.csvzall/charts.json
 # Keep the intentional chart fixture; ignore other generated chart output.
 /charts/*

@@ -1,0 +1,249 @@
+import type { DataAdapter } from 'obsidian';
+import { validateSource, type TableRecipe } from './managedTables.js';
+
+export const EXPORT_CONFIG_PATH = '.csvzall/exports.json';
+
+interface TableDefinition {
+  format?: 'table' | 'value';
+  legacyTableId?: string;
+  id: string;
+  input: string;
+  output?: string;
+  runOnSave?: boolean;
+  options?: { columns?: string[]; sql?: string; [key: string]: unknown };
+  [key: string]: unknown;
+}
+interface TableConfig { exports: TableDefinition[]; [key: string]: unknown }
+export interface ResolvedExport {
+  configPath: string;
+  recipe: TableRecipe;
+  runOnSave: boolean;
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
+
+function sameLegacy(left: TableDefinition, right: TableDefinition): boolean {
+  const normalized = (entry: TableDefinition) => ({ ...entry, id: undefined, legacyTableId: undefined,
+    format: entry.format ?? 'table', runOnSave: entry.runOnSave !== false,
+    options: { ...entry.options, columns: entry.options?.columns ?? [], sql: entry.options?.sql ?? '' } });
+  return canonical(normalized(left)) === canonical(normalized(right));
+}
+
+function rootFor(path: string): string[] {
+  return path.split('/').slice(0, -2);
+}
+
+function resolvePath(configPath: string, input: string): string {
+  if (!input || input.includes(':') || /^[\\/]/.test(input)) throw new Error('Table paths must be relative to the configuration folder.');
+  const parts = rootFor(configPath);
+  for (const part of input.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (!parts.length) throw new Error('Table path leaves the vault.');
+      parts.pop();
+    } else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function relativePath(configPath: string, path: string): string {
+  const root = rootFor(configPath), parts = path.split('/');
+  while (root.length && parts.length && root[0] === parts[0]) { root.shift(); parts.shift(); }
+  return [...root.map(() => '..'), ...parts].join('/');
+}
+
+function parseConfig(text: string, path: string): TableConfig {
+  const value: unknown = JSON.parse(text);
+  if (!value || typeof value !== 'object' || !('exports' in value) || !Array.isArray(value.exports)) throw new Error(`Invalid exports array in ${path}.`);
+  const ids = new Set<string>(), legacyIds = new Set<string>();
+  for (const item of value.exports as unknown[]) {
+    if (!item || typeof item !== 'object') throw new Error(`Invalid table definition in ${path}.`);
+    const entry = item as Partial<TableDefinition>;
+    if (typeof entry.id !== 'string' || !/^[\w-]+$/.test(entry.id) || ids.has(entry.id) || typeof entry.input !== 'string' ||
+      (entry.format !== undefined && entry.format !== 'table' && entry.format !== 'value') ||
+      (entry.legacyTableId !== undefined && (typeof entry.legacyTableId !== 'string' || !/^[\w-]+$/.test(entry.legacyTableId))) ||
+      (entry.output !== undefined && typeof entry.output !== 'string') ||
+      (entry.runOnSave !== undefined && typeof entry.runOnSave !== 'boolean')) throw new Error(`Invalid or duplicate table definition in ${path}.`);
+    ids.add(entry.id);
+    if (entry.legacyTableId !== undefined) {
+      if (legacyIds.has(entry.legacyTableId)) throw new Error(`Invalid or duplicate legacy table binding in ${path}.`);
+      legacyIds.add(entry.legacyTableId);
+    }
+    validateSource(resolvePath(path, entry.input));
+    if (entry.output !== undefined && !/\.md$/i.test(resolvePath(path, entry.output))) throw new Error(`Invalid table output in ${path}.`);
+    const options = entry.options;
+    if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options) ||
+      (options.sql !== undefined && typeof options.sql !== 'string') ||
+      (options.columns !== undefined && (!Array.isArray(options.columns) || !options.columns.every((column: unknown) => typeof column === 'string'))))) {
+      throw new Error(`Invalid table options in ${path}.`);
+    }
+  }
+  return value as TableConfig;
+}
+
+/** Definitions are scoped like charts: paths start at the folder containing .csvzall. */
+export class ExportDefinitions {
+  private writes: Promise<unknown> = Promise.resolve();
+  constructor(private readonly adapter: DataAdapter, private readonly stopped: () => boolean) {}
+
+  private candidates(note: string): string[] {
+    const parts = note.split('/').slice(0, -1), paths: string[] = [];
+    while (parts.length) { paths.push(`${parts.join('/')}/${EXPORT_CONFIG_PATH}`); parts.pop(); }
+    return [...paths, EXPORT_CONFIG_PATH];
+  }
+
+  private async read(path: string, context = path): Promise<{ text: string; config: TableConfig } | null> {
+    if (!await this.adapter.exists(path)) return null;
+    const text = await this.adapter.read(path);
+    return { text, config: parseConfig(text, context) };
+  }
+
+  async resolve(note: string, id: string, legacy = false): Promise<ResolvedExport> {
+    let fallback: ResolvedExport | undefined;
+    for (const configPath of this.candidates(note)) {
+      await this.migrate(configPath);
+      const saved = await this.read(configPath);
+      const mapped = legacy ? saved?.config.exports.find(table => table.legacyTableId === id) : undefined;
+      const entry = mapped ?? saved?.config.exports.find(table => table.id === id);
+      if (entry) {
+        const resolved: ResolvedExport = { configPath, runOnSave: entry.runOnSave !== false,
+          recipe: { version: 1, id: entry.id, format: entry.format ?? 'table', source: validateSource(resolvePath(configPath, entry.input)), columns: entry.options?.columns ?? [], sql: entry.options?.sql ?? '' } };
+        if (!legacy || mapped) return resolved;
+        // An unrelated new export cannot shadow an ancestor's legacy table.
+        if (!fallback && resolved.recipe.format === 'table') fallback = resolved;
+      }
+    }
+    if (fallback) return fallback;
+    throw new Error(`Table ${id} is missing from exports.json. The previous table has been kept.`);
+  }
+
+  async snapshot(note: string): Promise<string> {
+    const values: Array<string | null> = [];
+    for (const path of this.candidates(note)) {
+      await this.migrate(path);
+      values.push(await this.adapter.exists(path) ? await this.adapter.read(path) : null);
+    }
+    return JSON.stringify(values);
+  }
+
+  private enqueue(work: () => Promise<void>): Promise<void> {
+    const operation = this.writes.catch(() => {}).then(work);
+    this.writes = operation;
+    return operation;
+  }
+
+  /** Stage and verify before replacing an existing configuration. */
+  private async commit(path: string, saved: string | null, config: TableConfig, cancelled: () => boolean = () => false, context = path): Promise<void> {
+    const text = `${JSON.stringify(config, null, 2)}\n`;
+    parseConfig(text, context);
+    if (text === saved) return;
+    if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
+    const folder = path.slice(0, path.lastIndexOf('/'));
+    if (!await this.adapter.exists(folder)) await this.adapter.mkdir(folder);
+    const temporary = `${folder}/.exports-${crypto.randomUUID()}.json`;
+    try {
+      await this.adapter.write(temporary, text);
+      if (await this.adapter.read(temporary) !== text) throw new Error('Could not verify the saved export definition.');
+      const current = await this.adapter.exists(path) ? await this.adapter.read(path) : null;
+      if (current !== saved) throw new Error(`${path} changed while saving. Please try again.`);
+      if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
+      await this.adapter.rename(temporary, path);
+      if (await this.adapter.read(path) !== text) throw new Error('Could not verify exports.json.');
+    } finally {
+      if (await this.adapter.exists(temporary)) await this.adapter.remove(temporary);
+    }
+  }
+
+  private mutate(path: string, update: (config: TableConfig) => void, cancelled: () => boolean = () => false, previousPath = path): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
+      const saved = await this.read(path, previousPath), config = saved?.config ?? { exports: [] };
+      update(config);
+      await this.commit(path, saved?.text ?? null, config, cancelled);
+    });
+  }
+
+  private legacyPath(path: string): string { return path.replace(/exports\.json$/, 'tables.json'); }
+
+  /** Keep the original tables.json as a backup, after the merged exports file is verified. */
+  private async migrate(path: string, context = path): Promise<void> {
+    const legacyPath = this.legacyPath(path);
+    if (!await this.adapter.exists(legacyPath)) return;
+    await this.enqueue(async () => {
+      if (!await this.adapter.exists(legacyPath)) return;
+      if (this.stopped()) throw new Error('Export update cancelled.');
+      const original = await this.adapter.read(legacyPath);
+      const raw: unknown = JSON.parse(original);
+      if (!raw || typeof raw !== 'object' || !('tables' in raw) || !Array.isArray(raw.tables)) throw new Error(`Invalid tables array in ${legacyPath}.`);
+      const { tables, ...metadata } = raw;
+      const legacy = parseConfig(JSON.stringify({ ...metadata, exports: tables }), context);
+      const saved = await this.read(path, context);
+      const config: TableConfig = { ...legacy, ...saved?.config, exports: [...saved?.config.exports ?? []] };
+      for (const entry of legacy.exports) {
+        const mapped = config.exports.find(candidate => candidate.legacyTableId === entry.id);
+        if (mapped && sameLegacy(mapped, entry)) continue;
+        // A previous commit may have succeeded before the legacy file changed.
+        // Keep that export for existing canonical markers, but bind old markers
+        // to a separate definition containing the latest legacy instructions.
+        if (mapped) delete mapped.legacyTableId;
+        const current = config.exports.find(candidate => candidate.id === entry.id);
+        const same = current && sameLegacy(current, entry);
+        if (same && current && current.legacyTableId === undefined) {
+          Object.assign(current, { ...entry, ...current, options: { ...entry.options, ...current.options }, legacyTableId: entry.id });
+          continue;
+        }
+        config.exports.push({ ...entry, format: 'table', legacyTableId: entry.id, ...(current ? { id: crypto.randomUUID() } : {}) });
+      }
+      await this.commit(path, saved?.text ?? null, config, undefined, context);
+      if (await this.adapter.read(legacyPath) !== original) throw new Error(`${legacyPath} changed during migration. Please try again.`);
+      if (this.stopped()) throw new Error('Export update cancelled.');
+      const backup = await this.adapter.exists(`${legacyPath}.bak`) ? `${legacyPath}.${crypto.randomUUID()}.bak` : `${legacyPath}.bak`;
+      await this.adapter.rename(legacyPath, backup);
+    });
+  }
+
+  async save(note: string, recipe: TableRecipe, cancelled?: () => boolean, runOnSave = true): Promise<TableRecipe> {
+    let configPath = EXPORT_CONFIG_PATH;
+    for (const candidate of this.candidates(note)) if (await this.adapter.exists(candidate) || await this.adapter.exists(this.legacyPath(candidate))) { configPath = candidate; break; }
+    await this.migrate(configPath);
+    let result = recipe;
+    await this.mutate(configPath, config => {
+      const matching = config.exports.find(entry => entry.id === recipe.id);
+      if (matching) {
+        const same = (entry: TableDefinition) => validateSource(resolvePath(configPath, entry.input)) === recipe.source &&
+          JSON.stringify(entry.options?.columns ?? []) === JSON.stringify(recipe.columns) && (entry.options?.sql ?? '') === recipe.sql && (entry.format ?? 'table') === (recipe.format ?? 'table') && (entry.runOnSave !== false) === runOnSave;
+        if (same(matching)) return;
+        const previous = config.exports.find(entry => same(entry) && entry.output !== undefined && resolvePath(configPath, entry.output) === note);
+        if (previous) { result = { ...recipe, id: previous.id }; return; }
+        result = { ...recipe, id: crypto.randomUUID() };
+      }
+      config.exports.push({ id: result.id, format: result.format ?? 'table', input: relativePath(configPath, result.source), output: relativePath(configPath, note),
+        runOnSave, options: { columns: result.columns, sql: result.sql } });
+    }, cancelled);
+    return result;
+  }
+
+  async rename(notes: string[], oldPath: string, newPath: string): Promise<void> {
+    const paths = new Set(notes.flatMap(note => this.candidates(note)));
+    for (const path of paths) {
+      const previousConfig = path.startsWith(`${newPath}/`) ? oldPath + path.slice(newPath.length) : path;
+      await this.migrate(path, previousConfig);
+      if (!await this.adapter.exists(path)) continue;
+      await this.mutate(path, config => {
+        for (const entry of config.exports) for (const key of ['input', 'output'] as const) {
+          if (entry[key] === undefined) continue;
+          // A config moved with its enclosing folder still contains paths relative
+          // to its former location, including references outside that folder.
+          const resolved = resolvePath(previousConfig, entry[key]);
+          const renamed = resolved === oldPath || resolved.startsWith(`${oldPath}/`) ? newPath + resolved.slice(oldPath.length) : resolved;
+          entry[key] = relativePath(path, renamed);
+        }
+      }, undefined, previousConfig);
+    }
+  }
+}

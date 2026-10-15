@@ -59,6 +59,20 @@ test("process failures reject with Error objects even for untyped event payloads
   }
 });
 
+test("captured commands wait for stdout EOF and preserve split UTF-8 characters", async () => {
+  const child = childProcess();
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall" }), { record: async () => {} });
+  const pending = service.captureCommand([], ".");
+  const bytes = Buffer.from("Hello 😀\n");
+  child.stdout.emit("data", bytes.subarray(0, 8));
+  child.emit("exit", 0, null);
+  child.stdout.emit("data", bytes.subarray(8));
+  child.emit("close", 0, null);
+  assert.equal(await pending, "Hello 😀\n");
+  service.unload();
+});
+
 test("adapter discovery finds root and nested hidden configs from indexed folders", async () => {
   const configs = new Set([".csvzall/charts.json", "reports/.csvzall/charts.json"]);
   const adapter = { exists: async (path: string) => configs.has(path) };

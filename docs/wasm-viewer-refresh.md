@@ -5,6 +5,15 @@ compiled JavaScript unchanged; it never repairs minified variable names. Save
 acknowledgements, edit revisions, and keyboard visibility live in the upstream
 WASM host integration. Theme and dialog helpers are shared with the native viewer.
 
+The host can request a save with `{ source: "obsidian-csvzall", type:
+"save-request", version: 1, requestId }`. The viewer stops the active editor,
+waits for pending edits and persistence, then returns `save-response` with the
+same version/id, `success`, `dirty`, and optional `error`. Navigation may proceed
+only after a successful clean response. WASM advertises
+`csvzall-host-save-request-v1`; unsupported helpers time out without discarding
+edits. The Obsidian confirmation uses the standard title and `mod-cta` Save
+button, preserving the user's theme and accent.
+
 ## Prerequisites
 
 Install this repository's dependencies with `npm ci`. In the csvzall checkout,
