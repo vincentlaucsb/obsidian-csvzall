@@ -1,14 +1,14 @@
-const CACHE_NAME = "csvzall-viewer-62e14c792e7a";
+const CACHE_NAME = "csvzall-viewer-bdfc935f6e99";
 const PRECACHE_URLS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
-  "./assets/csv-worker-eTRdlAa1.js",
-  "./assets/csvzall_viewer_wasm-Hmw-1bsF.wasm",
+  "./assets/csv-worker-QSwbIe92.js",
+  "./assets/csvzall_viewer_wasm-BEOP-Zcf.wasm",
   "./assets/index-CF_9F-mP.css",
-  "./assets/index-Qp5gJYSi.js"
+  "./assets/index-GLYYHJzi.js"
 ];
 
 self.addEventListener('install', (event) => {

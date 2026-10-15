@@ -1,0 +1,25 @@
+{
+  "exports": [
+    {
+      "id": "open-tasks-demo",
+      "input": "Table export demo.csv",
+      "output": "Table export demo.md",
+      "runOnSave": true,
+      "options": {
+        "columns": [],
+        "sql": "SELECT title, priority FROM data WHERE status = 'open' ORDER BY priority DESC, title"
+      },
+      "format": "table"
+    },
+    {
+      "id": "open-task-count-demo",
+      "format": "value",
+      "input": "Table export demo.csv",
+      "output": "Table export demo.md",
+      "runOnSave": true,
+      "options": {
+        "sql": "SELECT COUNT(*) FROM data WHERE status = 'open'"
+      }
+    }
+  ]
+}

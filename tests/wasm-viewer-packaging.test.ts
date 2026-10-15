@@ -15,7 +15,7 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
   try {
     mkdirSync(assets, { recursive: true });
     const bundle = JSON.stringify([
-      "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-edit-revision-v1",
+      "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-host-save-request-v1", "csvzall-edit-revision-v1",
       "csvzall-obsidian-keyboard-lifecycle-v2", "csvzall-obsidian-viewport-resize-v2",
       "theme-ready", "data-csvzall-dialog-dismiss-v1",
     ]);

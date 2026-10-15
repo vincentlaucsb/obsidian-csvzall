@@ -3,6 +3,7 @@ import { csvzallDirtyStateFromMessageEvent } from "../viewerHelpers.js";
 import { UnsavedChangesModal } from "./UnsavedChangesModal.js";
 import { VIEW_TYPE_CSVZALL } from "./viewTypes.js";
 import { synchronizeViewerTheme } from "./viewerTheme.js";
+import { openViewerDocumentation } from "./viewerDocumentation.js";
 
 export interface CsvzallTableViewOwner {
   handleLeafClosed(leaf: WorkspaceLeaf): void;
@@ -94,6 +95,8 @@ export class CsvzallTableView extends FileView {
   private originalSetViewState: ProtectedLeaf["setViewState"] | null = null;
   private patchedSetViewState: ProtectedLeaf["setViewState"] | null = null;
   private pendingDiscardConfirmation: Promise<boolean> | null = null;
+  private nextSaveRequestId = 0;
+  private pendingSave: { requestId: number; resolve: () => void; reject: (error: Error) => void; timer: number } | null = null;
   private allowingProtectedLeafAction = false;
 
   constructor(
@@ -454,8 +457,10 @@ export class CsvzallTableView extends FileView {
       return;
     }
 
+    const generation = this.renderGeneration;
+    const file = this.file;
     const discard = await this.confirmDiscardChanges();
-    if (!discard || this.allowingProtectedLeafAction) {
+    if (!discard || this.allowingProtectedLeafAction || generation !== this.renderGeneration || file !== this.file) {
       return;
     }
 
@@ -470,7 +475,7 @@ export class CsvzallTableView extends FileView {
 
   private async confirmDiscardChanges(): Promise<boolean> {
     if (!this.pendingDiscardConfirmation) {
-      this.pendingDiscardConfirmation = new UnsavedChangesModal(this.app)
+      this.pendingDiscardConfirmation = new UnsavedChangesModal(this.app, () => this.saveBeforeLeaving())
         .confirmDiscard()
         .finally(() => {
           this.pendingDiscardConfirmation = null;
@@ -479,12 +484,59 @@ export class CsvzallTableView extends FileView {
     return await this.pendingDiscardConfirmation;
   }
 
+  private async saveBeforeLeaving(): Promise<void> {
+    const frame = this.frame;
+    if (!frame?.contentWindow) throw new Error("The CSV viewer is unavailable. Your edits have not been discarded.");
+    if (!this.wasmFile && this.file?.path !== this.desktopSourcePath) throw new Error("Restore the CSV's original path before saving, or discard the edits.");
+    if (this.pendingSave) throw new Error("A CSV save is already in progress.");
+    await new Promise<void>((resolve, reject) => {
+      const requestId = ++this.nextSaveRequestId;
+      const timer = window.setTimeout(() => {
+        this.pendingSave = null;
+        reject(new Error("The viewer did not confirm the save. Your edits are still open; update the csvzall helper if needed and retry."));
+      }, 60000);
+      this.pendingSave = { requestId, resolve, reject, timer };
+      try {
+        frame.contentWindow!.postMessage({ source: "obsidian-csvzall", type: "save-request", version: 1, requestId }, "*");
+      } catch (error) {
+        this.finishPendingSave(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private finishPendingSave(error?: Error): void {
+    const pending = this.pendingSave;
+    if (!pending) return;
+    this.pendingSave = null;
+    window.clearTimeout(pending.timer);
+    if (error) pending.reject(error);
+    else pending.resolve();
+  }
+
+  private handleSaveResponse(data: unknown): boolean {
+    if (!data || typeof data !== "object") return false;
+    const reply = data as { source?: unknown; type?: unknown; version?: unknown; requestId?: unknown; success?: unknown; dirty?: unknown; error?: unknown };
+    if ((reply.source !== "csvzall-viewer" && reply.source !== "csvzall-wasm-viewer") || reply.type !== "save-response" || reply.version !== 1) return false;
+    if (!this.pendingSave || reply.requestId !== this.pendingSave.requestId || typeof reply.success !== "boolean" || typeof reply.dirty !== "boolean") return true;
+    if (!reply.success) this.finishPendingSave(new Error(typeof reply.error === "string" ? reply.error : "Could not save CSV. Your edits are still open."));
+    else if (reply.dirty) {
+      this.setDirty(true);
+      this.finishPendingSave(new Error("New edits arrived while saving. Save again before leaving."));
+    } else {
+      this.setDirty(false);
+      this.finishPendingSave();
+    }
+    return true;
+  }
+
   private listenForDirtyState(frame: HTMLIFrameElement): void {
     this.frame = frame;
     this.messageHandler = (event) => {
       if (event.source !== this.frame?.contentWindow) {
         return;
       }
+      if (this.handleSaveResponse(event.data)) return;
+      if (openViewerDocumentation(event, this.frame?.contentWindow ?? null)) return;
       if (this.handleWasmViewerMessage(event)) {
         return;
       }
@@ -498,6 +550,7 @@ export class CsvzallTableView extends FileView {
   }
 
   private removeMessageListener(): void {
+    this.finishPendingSave(new Error("The CSV viewer closed before saving completed."));
     this.themeCleanup?.();
     this.themeCleanup = null;
     if (this.messageHandler) {

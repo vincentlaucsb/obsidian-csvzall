@@ -74,3 +74,38 @@ Desktop and mobile release versions are independent. This repository's
 desktop version is maintained in `manifest.json`, `versions.json`,
 `package.json`, and `package-lock.json`; a separate mobile release uses
 `mobile-src/manifest.json`.
+
+## Live browser checks
+
+Use a disposable CSV copied from `demo-vault/` into the ignored
+`.test-build/live-browser/` directory. Start a locally built helper with
+`csvzall view <disposable.csv> --edit --no-open --startup-json --viewer-assets
+<csvzall-checkout>/src/viewer`, and open the exact URL printed in its startup
+JSON using the supported in-app browser. Keep the process running throughout
+the check; stop it and close the temporary browser tab afterward.
+
+In the Codex Windows sandbox, a server can report successful startup while
+loopback connections from the browser time out. The verified route is to run
+this test server through `exec_command` with approved
+`sandbox_permissions: "require_escalated"`. Keep its existing `127.0.0.1`
+binding and session token authentication. Do not change firewall settings,
+expose the server on the network, or bypass a browser policy stop. No personal
+browser profile or vault is needed.
+
+Use fresh DOM snapshots and role/name locators such as
+`getByRole("combobox", { name: "Chart type", exact: true })`. Some legacy
+chart controls expose accessible names without HTML label associations, so
+`getByLabel` does not find them reliably.
+
+Check the shared Markdown table form's entire CSV, selected columns, SQLite
+query preview and query error states. Save an export and inspect the generated
+ordinary Markdown file and `.csvzall/charts.json` in the disposable directory.
+For the SQL viewer, check Ctrl/Cmd+Enter, Copy Markdown, errors, empty results,
+and switching directly from an active cell editor to SQL: the unsaved value
+must appear, and returning to Table must preserve the edit. Charts asks to
+save or discard unsaved CSV edits before opening; use only the disposable
+copy for this check.
+
+These browser checks cover the native viewer host. Check note insertion,
+managed region refresh and the Obsidian modal separately in the canonical
+demo vault when supported native UI access is available.

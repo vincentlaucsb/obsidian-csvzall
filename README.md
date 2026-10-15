@@ -68,6 +68,34 @@ saved.
 Besides chart image outputs, `type: "markdown-table"` can write generated
 Markdown notes that you embed with Obsidian's `![[path/to/output]]` syntax.
 
+## CSV exports in notes
+
+While editing a note, run **Insert from CSV**, or choose it from the
+editor context menu. Pick a CSV from your vault, then include the entire CSV,
+select columns, or enter a SQLite query against table `data`. **Preview** shows
+up to 20 rows; inserting a table includes the full result. Choose **Insert as: Value** to insert
+a single query result directly into a sentence. Value queries must return exactly
+one row and one column; text is escaped for Markdown and line breaks become spaces.
+
+**Keep updated when CSV changes** is enabled by default. The note contains an
+ordinary Markdown table or inline text with short ID markers in hidden HTML
+comments. Sources and queries are saved in `.csvzall/exports.json`, alongside
+chart definitions. Existing table definitions and markers migrate automatically;
+the original `tables.json` is retained as a backup.
+CSV saves refresh the table while the desktop plugin is running; enabling the
+plugin also refreshes saved tables. Text outside the table is preserved. If a
+source is missing or a query fails, the previous table is kept.
+
+Place the cursor inside a generated table to edit its source or query, refresh
+it, open its source, or stop automatic updates using the command palette or
+editor context menu. Stopping updates leaves a normal editable Markdown table.
+Changes made directly to a linked table may be replaced on its next refresh.
+
+You can also right-click a CSV and choose **Export to Markdown note** to create
+a new note. Generated tables remain readable when the plugin is disabled.
+Generation and automatic refresh require the desktop plugin and csvzall helper;
+the mobile companion can display the saved notes.
+
 ## Development
 
 ```powershell

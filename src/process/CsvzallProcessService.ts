@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { dirname, isAbsolute } from "path";
+import { StringDecoder } from "string_decoder";
 import type { WorkspaceLeaf } from "obsidian";
 import { Notice } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
@@ -48,6 +49,17 @@ export class CsvzallProcessService {
   }
 
   async runCommand(args: string[], cwd: string, label: string): Promise<void> {
+    await this.captureCommand(args, cwd).catch(async (error: unknown) => {
+      if (this.unloading) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`csvzall failed to regenerate ${label}: ${message}`);
+      await this.eventLog.record("error", `Failed to regenerate ${label}`, message);
+      console.error(`csvzall failed to regenerate ${label}`, error);
+      throw error;
+    });
+  }
+
+  async captureCommand(args: string[], cwd: string): Promise<string> {
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     const executable = stripOuterQuotes(this.getSettings().csvzallPath);
     const child = spawn(executable, args, {
@@ -57,30 +69,49 @@ export class CsvzallProcessService {
     let stdout = "";
     let stderr = "";
 
-    await new Promise<void>((resolve, reject) => {
-      const cancel = () => {
+    const decoder = new StringDecoder("utf8");
+    return await new Promise<string>((resolve, reject) => {
+      let settled = false;
+      let bytes = 0;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
         this.pending.delete(cancel);
-        child.kill();
-        reject(new ViewerStartupCancelledError("Plugin unloaded"));
+        window.clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve(stdout + decoder.end());
       };
+      const cancel = () => {
+        child.kill();
+        finish(new ViewerStartupCancelledError("Plugin unloaded"));
+      };
+      const timeout = window.setTimeout(() => {
+        child.kill();
+        finish(new Error("CSV command timed out after 60 seconds."));
+      }, 60000);
       this.pending.add(cancel);
       child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.on("error", (error: unknown) => {
-        this.pending.delete(cancel);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      });
-      child.on("exit", (code, signal) => {
-        this.pending.delete(cancel);
-        if (code === 0) {
-          resolve();
+        bytes += chunk.length;
+        if (bytes > 16 * 1024 * 1024) {
+          child.kill();
+          finish(new Error("Table output exceeds 16 MB. Select fewer rows or columns with a query."));
           return;
         }
-        reject(
+        stdout += decoder.write(chunk);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString("utf8")).slice(-8000);
+      });
+      child.on("error", (error: unknown) => {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      });
+      // close follows stdout EOF; exit can arrive before the last output chunk.
+      child.on("close", (code, signal) => {
+        if (code === 0) {
+          finish();
+          return;
+        }
+        finish(
           new Error(
             formatProcessFailure({
               executable,
@@ -94,13 +125,6 @@ export class CsvzallProcessService {
           ),
         );
       });
-    }).catch(async (error) => {
-      if (this.unloading) throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      new Notice(`csvzall failed to regenerate ${label}: ${message}`);
-      await this.eventLog.record("error", `Failed to regenerate ${label}`, message);
-      console.error(`csvzall failed to regenerate ${label}`, error);
-      throw error;
     });
   }
 

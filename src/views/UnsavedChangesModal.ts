@@ -1,9 +1,10 @@
-import { App, Modal } from "obsidian";
+import { App, Modal, Notice } from "obsidian";
 
 export class UnsavedChangesModal extends Modal {
   private resolveResult: ((discard: boolean) => void) | null = null;
+  private closed = false;
 
-  constructor(app: App) {
+  constructor(app: App, private readonly save: () => Promise<void>) {
     super(app);
   }
 
@@ -16,15 +17,13 @@ export class UnsavedChangesModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
+    this.closed = false;
     contentEl.empty();
-    contentEl.addClass("csvzall-unsaved-changes-modal");
-    contentEl.createEl("h2", {
-      text: "Unsaved changes",
-      cls: "csvzall-unsaved-changes-title",
-    });
+    this.titleEl.setText("Unsaved changes");
     contentEl.createEl("p", { text: "This CSV has unsaved changes." });
 
     const actions = contentEl.createDiv({ cls: "modal-button-container" });
+    const saveButton = actions.createEl("button", { text: "Save", cls: "mod-cta", attr: { autofocus: "" } });
     const discardButton = actions.createEl("button", {
       text: "Discard changes",
       cls: "mod-warning",
@@ -39,9 +38,26 @@ export class UnsavedChangesModal extends Modal {
     cancelButton.addEventListener("click", () => {
       this.finish(false);
     });
+    saveButton.addEventListener("click", () => {
+      saveButton.disabled = true;
+      discardButton.disabled = true;
+      void this.save().then(() => {
+        if (!this.closed) this.finish(true);
+      }).catch((error: unknown) => {
+        if (!this.closed) new Notice(error instanceof Error ? error.message : String(error));
+      }).finally(() => {
+        if (!this.closed) {
+          saveButton.disabled = false;
+          discardButton.disabled = false;
+          saveButton.focus();
+        }
+      });
+    });
+    saveButton.focus();
   }
 
   onClose(): void {
+    this.closed = true;
     this.contentEl.empty();
     this.resolve(false);
   }

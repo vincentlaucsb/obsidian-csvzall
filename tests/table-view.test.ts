@@ -24,7 +24,9 @@ function fixture() {
   const messages: any[] = [];
   const exports: any = {};
   const module = {exports};
-  runInNewContext(compiled, {module, exports, ArrayBuffer, Uint8Array, require: () => ({
+  runInNewContext(compiled, {module, exports, ArrayBuffer, Uint8Array,
+    window: { setTimeout, clearTimeout, removeEventListener() {} },
+    require: () => ({
     FileView: class {leaf: any; constructor(leaf: any) {this.leaf = leaf;}},
     Modal: class {}, Platform: {isMobileApp: false}, Notice: class {constructor(message: string) {notices.push(message);}},
   })});
@@ -105,6 +107,42 @@ test("canceling discard keeps renamed desktop editor locked and dirty", async ()
   assert.equal(acted, false);
   assert.equal(f.view.dirty, true);
   assert.equal(f.frame.inert, true);
+});
+
+test('Save before navigation waits for the matching persisted viewer acknowledgment', async () => {
+  const f = fixture(); f.view.dirty = true;
+  f.view.confirmDiscardChanges = async () => { await f.view.saveBeforeLeaving(); return true; };
+  let acted = false;
+  const navigation = f.view.runProtectedLeafAction(() => { acted = true; });
+  assert.equal(acted, false);
+  const request = f.messages[0];
+  const response = { source: 'csvzall-wasm-viewer', type: 'save-response', version: 1, requestId: request.requestId, success: true, dirty: false };
+  f.view.handleSaveResponse({ ...response, requestId: request.requestId + 1 });
+  assert.equal(acted, false);
+  f.view.handleSaveResponse(response); await navigation;
+  assert.equal(acted, true); assert.equal(f.view.dirty, false);
+});
+
+test('failed saves and edits during saving retain dirty state and stop navigation', async () => {
+  for (const success of [true, false]) {
+    const f = fixture(); f.view.dirty = true;
+    const pending = f.view.saveBeforeLeaving();
+    const rejected = assert.rejects(pending, success ? /New edits/ : /disk full/);
+    f.view.handleSaveResponse({ source: 'csvzall-wasm-viewer', type: 'save-response', version: 1,
+      requestId: f.messages[0].requestId, success, dirty: true, error: 'disk full' });
+    await rejected; assert.equal(f.view.dirty, true);
+  }
+});
+
+test('late confirmation cannot navigate a replacement CSV view', async () => {
+  const f = fixture(); f.view.dirty = true;
+  const decision = deferred<boolean>();
+  f.view.confirmDiscardChanges = () => decision.promise;
+  let acted = false;
+  const pending = f.view.runProtectedLeafAction(() => { acted = true; });
+  f.view.renderGeneration++;
+  decision.resolve(true); await pending;
+  assert.equal(acted, false);
 });
 
 for (const installed of [true, false]) {

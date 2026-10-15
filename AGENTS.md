@@ -1,5 +1,12 @@
 # Repository Guide
 
+## Git synchronization
+
+- When working on `master` or `main`, pull from `origin` before editing if the last successful pull is unknown or more than one hour old. Use `git pull --ff-only origin master` (or `main`, matching the current branch). A fetch alone does not update the working branch.
+- During long sessions, refresh again before starting a new independent task once that window has elapsed. Do not assume a checkout is current because an earlier task fetched it.
+- Preserve uncommitted and untracked work, and coordinate with other agents using the checkout before pulling. Never reset, discard changes, or force-update a branch to make a pull succeed; inspect and reconcile any overlap or divergence.
+- On a feature branch, keep its intended upstream and do not switch branches or merge the default branch merely to satisfy this rule.
+
 ## Directory Structure
 
 - `src/main.ts`: Obsidian plugin composition root. It should only load settings, construct services, register views/commands/watchers, and handle unload.
@@ -70,6 +77,7 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 
 ## Obsidian Review Rules
 
+- In Obsidian-hosted UI, preserve Obsidian defaults and the user's active theme/CSS styling. Use the standard Modal title element and built-in semantic classes such as `mod-cta` for the user's accent. Do not add custom heading typography, control colors, fonts, line heights, padding, or vertical-alignment overrides to restyle native controls. Keep custom CSS limited to necessary feature layout; shared viewer components must inherit host styling.
 - Follow the official Obsidian developer policies, plugin submission requirements, and plugin guidelines before cutting a release.
 - Settings tabs: keep general settings at the top without a heading. Do not use top-level headings like `General`, `Settings`, or the plugin name. If a settings section heading is needed, use `new Setting(containerEl).setName(...).setHeading()` and avoid the word `settings` in the heading.
 - UI text should use sentence case. Do not repeat the plugin name in command names; Obsidian already shows the plugin name next to commands.
@@ -85,6 +93,9 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - `package.json` `engines.node`: supported Node.js versions for the lint/build toolchain.
 - `package-lock.json`: npm lockfile root package version.
 - `mobile-src/manifest.json`: generated mobile plugin version and minimum supported Obsidian app version.
+- `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
+- `src/views/CsvzallTableView.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
+- `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.
 
 After every Obsidian validation failure fix, bump the plugin patch version before
 creating or retrying a release tag. The release tag, `manifest.json`,
