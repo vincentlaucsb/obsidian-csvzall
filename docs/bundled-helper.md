@@ -56,8 +56,9 @@ token; the preparation checkout/push/PR uses it when available.
 The generated snapshot is committed before tagging so a clean GitHub source
 archive contains exactly the bytes bundled into the release. After `npm ci`,
 ordinary plugin builds need neither Git, a native compiler, nor helper downloads.
-The initial imported 0.5.0 archives have no source-build receipt, so the first
-preparation intentionally builds all three. They remain usable for local builds.
+The initial imported 0.5.0 archives had no source-build receipt. The first
+preparation rebuilt all three and froze the verified 0.6.0 snapshot for desktop
+0.5.0; subsequent releases reuse it while the source and recipe remain unchanged.
 
 ## Local inspection and maintenance
 

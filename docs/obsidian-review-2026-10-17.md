@@ -1,6 +1,6 @@
 # Obsidian release review: October 17, 2026
 
-Preparing desktop 0.5.0 and csvzall Lite 0.2.0 from the reviewed working tree.
+Published desktop 0.5.0 and csvzall Lite 0.2.0 from the reviewed working tree.
 The native helper source is pinned to csvzall 0.6.0, commit
 `34bab618cbf91b78f016430fcff7c0c27805835e`. Native archives are frozen by release
 preparation before the desktop release tag is created.
@@ -32,6 +32,22 @@ Local verification before release preparation:
   Obsidian's community directory. Release tags and attached manifests must
   match their respective plugin versions.
 
-Physical-device testing and a refreshed hosted scorecard for these unpublished
-versions are not claimed. Public releases and hosted workflow results will be
-verified after publication; service-unavailable scans are not passing results.
+Publication verification:
+
+- [Desktop preparation](https://github.com/vincentlaucsb/obsidian-csvzall/actions/runs/39058558766)
+  built and smoke-tested all three platforms. Its verified snapshot was merged
+  through [PR #10](https://github.com/vincentlaucsb/obsidian-csvzall/pull/10) before tagging.
+- [Desktop publication](https://github.com/vincentlaucsb/obsidian-csvzall/actions/runs/39058970399)
+  and the merged commit's unit and coverage checks passed. Publication verified
+  the snapshot, ran tests and the source-archive build, and attested the assets.
+- [Unchanged-source preparation](https://github.com/vincentlaucsb/obsidian-csvzall/actions/runs/39059027452)
+  passed with native compilation skipped and no new preparation PR or commit.
+- [Lite validation](https://github.com/vincentlaucsb/obsidian-csvzall-mobile/actions/runs/39058537207)
+  and [publication](https://github.com/vincentlaucsb/obsidian-csvzall-mobile/actions/runs/39058591528)
+  passed. Both plugins' latest stable releases expose exactly the standard three
+  assets; downloaded bytes match their validated builds and version metadata.
+- The exact Windows helper from preparation also passed a local checksum,
+  architecture, version, and HTTP viewer startup check after publication.
+
+Physical-device testing and a refreshed hosted scorecard for these versions are
+not claimed; service-unavailable scans are not passing results.
