@@ -6,19 +6,72 @@ on:
       - "[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
     inputs:
+      operation:
+        description: Prepare verified binaries in a release PR, or publish an existing tag
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+        required: true
       tag:
-        description: "Release tag to publish assets to, for example 0.1.0"
+        description: "Plugin version to prepare or publish, for example 0.4.1"
         required: true
         type: string
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ inputs.tag || github.ref_name }}-${{ inputs.operation || 'publish' }}
+  cancel-in-progress: false
 
 jobs:
+  prepare-helpers:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'prepare'
+    uses: ./.github/workflows/build-obsidian-helpers.yml
+    with:
+      tag: ${{ inputs.tag }}
+
+  prepare:
+    needs: prepare-helpers
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_BASE: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ secrets.RELEASE_PREPARATION_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PREPARATION_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Validate intended release version
+        run: node scripts/validate-release.mjs "$RELEASE_TAG"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare-helpers.outputs.artifact }}
+          path: .test-build/prepared-native-helpers
+      - name: Freeze verified helpers into the release source snapshot
+        run: node scripts/native-helper-contract.mjs install .test-build/prepared-native-helpers
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:source-archive
+      - name: Open preparation PR with the exact binaries and generated plugin
+        run: node scripts/prepare-desktop-release.mjs "$RELEASE_TAG"
+
   release:
+    if: github.event_name == 'push' || inputs.operation == 'publish'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Check out repository
@@ -32,32 +85,22 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Verify tagged snapshot matches pinned helper source and recipe
+        run: |
+          node scripts/validate-release.mjs "$RELEASE_TAG"
+          node scripts/native-helper-contract.mjs verify
+
       - name: Install dependencies
         run: npm ci
 
       - name: Build and test
         run: npm test
 
-      - name: Resolve release tag
-        id: release-tag
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            tag="${{ inputs.tag }}"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+      - name: Verify batteries included desktop bundle
+        run: npm run check:bundled-helper
 
-      - name: Verify manifest version matches tag
-        shell: bash
-        run: |
-          tag="${{ steps.release-tag.outputs.tag }}"
-          version="$(node -p "require('./manifest.json').version")"
-          if [[ "${version}" != "${tag}" ]]; then
-            echo "manifest.json version (${version}) must match release tag (${tag})." >&2
-            exit 1
-          fi
+      - name: Verify clean source archive build
+        run: npm run check:source-archive
 
       - name: Generate release asset attestations
         uses: actions/attest@v4
@@ -72,12 +115,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          tag="${{ steps.release-tag.outputs.tag }}"
+          tag="$RELEASE_TAG"
           assets=(manifest.json main.js styles.css)
+          helper_version="$(node -p "require('./native-binaries/manifest.json').version")"
           if gh release view "${tag}" >/dev/null 2>&1; then
             gh release upload "${tag}" "${assets[@]}" --clobber
           else
             gh release create "${tag}" "${assets[@]}" \
               --title "${tag}" \
-              --notes "Release ${tag}"
+              --notes "Batteries included: bundled csvzall ${helper_version} for Windows x64, macOS arm64, and Linux x64. The helper updates with the plugin and works offline. Custom executable paths remain supported."
           fi

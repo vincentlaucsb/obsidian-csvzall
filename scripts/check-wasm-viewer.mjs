@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { requireHostIntegration } from "./wasm-viewer-contract.mjs";
+import { requireHostIntegration, requireEmbeddedAssets } from "./wasm-viewer-contract.mjs";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -38,8 +38,8 @@ if (!hasJavaScript) {
 if (assets.some((name) => name.endsWith(".css"))) {
   fail("stylesheet bundles should be inlined into index.html so Obsidian's source scanner does not lint generated AG Grid CSS");
 }
-if (wasmAssets.length !== 1) {
-  fail(`expected exactly one .wasm file, found ${wasmAssets.length}`);
+if (wasmAssets.length !== 0) {
+  fail("the embedded viewer must inline its WASM engine instead of requesting it through a vault URL");
 }
 
 const indexHtml = readFileSync(indexPath, "utf8");
@@ -70,17 +70,18 @@ const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name))
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
 requireHostIntegration(indexBundle);
+requireEmbeddedAssets(indexHtml, indexBundle);
 const stylesheetBundle = stylesheetBundleName ?
   readFileSync(join(assetsDir, stylesheetBundleName), "utf8") :
   (indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "");
 if (!stylesheetBundle) {
   fail("index.html is missing the inline viewer stylesheet");
 }
-if (!indexBundle.includes("csvzall-obsidian-host-compact-v1") && !stylesheetBundle.includes("csvzall-obsidian-host-compact-v1")) {
-  fail("packaged viewer is missing compact Obsidian host styles");
+if (!stylesheetBundle.includes("--csvzall-shared-shell-v1")) {
+  fail("packaged viewer is missing the shared upstream shell stylesheet");
 }
-if (!stylesheetBundle.includes("body[data-host-mode] .topbar p") || !stylesheetBundle.includes("display: none")) {
-  fail("packaged viewer should hide the standalone status line in Obsidian host mode");
+for (const feature of ["/api/sql-query", "heatmap-chart-form", "SQLite query", "chart-dirty-dialog"]) {
+  if (indexBundle.includes(feature)) fail(`Lite must not bundle optional native feature: ${feature}`);
 }
 if (!indexBundle.includes("checkboxes:!1") || !indexBundle.includes("headerCheckbox:!1")) {
   fail("packaged viewer should disable AG Grid selection checkboxes");
@@ -100,7 +101,7 @@ if (!indexBundle.includes("csvzall-obsidian-keyboard-lifecycle-v2") || !indexBun
 if (stylesheetBundle.includes("body[data-host-mode][data-keyboard-open]")) {
   fail("packaged viewer should not reflow host layout while AG Grid is editing");
 }
-if (!stylesheetBundle.includes("body[data-host-mode] { height: 100vh; min-height: 100vh")) {
+if (!/body\[data-host-mode\]\s*\{[^}]*height:\s*100%/.test(stylesheetBundle)) {
   fail("packaged viewer should give the hosted grid a concrete iframe-local height");
 }
 
@@ -114,4 +115,4 @@ for (const field of ["sourceRepo", "sourceCommit", "sourcePath", "syncedAt"]) {
   }
 }
 
-console.log(`WASM viewer assets OK (${wasmAssets[0]}).`);
+console.log("WASM viewer assets OK (inline worker and validated WASM engine).");

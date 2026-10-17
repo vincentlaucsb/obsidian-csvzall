@@ -4,7 +4,7 @@ import type { ObsidianFilesystem } from '../obsidian/filesystem.js';
 import type { CsvzallProcessService } from '../process/CsvzallProcessService.js';
 import { csvHeader, findManagedTables, managedTableText, replaceManagedTable, scalarMarkdown, shortenManagedTable, tableBody, validateSource, type ManagedTable, type TableRecipe } from './managedTables.js';
 import { tableQuery, type TableValue } from './table-form.mjs';
-import { ExportDefinitions, type ResolvedExport } from './ExportDefinitions.js';
+import { ExportDefinitions, type ResolvedExport, type SavedExport } from './ExportDefinitions.js';
 import { TableModal } from './TableModal.js';
 
 export class MarkdownTableService {
@@ -21,6 +21,7 @@ export class MarkdownTableService {
   private readonly revisions = new Map<string, number>();
   private readonly errors = new Map<string, string>();
   private readonly indexRevisions = new Map<TFile, number>();
+  private readonly deletingSources = new Set<string>();
 
   constructor(private readonly app: App, private readonly filesystem: ObsidianFilesystem,
     private readonly processService: CsvzallProcessService, private readonly eventLog: EventLog) {
@@ -130,7 +131,8 @@ export class MarkdownTableService {
     this.running = true;
     try {
       while (!this.stopped && this.queued.size) {
-        const file = this.queued.values().next().value as TFile;
+        const [file] = this.queued;
+        if (!(file instanceof TFile)) break;
         this.queued.delete(file);
         try { await this.refresh(file, undefined, true); } catch (error) { await this.report(file, error); }
       }
@@ -174,9 +176,11 @@ export class MarkdownTableService {
         const definition = await this.definitions.resolve(file.path, table.id);
         if (automatic && !definition.runOnSave) continue;
         const recipe = definition.recipe;
+        if (this.deletingSources.has(recipe.source)) continue;
         const revision = this.revisions.get(recipe.source);
         const markdown = await this.render(recipe);
         if (this.stopped) return;
+        if (this.deletingSources.has(recipe.source)) continue;
         if (path !== file.path || snapshot !== await this.definitions.snapshot(file.path) || revision !== this.revisions.get(recipe.source)) { this.schedule(file); continue; }
         await this.replace(file, table, this.regionText(table, recipe, markdown));
         this.errors.delete(file.path);
@@ -301,5 +305,73 @@ export class MarkdownTableService {
     const body = tableBody(table);
     await this.replace(file, table, body);
     await this.index(file);
+  }
+
+  listExports(folders: string[]): Promise<SavedExport[]> { return this.definitions.list(folders); }
+
+  async loadColumns(source: string): Promise<string[]> {
+    const root = this.filesystem.getVaultRoot();
+    if (!root) throw new Error('Export generation requires a local desktop vault.');
+    return csvHeader(await this.processService.captureCommand(['sql', 'query', '--csv', this.sourceFile(source).path,
+      '--format', 'csv', '--sql', 'SELECT * FROM data LIMIT 0'], root));
+  }
+
+  configureExport(saved: SavedExport, onSaved: () => void): void {
+    new TableModal(this.app, {
+      value: { source: saved.recipe.source, columns: saved.recipe.columns, sql: saved.recipe.sql,
+        format: saved.recipe.format, autoUpdate: saved.runOnSave },
+      showSource: false, showFormat: true, submitLabel: 'Update export',
+      loadColumns: source => this.loadColumns(source),
+      preview: value => this.render(value, 20),
+      submit: async (value, signal) => {
+        await this.render(value);
+        await this.definitions.update(saved, { ...saved.recipe, columns: value.columns, sql: value.sql,
+          format: value.format ?? 'table' }, value.autoUpdate, () => signal.aborted);
+        await this.initialize();
+        onSaved();
+      },
+    }).open();
+  }
+
+  async removeExport(saved: SavedExport): Promise<void> {
+    await this.definitions.checkCurrent(saved);
+    await this.removeLinkedExports(saved.recipe.source, async (file, table) => {
+      // Inline legacy recipes are self-contained, not links to the selected definition.
+      if (table.recipe || (table.marker === 'export' && table.id !== saved.recipe.id)) return false;
+      const definition = await this.definitions.find(file.path, table.id, table.marker === 'table');
+      return definition?.configPath === saved.configPath && definition.recipe.id === saved.recipe.id;
+    }, () => this.definitions.removeExport(saved));
+  }
+
+  async removeExports(source: string, configPaths: string[]): Promise<void> {
+    await this.removeLinkedExports(source, async (file, table) => {
+      if (table.recipe) return table.recipe.source === source;
+      const definition = await this.definitions.find(file.path, table.id, table.marker === 'table');
+      return definition?.recipe.source === source && configPaths.includes(definition.configPath);
+    }, () => this.definitions.removeSource(source, configPaths));
+  }
+
+  /** Detach all matching copies first; failed detaches leave definitions available for retry. */
+  private async removeLinkedExports(source: string, matches: (file: TFile, table: ManagedTable) => Promise<boolean>,
+    removeDefinitions: () => Promise<void>): Promise<void> {
+    if (this.stopped) throw new Error('Export deletion cancelled.');
+    if (this.deletingSources.has(source)) throw new Error('An export deletion for this CSV is already in progress. Please try again.');
+    this.deletingSources.add(source);
+    this.sourceChanged(source);
+    try {
+      const targets: Array<{ file: TFile; table: ManagedTable }> = [];
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        for (const table of findManagedTables(await this.textFor(file))) {
+          if (await matches(file, table)) targets.push({ file, table });
+        }
+      }
+      for (const { file, table } of targets) {
+        if (this.stopped) throw new Error('Export deletion cancelled.');
+        await this.replace(file, table, tableBody(table));
+      }
+      if (this.stopped) throw new Error('Export deletion cancelled.');
+      await removeDefinitions();
+      await this.initialize();
+    } finally { this.deletingSources.delete(source); }
   }
 }

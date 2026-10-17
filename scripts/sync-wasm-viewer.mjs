@@ -8,14 +8,14 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { requireHostIntegration } from "./wasm-viewer-contract.mjs";
+import { requireHostIntegration, requireEmbeddedAssets } from "./wasm-viewer-contract.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
-const defaultSource = resolve(repoRoot, "..", "csvzall", "src", "viewer_wasm", "web", "dist");
+const defaultSource = resolve(repoRoot, "..", "csvzall", "src", "viewer_wasm", "web", "dist-embedded");
 const outputDir = resolve(repoRoot, "wasm-viewer");
 
 function optionValue(name) {
@@ -66,6 +66,7 @@ if (!sourceBundleName) fail("missing source JavaScript bundle");
 const sourceBundle = readFileSync(resolve(sourceDir, "assets", sourceBundleName));
 requireHostIntegration(sourceBundle.toString("utf8"));
 const sourceHtml = readFileSync(resolve(sourceDir, "index.html"), "utf8");
+requireEmbeddedAssets(sourceHtml, sourceBundle.toString("utf8"));
 if (!sourceHtml.includes("./assets/")) fail("source index.html must use relative ./assets/ paths");
 
 if (!outputDir.startsWith(repoRoot) || basename(outputDir) !== "wasm-viewer") {
@@ -84,9 +85,9 @@ const metadata = {
   sourceRepo: "vincentlaucsb/csvzall",
   sourceCommit: runGit(["rev-parse", "HEAD"], sourceRepoRoot) || "unknown",
   sourceRef: runGit(["rev-parse", "--abbrev-ref", "HEAD"], sourceRepoRoot) || "unknown",
-  sourceDirty: Boolean(runGit(["status", "--porcelain", "--untracked-files=normal"], sourceRepoRoot)),
+  sourceDirty: Boolean(runGit(["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules"], sourceRepoRoot)),
   javascriptSha256: createHash("sha256").update(sourceBundle).digest("hex"),
-  sourcePath: "src/viewer_wasm/web/dist",
+  sourcePath: relative(sourceRepoRoot, sourceDir).replace(/\\/g, "/"),
   sourceDist: sourceDir,
   syncedAt: new Date().toISOString(),
 };

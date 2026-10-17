@@ -25,8 +25,8 @@ function run(file, args, cwd = root) {
   execFileSync(process.execPath, [file, ...args], { cwd, stdio: "inherit", windowsHide: true });
 }
 run(npmCli, ["test"], web);
-run(npmCli, ["run", "build"], web);
-run(resolve(root, "scripts/sync-wasm-viewer.mjs"), [`--source=${resolve(web, "dist")}`]);
+run(npmCli, ["run", "build", "--", "--mode", "embedded"], web);
+run(resolve(root, "scripts/sync-wasm-viewer.mjs"), [`--source=${resolve(web, "dist-embedded")}`]);
 run(resolve(root, "scripts/patch-wasm-viewer-bridge.mjs"), []);
 run(resolve(root, "scripts/check-wasm-viewer.mjs"), []);
 run(npmCli, ["test"]);

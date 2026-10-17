@@ -25,6 +25,7 @@ export class CsvzallProcessService {
   constructor(
     private readonly getSettings: () => CsvzallPluginSettings,
     private readonly eventLog: EventLog,
+    private readonly executablePath?: () => string,
   ) {}
 
   unload(): void {
@@ -61,7 +62,7 @@ export class CsvzallProcessService {
 
   async captureCommand(args: string[], cwd: string): Promise<string> {
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
-    const executable = stripOuterQuotes(this.getSettings().csvzallPath);
+    const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);
     const child = spawn(executable, args, {
       cwd,
       windowsHide: true,
@@ -131,7 +132,7 @@ export class CsvzallProcessService {
   async startViewer(filePath: string, leaf?: WorkspaceLeaf): Promise<CsvzallServerHandle> {
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     if (leaf) this.handleLeafClosed(leaf);
-    const executable = stripOuterQuotes(this.getSettings().csvzallPath);
+    const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);
     const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
     const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
     const child = spawn(executable, args, {

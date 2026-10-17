@@ -15,6 +15,8 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
   try {
     mkdirSync(assets, { recursive: true });
     const bundle = JSON.stringify([
+      "csvzall-shared-shell-v1",
+      "csvzall-compact-layout-v1",
       "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-host-save-request-v1", "csvzall-edit-revision-v1",
       "csvzall-obsidian-keyboard-lifecycle-v2", "csvzall-obsidian-viewport-resize-v2",
       "theme-ready", "data-csvzall-dialog-dismiss-v1",
@@ -27,6 +29,8 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
     assert.equal(readFileSync(bundlePath, "utf8"), bundle);
     const html = readFileSync(htmlPath, "utf8");
     assert.match(html, /data-csvzall-inline-viewer-style/);
+    assert.ok(html.includes("body { color: black; }"));
+    assert.doesNotMatch(html, /csvzall-obsidian-host-compact/);
     assert.doesNotMatch(html, /\r/);
     prepare();
     assert.equal(readFileSync(htmlPath, "utf8"), html);

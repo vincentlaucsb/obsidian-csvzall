@@ -1,9 +1,10 @@
-import { Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { isCsv } from "../src/csv/csvFiles.js";
 import { CsvzallTableView } from "../src/views/CsvzallTableView.js";
 import {
   embeddedWasmViewerUrl,
   ensureEmbeddedWasmViewerAssets,
+  releaseEmbeddedWasmViewer,
 } from "./WasmAssetInstaller.js";
 
 const VIEW_TYPE_CSVZALL_MOBILE = "csvzall-mobile-view";
@@ -22,15 +23,12 @@ export default class CsvzallMobilePlugin extends Plugin {
   private assetError = "";
 
   async onload(): Promise<void> {
-    if (!Platform.isMobileApp) {
-      return;
-    }
-
     try {
       await ensureEmbeddedWasmViewerAssets(this.app, this.manifest);
+      embeddedWasmViewerUrl(this.app, this.manifest);
     } catch (error) {
       this.assetError = error instanceof Error ? error.message : String(error);
-      console.error("csvzall mobile failed to install bundled WASM viewer assets", error);
+      console.error("csvzall Lite failed to install bundled WASM viewer assets", error);
     }
 
     this.registerView(
@@ -44,7 +42,11 @@ export default class CsvzallMobilePlugin extends Plugin {
   }
 
   handleLeafClosed(_leaf: WorkspaceLeaf): void {
-    // Mobile WASM sessions do not spawn external processes.
+    // Bundled WASM sessions do not spawn external processes on either platform.
+  }
+
+  onunload(): void {
+    releaseEmbeddedWasmViewer();
   }
 
   async openCsvInLeaf(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
@@ -60,17 +62,21 @@ export default class CsvzallMobilePlugin extends Plugin {
   }
 
   async installCsvzallFromView(_file: TFile, _leaf: WorkspaceLeaf): Promise<boolean> {
-    new Notice("csvzall Mobile uses the bundled WASM viewer and does not install a desktop helper.");
+    new Notice("csvzall Lite uses the bundled WASM viewer and does not install a desktop helper.");
     return false;
   }
 
   openCsvzallSettings(): void {
-    new Notice("csvzall Mobile does not have desktop helper settings.");
+    new Notice("csvzall Lite does not have desktop helper settings.");
   }
 
   private async openCsv(file: TFile): Promise<void> {
     const leaf = this.app.workspace.getLeaf(true);
-    await leaf.openFile(file);
+    await leaf.setViewState({
+      type: VIEW_TYPE_CSVZALL_MOBILE,
+      state: { file: file.path },
+      active: true,
+    });
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
@@ -81,8 +87,8 @@ export default class CsvzallMobilePlugin extends Plugin {
       await this.openCsv(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      new Notice(`csvzall Mobile failed to create CSV: ${message}`);
-      console.error("csvzall Mobile failed to create CSV", error);
+      new Notice(`csvzall Lite failed to create CSV: ${message}`);
+      console.error("csvzall Lite failed to create CSV", error);
     }
   }
 
@@ -95,8 +101,8 @@ export default class CsvzallMobilePlugin extends Plugin {
       await this.openCsv(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      new Notice(`csvzall Mobile failed to create CSV: ${message}`);
-      console.error("csvzall Mobile failed to create CSV", error);
+      new Notice(`csvzall Lite failed to create CSV: ${message}`);
+      console.error("csvzall Lite failed to create CSV", error);
     }
   }
 
@@ -154,7 +160,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       }
       menu.addItem((item) => {
         item
-          .setTitle("Open with csvzall Mobile")
+          .setTitle("Open with csvzall Lite")
           .setIcon("table")
           .onClick(() => void this.openCsv(file));
       });

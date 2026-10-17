@@ -17,6 +17,8 @@ export default [
     plugins: { "@typescript-eslint": tseslint.plugin, obsidianmd },
     rules: {
       "obsidianmd/no-unsupported-api": "error",
+      "obsidianmd/no-tfile-tfolder-cast": "error",
+      "no-control-regex": "error",
       "no-restricted-syntax": ["error", {
         selector: "CallExpression[callee.type='Identifier'][callee.name=/^(setTimeout|clearTimeout|setInterval|clearInterval)$/]",
         message: "Use window timers for UI work or explicit Node timers in desktop-only services.",
@@ -30,6 +32,10 @@ export default [
       "@typescript-eslint/no-redundant-type-constituents": "error",
       "@typescript-eslint/prefer-promise-reject-errors": "error",
     },
+  },
+  {
+    files: ["src/**/*.ts"],
+    rules: { "obsidianmd/settings-tab/no-deprecated-display": "error" },
   },
   {
     files: ["mobile-src/**/*.ts"],

@@ -1,10 +1,10 @@
 {
   "sourceRepo": "vincentlaucsb/csvzall",
-  "sourceCommit": "4584fe187da11be291603bea0514672ba2179016",
-  "sourceRef": "codex/sqlite-viewer-0.5.0",
+  "sourceCommit": "34bab618cbf91b78f016430fcff7c0c27805835e",
+  "sourceRef": "master",
   "sourceDirty": false,
-  "javascriptSha256": "b93d29403d3cf7467ee04354e0fb3cf647e95265d2db1204fa726a6a5dbf3095",
-  "sourcePath": "src/viewer_wasm/web/dist",
-  "sourceDist": "E:\\GitHub\\csvzall\\src\\viewer_wasm\\web\\dist",
-  "syncedAt": "2026-10-15T05:35:58.741Z"
+  "javascriptSha256": "6ba7653299beba09caefb8d86fb119010639fa86c095818d76efa87e652e777d",
+  "sourcePath": "src/viewer_wasm/web/dist-embedded",
+  "sourceDist": "E:\\GitHub\\csvzall\\src\\viewer_wasm\\web\\dist-embedded",
+  "syncedAt": "2026-10-17T18:26:29.408Z"
 }

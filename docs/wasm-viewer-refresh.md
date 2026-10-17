@@ -3,7 +3,20 @@
 Runtime behavior belongs in readable csvzall source. The plugin packages the
 compiled JavaScript unchanged; it never repairs minified variable names. Save
 acknowledgements, edit revisions, and keyboard visibility live in the upstream
-WASM host integration. Theme and dialog helpers are shared with the native viewer.
+WASM host integration. The entire basic editor, shell markup, dialogs, and
+stylesheet are shared with the native viewer in upstream `src/viewer/modules/`
+and `src/viewer/viewer.css`. Native composes optional SQL and chart modules;
+Lite's entry point has no feature imports. See upstream
+`docs/shared-viewer-shell.md` for the adapter and feature contracts.
+
+Compact layout also lives upstream. At portrait widths or landscape heights up
+to 600 CSS pixels, hosted viewers hide the duplicate filename, keep Save visible,
+and put overflowing actions under More actions. The grid includes 100 pixels
+plus the bottom safe-area inset of trailing scroll space without adding CSV
+rows. Layout changes wait for cell editing and toolbar menus to finish. The
+`csvzall-compact-layout-v1` capability prevents an older viewer being imported
+without these behaviors. Upstream `scripts/smoke_compact_viewer.cjs` exercises the
+real engine, including the compiled embedded distribution.
 
 The host can request a save with `{ source: "obsidian-csvzall", type:
 "save-request", version: 1, requestId }`. The viewer stops the active editor,
@@ -22,6 +35,12 @@ using its documented Emscripten build workflow. The web build expects
 `out/build/wasm/csvzall_viewer_wasm.js` and `csvzall_viewer_wasm.wasm`.
 Rebuild that core whenever its C++ inputs change; this refresh command rebuilds
 the web application using those existing core artifacts.
+
+The refresh uses Vite's `embedded` mode (`dist-embedded/`). This source build
+inlines the worker and WASM engine; the plugin creates Blob document/script URLs
+from its bundled assets because desktop Obsidian blocks JavaScript served through
+vault resource URLs. The standalone upstream release still uses the normal
+split-asset build. Compiled JavaScript is imported byte-for-byte in both cases.
 
 ## One refresh command
 
@@ -45,8 +64,9 @@ It does not commit, publish, or rebuild the native executable.
 
 Packaging requires explicit source capabilities and rejects older unsupported
 bundles before replacing existing assets. Update upstream source instead of
-adding compatibility string replacements. Stylesheet inlining and compact host
-CSS remain packaging concerns; neither changes JavaScript behavior.
+adding compatibility string replacements. Packaging inlines the unchanged shared
+stylesheet; host/mobile layout belongs upstream. Checks require the
+`csvzall-shared-shell-v1` source capability and reject SQL/chart UI code in Lite.
 
 `wasm-viewer/csvzall-wasm-viewer.json` records the source commit, dirty-checkout
 status, and imported JavaScript SHA-256. Asset validation ensures that the

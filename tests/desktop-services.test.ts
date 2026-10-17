@@ -44,6 +44,16 @@ function childProcess() {
   });
 }
 
+test("an unavailable bundled helper prevents both commands and viewers from spawning", async () => {
+  let spawns = 0;
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => { spawns++; return childProcess(); });
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "old-managed-helper" }), {},
+    () => { throw new Error("bundled helper unavailable"); });
+  await assert.rejects(service.captureCommand(["--version"], "."), /bundled helper unavailable/);
+  await assert.rejects(service.startViewer("data.csv"), /bundled helper unavailable/);
+  assert.equal(spawns, 0);
+});
+
 test("process failures reject with Error objects even for untyped event payloads", async () => {
   for (const command of [false, true]) {
     const child = childProcess();

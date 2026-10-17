@@ -1,0 +1,7 @@
+id,title,notes,value
+1,"Comma, inside","He said ""hello""",12.5
+2,café,日本語 😀,-3
+3,Multiline,"First line
+Second line",0
+4,Blank fields,,
+5,Whitespace,"  keep spaces  ",1000

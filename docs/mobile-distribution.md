@@ -7,6 +7,11 @@ desktop behavior.
 
 ## Overview
 
+The lightweight distribution is named **csvzall Lite**. It retains the
+`csvzall-mobile` plugin ID and `obsidian-csvzall-mobile` repository name for
+existing installations. The `mobile-src/` paths and build command names also
+remain stable.
+
 The desktop plugin and mobile plugin are released from separate repositories.
 The source of truth for mobile code still lives in this repository under
 `mobile-src/`, but the Community plugin assets are generated and synced into
@@ -19,6 +24,9 @@ This split keeps the release artifacts simple:
 - The mobile plugin must not contain Node.js built-ins, Electron APIs, desktop
   installer code, or desktop helper-process code.
 - Desktop and mobile versions can move independently.
+- The generated mobile plugin also supports desktop as a lightweight WASM
+  viewer/editor. It needs no helper binary. Enable only one of the two CSV
+  plugins on desktop; both register the CSV extension.
 - A mobile WASM change should not be able to break the desktop Community
   download, and desktop helper changes should not leak into the mobile bundle.
 
@@ -34,6 +42,9 @@ npm run sync:mobile-repo
 `npm run test:mobile` builds `.mobile-dist/` and validates the generated
 bundle. `npm run sync:mobile-repo` rebuilds the distribution, validates it, and
 copies it into the sibling `obsidian-csvzall-mobile` checkout.
+It also prepares that checkout's `demo-vault/` with the latest mobile build,
+preserving local fixture edits and Obsidian state. See the
+[mobile demo vault guide](mobile-demo-vault.md) for device transfer and testing.
 
 ## Generated Assets
 
@@ -75,7 +86,7 @@ continue to verify that:
 - Required generated files exist.
 - The generated manifest matches `mobile-src/manifest.json`.
 - Desktop-only Node.js and Electron APIs do not appear in mobile `main.js`.
-- The mobile plugin registers CSV ownership only on Obsidian mobile.
+- The lightweight plugin loads and registers CSV ownership on desktop and mobile.
 - Expected WASM viewer bridge and mobile creation markers are present.
 
 ## Runtime Import Rule

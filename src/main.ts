@@ -18,6 +18,7 @@ import { VIEW_TYPE_CSVZALL } from "./views/viewTypes.js";
 import { registerVaultWatchers } from "./watchers/registerVaultWatchers.js";
 import { MarkdownTableService } from "./markdown/MarkdownTableService.js";
 import { registerMarkdownCommands } from "./commands/registerMarkdownCommands.js";
+import { ExportSettingsService } from "./settings/ExportSettingsService.js";
 
 export default class CsvzallPlugin extends Plugin {
   settings: CsvzallPluginSettings = DEFAULT_SETTINGS;
@@ -33,6 +34,7 @@ export default class CsvzallPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.createServices();
+    await this.installerService.ensureBundledCsvzall();
     await this.chartService.reloadChartConfig();
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
@@ -42,6 +44,7 @@ export default class CsvzallPlugin extends Plugin {
       saveSettings: () => this.saveSettings(),
       eventLog: this.eventLog,
       installer: this.installerService,
+      exports: new ExportSettingsService(this.app, this.chartService, this.markdownTables, this.filesystem, this.processService),
     }));
 
     registerCsvCommands(this, this.csvService);
@@ -105,6 +108,7 @@ export default class CsvzallPlugin extends Plugin {
     this.processService = new CsvzallProcessService(
       () => this.settings,
       this.eventLog,
+      () => this.installerService.getExecutablePath(),
     );
     this.csvService = new CsvService(
       this.app,

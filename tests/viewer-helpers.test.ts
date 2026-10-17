@@ -224,7 +224,9 @@ test("built plugin launches csvzall view in edit mode", () => {
   const installerServiceSource = readFileSync("src/installer/InstallerService.ts", "utf8");
   assert.match(bundle, /"--edit"/);
   assert.match(bundle, /"--startup-json"/);
-  assert.match(bundle, /Check for updates/);
+  assert.match(bundle, /Use bundled helper/);
+  assert.doesNotMatch(bundle, /api\.github\.com\/repos\/vincentlaucsb\/csvzall\/releases\/latest/);
+  assert.doesNotMatch(bundle, /require\(["'](?:https|timers)["']\)/);
   assert.match(bundle, /installDesktopCsvzall/);
   assert.match(bundle, /Report a bug/);
   assert.match(bundle, /obsidian-csvzall\/issues\/new/);
@@ -246,7 +248,6 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /viewport-resized/);
   assert.doesNotMatch(bundle, /import\(["'](?:node:)?(?:child_process|path|fs(?:\/promises)?|https|crypto|zlib|electron|timers)["']\)/);
   assert.match(bundle, /require\(["']fs\/promises["']\)/);
-  assert.match(bundle, /require\(["']timers["']\)/);
   assert.doesNotMatch(installerServiceSource, /import\(/);
   assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
   // Loading may resend the theme, but must not reinstall mobile viewport shims.

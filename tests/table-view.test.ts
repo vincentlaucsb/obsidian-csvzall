@@ -16,7 +16,7 @@ function fixture() {
     createDiv() { return new Element(); }
     createEl(optionsOrTag?: unknown, options?: {text?: string}) {
       return {addEventListener(_: string, callback: () => void) {
-        if (options?.text === "Install csvzall") installClick = callback;
+        if (options?.text === "Use bundled helper") installClick = callback;
       }};
     }
   }

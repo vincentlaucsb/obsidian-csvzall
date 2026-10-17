@@ -1,0 +1,5 @@
+# Local Obsidian state, installed build, extracted WASM, and plugin settings.
+/.obsidian/
+/.trash/
+*.bak
+*.backup

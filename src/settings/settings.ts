@@ -9,6 +9,7 @@ export interface CsvzallEventLogEntry {
 
 export interface CsvzallPluginSettings {
   csvzallPath: string;
+  csvzallExecutableMode: "bundled" | "custom";
   installedCsvzallVersion: string;
   installedCsvzallAssetName: string;
   csvzallLastUpdateCheckAt: string;
@@ -19,6 +20,7 @@ export interface CsvzallPluginSettings {
 
 export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   csvzallPath: "csvzall",
+  csvzallExecutableMode: "bundled",
   installedCsvzallVersion: "",
   installedCsvzallAssetName: "",
   csvzallLastUpdateCheckAt: "",
@@ -29,8 +31,16 @@ export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
 
 export function normalizeSettings(data: unknown): CsvzallPluginSettings {
   const candidate = data && typeof data === "object" ? data as Partial<CsvzallPluginSettings> : {};
+  const path = typeof candidate.csvzallPath === "string" ? candidate.csvzallPath.trim() : "";
+  // Older managed downloads used csvzall-bin/<version>/csvzall[.exe].
+  // Metadata alone must not cause an unrelated custom path to be replaced.
+  const legacyManaged = !!candidate.installedCsvzallVersion &&
+    path.replace(/\\/g, "/").endsWith(`/csvzall-bin/${candidate.installedCsvzallVersion}/csvzall${/\.exe$/i.test(path) ? ".exe" : ""}`);
+  const mode = candidate.csvzallExecutableMode === "custom" || candidate.csvzallExecutableMode === "bundled" ?
+    candidate.csvzallExecutableMode : (!path || path === DEFAULT_SETTINGS.csvzallPath || legacyManaged ? "bundled" : "custom");
   return {
     ...DEFAULT_SETTINGS,
+    csvzallExecutableMode: mode,
     csvzallPath: typeof candidate.csvzallPath === "string" && candidate.csvzallPath.trim() ?
       candidate.csvzallPath : DEFAULT_SETTINGS.csvzallPath,
     openInObsidian: typeof candidate.openInObsidian === "boolean" ?

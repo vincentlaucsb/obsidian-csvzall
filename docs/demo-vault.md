@@ -1,5 +1,8 @@
 # Canonical local test vault
 
+For the mobile plugin's separate vault, device transfer, and keyboard/save/theme
+checklist, see the [mobile demo vault guide](mobile-demo-vault.md).
+
 `demo-vault/` is the shared local Obsidian test bed. It contains the sample CSV,
 note, chart configuration, and rendered chart from the original csvzall Demo
 vault. The chart is an intentional fixture so the note renders on a clean checkout.

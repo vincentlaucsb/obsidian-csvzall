@@ -11,6 +11,22 @@ test('Windows helper line endings are normalized before saving a generated regio
   assert.equal(managedTableText(recipe, markdown.replace(/\n/g, '\r\n')), managedTableText(recipe, markdown));
 });
 
+test('generated tables have blank lines inside both markers for Live Preview', () => {
+  assert.equal(managedTableText(recipe, markdown), `<!-- csvzall:export tasks -->\n\n${markdown}\n\n<!-- /csvzall:export tasks -->`);
+});
+
+test('old and new table spacing yields the same body when detaching', () => {
+  for (const newline of ['\n', '\r\n']) for (const count of [1, 2]) {
+    const body = markdown.replace(/\n/g, newline);
+    const text = `<!-- csvzall:export tasks -->${newline.repeat(count)}${body}${newline.repeat(count)}<!-- /csvzall:export tasks -->`;
+    assert.equal(findManagedTables(text)[0]!.body, body);
+  }
+});
+
+test('inline value exports retain their compact markers', () => {
+  assert.equal(managedTableText({ id: 'count', format: 'value' }, '7'), '<span><!-- csvzall:export count -->7<!-- /csvzall:export count --></span>');
+});
+
 test('managed tables preserve surrounding prose and identify independent regions', () => {
   const first = managedTableText(recipe, markdown);
   const second = managedTableText({ id: 'other' }, markdown);
@@ -60,6 +76,8 @@ test('both hosts use the packaged shared form; desktop bundle retains static Nod
   const bundle = readFileSync('main.js', 'utf8');
   assert.match(bundle, /Insert from CSV/);
   assert.match(bundle, /csvzall:export/);
+  assert.match(bundle, /Click a column to insert it/);
+  assert.match(bundle, /setRangeText/);
   assert.match(bundle, /require\(["']string_decoder["']\)/);
   assert.doesNotMatch(bundle, /import\(["'](?:node:)?string_decoder["']\)/);
   const upstream = '../csvzall/src/viewer/modules/table-form.mjs';
@@ -100,6 +118,14 @@ test('scalar CSV conversion keeps precise values and escapes Markdown, HTML and 
   assert.equal(scalarMarkdown('value\n"<b>*hi* &amp; <!-- /csvzall:export x -->"\n'), '\\<b\\>\\*hi\\* \\&amp\\; \\<\\!\\-\\- \\/csvzall\\:export x \\-\\-\\>');
   assert.equal(scalarMarkdown('value\n\n'), '');
   for (const csv of ['value\n', 'value\n1\n2\n', 'a,b\n1,2\n', 'value\n"unclosed']) assert.throws(() => scalarMarkdown(csv));
+});
+
+test('scalar exports collapse every C0 and DEL run while preserving Unicode', () => {
+  for (const code of [...Array.from({ length: 32 }, (_, index) => index), 127]) {
+    const char = String.fromCharCode(code);
+    assert.equal(scalarMarkdown(`value\n"a${char}${char}b"\n`), 'a b', `control ${code}`);
+  }
+  assert.equal(scalarMarkdown('value\n"é 日本語 😀"\n'), 'é 日本語 😀');
 });
 
 

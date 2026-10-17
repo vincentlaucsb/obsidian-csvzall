@@ -1,9 +1,12 @@
-import { Platform, PluginSettingTab } from "obsidian";
-import type { Plugin, Setting, SettingDefinitionRender } from "obsidian";
+import { Notice, Platform, PluginSettingTab, Setting } from "obsidian";
+import type { Plugin, SettingDefinitionRender } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { InstallerService } from "../installer/InstallerService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
+import type { ExportSettingsService } from "./ExportSettingsService.js";
+import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledBinaries.generated.js";
+import { addExportActions } from "./exportActions.js";
 
 const BUG_REPORT_URL = "https://github.com/vincentlaucsb/obsidian-csvzall/issues/new";
 
@@ -12,15 +15,12 @@ export interface CsvzallSettingTabServices {
   saveSettings(): Promise<void>;
   eventLog: EventLog;
   installer: InstallerService;
-}
-
-function formatSettingsTimestamp(timestamp: string): string {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString();
+  exports: ExportSettingsService;
 }
 
 export class CsvzallSettingTab extends PluginSettingTab {
   private installing = false;
+  private exportsRevision = 0;
 
   constructor(
     plugin: Plugin,
@@ -29,38 +29,42 @@ export class CsvzallSettingTab extends PluginSettingTab {
     super(plugin.app, plugin);
   }
 
-  display(): void {
-    this.update();
-  }
+  hide(): void { this.exportsRevision++; }
 
   private refreshSettings(): void {
     this.update();
   }
 
+  private async useBundledHelper(): Promise<void> {
+    if (this.installing) return;
+    this.installing = true;
+    this.refreshSettings();
+    try { await this.services.installer.installDesktopCsvzall(); }
+    finally {
+      this.installing = false;
+      this.refreshSettings();
+    }
+  }
+
   getSettingDefinitions(): Array<Omit<SettingDefinitionRender, "render"> & { render: (setting: Setting) => void }> {
     const settings = this.services.getSettings();
-    const hasManagedInstall = settings.installedCsvzallVersion.length > 0;
-    const csvzallInstallDesc = [
-      "Downloads the matching desktop binary from GitHub Releases, verifies its SHA-256 checksum, and updates the path above.",
-      `Current version: ${settings.installedCsvzallVersion || "not installed by this plugin"}.`,
-      `Current asset: ${settings.installedCsvzallAssetName || "unknown"}.`,
-      `Last checked: ${
-        settings.csvzallLastUpdateCheckAt ?
-          formatSettingsTimestamp(settings.csvzallLastUpdateCheckAt) :
-          "never"
-      }.`,
-    ].join(" ");
+    const usesBundled = settings.csvzallExecutableMode === "bundled";
+    const csvzallInstallDesc = `csvzall ${BUNDLED_CSVZALL_VERSION} is included with this plugin and updates with it. Restore its files or switch back from a custom executable without downloading anything.`;
     return [
       {
-        name: "csvzall path",
-        desc: "Path to the csvzall executable. Use an absolute path if csvzall is not on PATH.",
+        name: "Custom executable path",
+        desc: "Leave empty to use the bundled helper. Set an absolute path or a command on PATH to manage csvzall independently.",
         render: (setting) => {
           setting.addText((text) =>
             text
-              .setPlaceholder("csvzall")
-              .setValue(settings.csvzallPath)
+              .setPlaceholder("Use bundled helper")
+              .setValue(usesBundled ? "" : settings.csvzallPath)
               .onChange(async (value) => {
-                const nextPath = stripOuterQuotes(value) || DEFAULT_SETTINGS.csvzallPath;
+                const nextPath = stripOuterQuotes(value);
+                if (!nextPath) {
+                  await this.useBundledHelper();
+                  return;
+                }
                 const nextSettings = this.services.getSettings();
                 if (nextPath !== nextSettings.csvzallPath) {
                   nextSettings.installedCsvzallVersion = "";
@@ -68,6 +72,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
                   nextSettings.csvzallLastUpdateCheckAt = "";
                 }
                 nextSettings.csvzallPath = nextPath;
+                nextSettings.csvzallExecutableMode = "custom";
                 await this.services.saveSettings();
               }),
           );
@@ -75,25 +80,14 @@ export class CsvzallSettingTab extends PluginSettingTab {
       },
 
       {
-        name: hasManagedInstall ? "csvzall updates" : "Install csvzall",
+        name: "Bundled helper",
         desc: csvzallInstallDesc,
         render: (setting) => {
           setting.addButton((button) =>
             button
-              .setButtonText(this.installing ?
-                (hasManagedInstall ? "Checking..." : "Installing...") :
-                (hasManagedInstall ? "Check for updates" : "Install"))
+              .setButtonText(this.installing ? "Preparing..." : "Use bundled helper")
               .setDisabled(this.installing || !Platform.isDesktopApp)
-              .onClick(async () => {
-                this.installing = true;
-                this.refreshSettings();
-                try {
-                  await this.services.installer.installDesktopCsvzall();
-                } finally {
-                  this.installing = false;
-                  this.refreshSettings();
-                }
-              }),
+              .onClick(() => this.useBundledHelper()),
           );
         },
       },
@@ -145,6 +139,9 @@ export class CsvzallSettingTab extends PluginSettingTab {
         },
       },
 
+      { name: "Active exports", render: setting => { setting.setHeading(); } },
+      { name: "Files with exports", desc: "Manage saved chart and note export configurations, including paused exports.",
+        render: setting => { this.renderExports(setting); } },
       { name: "Log", render: (setting) => { setting.setHeading(); } },
       {
         name: "Chart and error log",
@@ -163,6 +160,35 @@ export class CsvzallSettingTab extends PluginSettingTab {
         },
       },
     ];
+  }
+
+  private renderExports(setting: Setting): void {
+    const revision = ++this.exportsRevision;
+    const container = setting.settingEl.createDiv({ cls: "csvzall-settings-exports" });
+    const status = container.createDiv({ text: "Loading exports..." });
+    const refresh = () => { if (this.exportsRevision === revision) this.refreshSettings(); };
+    void this.services.exports.list().then(files => {
+      if (this.exportsRevision !== revision) return;
+      status.remove();
+      if (files.length === 0) container.createDiv({ text: "No active exports." });
+      for (const file of files) {
+        const charts = file.entries.filter(entry => entry.kind === "chart" && entry.chart.definition.type !== "markdown-table").length;
+        const tables = file.entries.length - charts;
+        const counts = [charts ? `${charts} chart${charts === 1 ? "" : "s"}` : "", tables ? `${tables} table or value export${tables === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
+        addExportActions(new Setting(container).setName(file.source).setDesc(`${counts}${file.missing ? " · CSV missing" : ""}`), {
+          configureDisabled: file.missing,
+          configure: () => {
+            try { this.services.exports.configure(file, refresh); }
+            catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
+          },
+          remove: () => { this.services.exports.confirmDelete(file, refresh); },
+        });
+      }
+    }).catch((error: unknown) => {
+      if (this.exportsRevision !== revision) return;
+      status.setText(`Could not load exports: ${error instanceof Error ? error.message : String(error)}`);
+      new Setting(container).addButton(button => button.setButtonText("Retry").onClick(refresh));
+    });
   }
 
   private renderLog(containerEl: HTMLElement): void {

@@ -1,5 +1,6 @@
 import esbuild from "esbuild";
 import { runTypeSafetyChecks } from "./lint.mjs";
+import { mobileDemoFiles } from "./setup-mobile-demo-vault.mjs";
 import {
   copyFileSync,
   existsSync,
@@ -22,6 +23,7 @@ const distDir = resolve(repoRoot, ".mobile-dist");
 const sourceSnapshotFiles = [
   "mobile-src/main.ts",
   "mobile-src/WasmAssetInstaller.ts",
+  "mobile-src/EmbeddedViewerDocument.ts",
   "mobile-src/manifest.json",
   "src/csv/csvFiles.ts",
   "src/views/CsvzallTableView.ts",
@@ -127,34 +129,32 @@ function mobileVersions() {
 }
 
 function mobileReadme() {
-  return `# csvzall Mobile
+  return `# csvzall Lite
 
 <img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
-Create, open, and edit CSV files directly inside Obsidian mobile with the bundled
+Create, view, and edit CSV files directly inside Obsidian on desktop and mobile with the bundled
 csvzall WASM viewer.
 
-csvzall Mobile is the phone and tablet companion to
-[csvzall for Obsidian](https://github.com/vincentlaucsb/obsidian-csvzall). It
-does not install the desktop helper binary and does not require a local server.
+csvzall Lite is a lightweight alternative to
+[csvzall for Obsidian](https://github.com/vincentlaucsb/obsidian-csvzall) for people
+who need basic CSV viewing and editing. It works on computers, phones, and
+tablets without installing a helper binary or running a local server.
 
-If csvzall Mobile saves you time, please star this repository. It helps other
-Obsidian users find the plugin and helps me gauge demand for continued mobile
-support.
+If csvzall Lite saves you time, please star this repository. It helps other
+Obsidian users find the plugin and helps me gauge demand for continued support.
 
 ## What It Does
 
 - Creates new CSV files from the command palette, ribbon, or folder menu.
-- Opens \`.csv\` files in an Obsidian mobile pane.
+- Opens \`.csv\` files in an Obsidian pane on desktop and mobile.
 - Loads the bundled WASM viewer without installing a desktop helper binary.
 - Supports basic CSV editing and saving back to the vault file.
 - Includes an Obsidian-style mobile toolbar button for opening navigation.
-- Stays inert on desktop so it does not compete with the desktop csvzall plugin
-  for CSV ownership.
 
 ## Requirements
 
-- Obsidian mobile.
+- Obsidian on desktop or mobile.
 - A local or synced Obsidian vault.
 - No external \`csvzall\` binary is required.
 
@@ -164,19 +164,19 @@ For desktop-native features such as chart generation, SQLite queries, large-file
 viewing through the native helper process, and managed helper binary updates,
 install [csvzall for Obsidian](https://github.com/vincentlaucsb/obsidian-csvzall).
 
-It is safe to keep both plugins in the same synced vault. The desktop plugin is
-desktop-only, and csvzall Mobile only registers itself as a CSV handler on
-Obsidian mobile.
+On desktop, enable either csvzall Lite for the bundled basic editor or csvzall
+for the native features. Keep only one enabled at a time because both register
+as the CSV file handler. On phones and tablets, use csvzall Lite.
 
 ## Privacy and Network Use
 
-csvzall Mobile does not collect telemetry and does not download executable code
+csvzall Lite does not collect telemetry and does not download executable code
 at runtime. The WASM viewer assets are embedded in \`main.js\` and materialized
 into the plugin directory when the plugin loads.
 
 ## Limitations
 
-- Mobile support is focused on CSV creating, viewing, and editing.
+- This plugin focuses on CSV creation, viewing, and editing on both platforms.
 - Charts, SQLite queries, and desktop helper-process features live in the
   desktop plugin.
 - Very large files may still exceed what a mobile device can comfortably hold in
@@ -203,6 +203,8 @@ This repository is generated from \`vincentlaucsb/obsidian-csvzall\`.
 - Make source changes in \`obsidian-csvzall\`, then run \`npm run sync:mobile-repo\`.
 - The mobile bundle must not contain Node.js or Electron APIs.
 - Obsidian Community releases should attach only \`main.js\`, \`manifest.json\`, and \`styles.css\`.
+- \`demo-vault/\` is the mobile test bed. Preserve local edits and ignored Obsidian state when syncing.
+- Run \`node scripts/setup-mobile-demo-vault.mjs\` to refresh its installed build; see \`docs/mobile-demo-vault.md\`.
 `;
 }
 
@@ -210,7 +212,7 @@ function sourceReadme() {
   return `# Source Snapshot
 
 This directory contains the TypeScript source snapshot used to build the
-published csvzall Mobile release assets.
+published csvzall Lite release assets.
 
 The authoritative source repository is
 https://github.com/vincentlaucsb/obsidian-csvzall. This generated mobile
@@ -283,7 +285,7 @@ jobs:
           const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
           const main = readFileSync("main.js", "utf8");
           if (manifest.isDesktopOnly !== false) {
-            throw new Error("csvzall Mobile must keep isDesktopOnly=false.");
+            throw new Error("csvzall Lite must keep isDesktopOnly=false.");
           }
           const banned = [
             /require\\(["'](?:node:)?(?:child_process|crypto|electron|fs|fs\\/promises|http|https|os|path|zlib|timers)["']\\)/,
@@ -299,8 +301,8 @@ jobs:
           if (!main.includes("csvzall-mobile-embedded-wasm-viewer-v1")) {
             throw new Error("main.js is missing the embedded WASM viewer marker.");
           }
-          if (!main.includes("isMobileApp")) {
-            throw new Error("main.js must gate plugin registration to Obsidian mobile.");
+          if (readFileSync("mobile-src/main.ts", "utf8").includes("Platform.isMobileApp")) {
+            throw new Error("The lightweight plugin must load on desktop and mobile.");
           }
           NODE
 
@@ -373,8 +375,8 @@ jobs:
           if (!main.includes("csvzall-mobile-embedded-wasm-viewer-v1")) {
             throw new Error("main.js is missing the embedded WASM viewer marker.");
           }
-          if (!main.includes("isMobileApp")) {
-            throw new Error("main.js must gate plugin registration to Obsidian mobile.");
+          if (readFileSync("mobile-src/main.ts", "utf8").includes("Platform.isMobileApp")) {
+            throw new Error("The lightweight plugin must load on desktop and mobile.");
           }
           NODE
 `;
@@ -418,10 +420,20 @@ async function buildMobileBundle() {
   writeJson(resolve(distDir, "versions.json"), mobileVersions());
   writeFileSync(resolve(distDir, "README.md"), mobileReadme());
   writeFileSync(resolve(distDir, "AGENTS.md"), mobileAgents());
-  writeFileSync(resolve(distDir, ".gitignore"), "data.json\nnode_modules/\n*.log\n*.tmp\n.DS_Store\nThumbs.db\n");
+  writeFileSync(resolve(distDir, ".gitignore"), "/.obsidian/\ndata.json\nnode_modules/\n*.log\n*.tmp\n.DS_Store\nThumbs.db\n");
   writeFileSync(resolve(distDir, ".github", "workflows", "release.yml"), releaseWorkflow());
   writeFileSync(resolve(distDir, ".github", "workflows", "validate.yml"), validateWorkflow());
   copySourceSnapshot();
+  for (const [source, target] of [
+    ...mobileDemoFiles.map(file => [`mobile-demo-vault/${file}`, `demo-vault/${file}`]),
+    ["scripts/setup-mobile-demo-vault.mjs", "scripts/setup-mobile-demo-vault.mjs"],
+    ["docs/mobile-demo-vault.md", "docs/mobile-demo-vault.md"],
+    [".gitattributes", ".gitattributes"],
+    [".editorconfig", ".editorconfig"],
+  ]) {
+    mkdirSync(dirname(resolve(distDir, target)), { recursive: true });
+    copyFileSync(resolve(repoRoot, source), resolve(distDir, target));
+  }
   copyFileSync(resolve(repoRoot, "LICENSE"), resolve(distDir, "LICENSE"));
   copyFileSync(resolve(repoRoot, "styles.css"), resolve(distDir, "styles.css"));
 }
@@ -431,4 +443,4 @@ generateEmbeddedAssetModule();
 await buildMobileBundle();
 
 const mainSize = statSync(resolve(distDir, "main.js")).size;
-console.log(`Built csvzall Mobile distribution in ${distDir} (${mainSize} bytes main.js).`);
+console.log(`Built csvzall Lite distribution in ${distDir} (${mainSize} bytes main.js).`);

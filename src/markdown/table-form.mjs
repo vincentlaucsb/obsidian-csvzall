@@ -1,4 +1,6 @@
 // Shared, framework-free CSV table form. Hosts own dialogs, IO and destinations.
+function quoteColumn(name) { return `"${name.replace(/"/g, '""')}"`; }
+
 function stripTerminator(sql) {
   let quote = '', comment = '', terminator = -1;
   for (let i = 0; i < sql.length; ++i) {
@@ -23,7 +25,7 @@ function stripTerminator(sql) {
 
 export function tableQuery(value, limit) {
   const sql = stripTerminator(value.sql?.trim() || '') ||
-    `SELECT ${value.columns?.length ? value.columns.map(column => `data."${column.replace(/"/g, '""')}"`).join(', ') : '*'} FROM data`;
+    `SELECT ${value.columns?.length ? value.columns.map(column => `data.${quoteColumn(column)}`).join(', ') : '*'} FROM data`;
   // A subquery accepts SELECT/CTE results, never a write statement or SQL script.
   return `SELECT * FROM (\n${sql}\n) AS csvzall_table${limit === undefined ? '' : ` LIMIT ${limit}`}`;
 }
@@ -51,8 +53,12 @@ export function mountTableForm(root, options) {
     .csvzall-table-form { display:flex; flex-direction:column; gap:12px; min-width:0; }
     .csvzall-table-form > label { display:flex; flex-direction:column; gap:6px; }
     .csvzall-table-form label:has(> input[type=checkbox]), .csvzall-table-columns label { display:flex; flex-direction:row; align-items:center; gap:8px; }
-    .csvzall-table-form input[type=text], .csvzall-table-form textarea, .csvzall-table-form select { width:100%; box-sizing:border-box; }
+    .csvzall-table-form input[type=text], .csvzall-table-form input[type=search], .csvzall-table-form textarea, .csvzall-table-form select { width:100%; box-sizing:border-box; }
     .csvzall-table-columns { display:flex; flex-wrap:wrap; gap:8px 16px; max-height:160px; overflow:auto; }
+    .csvzall-query-picker { display:flex; flex-direction:column; gap:8px; min-width:0; }
+    .csvzall-query-picker > label { display:flex; flex-direction:column; gap:6px; }
+    .csvzall-query-columns { display:flex; flex-wrap:wrap; gap:8px; max-height:160px; overflow:auto; }
+    .csvzall-query-columns button { max-width:100%; white-space:normal; overflow-wrap:anywhere; height:auto; }
     .csvzall-table-form p { margin:0; }
     .csvzall-table-form [role=alert] { color:var(--text-error, inherit); }
     .csvzall-table-preview { overflow:auto; max-height:240px; white-space:pre; padding:10px; }
@@ -89,6 +95,16 @@ export function mountTableForm(root, options) {
   const query = field('SQLite query', 'textarea');
   query.rows = 5;
   query.placeholder = 'SELECT * FROM data';
+  const queryPicker = el('fieldset'); queryPicker.className = 'csvzall-query-picker';
+  const queryLegend = el('legend', queryPicker, 'Columns');
+  el('p', queryPicker, 'Click a column to insert it. An empty query starts a SELECT from data.');
+  const searchLabel = el('label', queryPicker);
+  el('span', searchLabel, 'Find a column');
+  const columnSearch = el('input', searchLabel); columnSearch.type = 'search';
+  const queryColumns = el('div', queryPicker); queryColumns.className = 'csvzall-query-columns';
+  const columnStatus = el('p', queryPicker); columnStatus.setAttribute('role', 'status');
+  const expandColumns = el('button', queryPicker); expandColumns.type = 'button';
+  let columnsExpanded = false;
   const help = el('p', root, 'Query the CSV as table data. Preview shows up to 20 rows.');
   const autoLabel = el('label');
   const auto = el('input', autoLabel); auto.type = 'checkbox';
@@ -108,6 +124,23 @@ export function mountTableForm(root, options) {
   let loadedSource = source.value;
   let pendingSelection = [];
   const checks = () => Array.from(columns.querySelectorAll('input'));
+  function renderQueryColumns() {
+    queryColumns.replaceChildren();
+    queryLegend.textContent = `Columns (${availableColumns.length})`;
+    searchLabel.hidden = !columnsExpanded;
+    const search = columnSearch.value.toLocaleLowerCase();
+    const visible = columnsExpanded ? availableColumns.filter(name => name.toLocaleLowerCase().includes(search)) : availableColumns.slice(0, 6);
+    visible.forEach(name => {
+      const button = el('button', queryColumns, name); button.type = 'button'; button.value = name;
+      button.disabled = query.disabled;
+      button.title = `Insert ${quoteColumn(name)}`;
+    });
+    columnStatus.hidden = visible.length > 0;
+    columnStatus.textContent = availableColumns.length ? 'No matching columns.' : 'No columns available.';
+    expandColumns.hidden = availableColumns.length <= 6;
+    expandColumns.textContent = columnsExpanded ? 'Show fewer columns' : `Show all ${availableColumns.length} columns`;
+    expandColumns.setAttribute('aria-expanded', String(columnsExpanded));
+  }
   function renderColumns(selected) {
     columns.replaceChildren();
     availableColumns.forEach(name => {
@@ -116,12 +149,14 @@ export function mountTableForm(root, options) {
       check.checked = selected.includes(name);
       el('span', label, name);
     });
+    renderQueryColumns();
   }
   function changed() {
     ++revision;
     preview.hidden = true; error.hidden = true;
     columnGroup.hidden = mode.value !== 'columns';
     query.parentElement.hidden = mode.value !== 'sql';
+    queryPicker.hidden = mode.value !== 'sql';
     ownership.hidden = options.showAutoUpdate === false || !auto.checked;
     ownership.textContent = 'Changes made directly to automatically updated content may be replaced.';
     help.textContent = format.value === 'value' ? 'Return exactly one row and one column. Line breaks become spaces; text is escaped for Markdown.' : 'Query the CSV as table data. Preview shows up to 20 rows.';
@@ -150,7 +185,7 @@ export function mountTableForm(root, options) {
   async function run(action) {
     if (busy || disposed) return;
     busy = true; previewButton.disabled = true; if (submit) submit.disabled = true;
-    const controls = action === 'submit' ? ['input', 'select', 'textarea'].flatMap(tag => Array.from(root.querySelectorAll(tag))) : [];
+    const controls = action === 'submit' ? ['input', 'select', 'textarea', 'button'].flatMap(tag => Array.from(root.querySelectorAll(tag))) : [];
     controls.forEach(control => { control.disabled = true; });
     const current = revision;
     try {
@@ -161,16 +196,37 @@ export function mountTableForm(root, options) {
         if (!disposed && current === revision) { preview.textContent = text; preview.hidden = false; }
       }
     } catch (cause) { if (!disposed && current === revision) showError(cause); }
-    finally { busy = false; if (!disposed) { controls.forEach(control => { control.disabled = false; }); previewButton.disabled = false; if (submit) submit.disabled = false; } }
+    finally { busy = false; if (!disposed) { controls.forEach(control => { control.disabled = false; }); previewButton.disabled = false; if (submit) submit.disabled = false; if (action === 'submit') renderQueryColumns(); } }
   }
   on(root, 'input', changed);
   on(root, 'change', changed);
+  on(queryColumns, 'click', event => {
+    const button = event.target.closest('button');
+    if (!button || button.parentElement !== queryColumns || query.disabled || disposed) return;
+    const quoted = quoteColumn(button.value);
+    if (!query.value.trim()) {
+      query.value = `SELECT ${quoted} FROM data`;
+      query.setSelectionRange(query.value.length, query.value.length);
+    } else {
+      query.setRangeText(quoted, query.selectionStart, query.selectionEnd, 'end');
+    }
+    query.focus();
+    query.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+  });
+  on(expandColumns, 'click', () => {
+    columnsExpanded = !columnsExpanded;
+    columnSearch.value = '';
+    renderQueryColumns();
+  });
+  on(columnSearch, 'input', event => { event.stopPropagation(); renderQueryColumns(); });
+  on(columnSearch, 'change', event => event.stopPropagation());
+  on(columnSearch, 'keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
   on(source, 'change', () => {
     if (!options.loadColumns) return;
     const current = ++sourceRevision;
     const selected = source.value === loadedSource ? (availableColumns.length ? checks().filter(check => check.checked).map(check => check.value) : pendingSelection) : [];
     loadedSource = source.value;
-    availableColumns = []; renderColumns([]);
+    availableColumns = []; columnsExpanded = false; columnSearch.value = ''; renderColumns([]);
     void options.loadColumns(source.value.trim()).then(names => {
       if (!disposed && current === sourceRevision) { availableColumns = names; renderColumns(selected); }
     }).catch(cause => { if (!disposed && current === sourceRevision) showError(cause); });
@@ -179,6 +235,6 @@ export function mountTableForm(root, options) {
   if (submit) on(submit, 'click', () => void run('submit'));
   setValue(options.value);
   if (source.value && options.loadColumns) source.dispatchEvent(new doc.defaultView.Event('change'));
-  return { getValue, setValue, setColumns(names, selected = []) { availableColumns = names; pendingSelection = selected; renderColumns(selected); },
+  return { getValue, setValue, setColumns(names, selected = []) { availableColumns = names; pendingSelection = selected; columnsExpanded = false; columnSearch.value = ''; renderColumns(selected); },
     dispose() { disposed = true; controller.abort(); ++sourceRevision; listeners.forEach(remove => remove()); root.replaceChildren(); } };
 }

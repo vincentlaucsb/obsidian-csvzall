@@ -103,26 +103,70 @@ test("Persisted settings reject malformed paths, flags, timeouts and log entries
   assert.equal(normalizeSettings({ startupTimeoutMs: 2147483648 }).startupTimeoutMs, DEFAULT_SETTINGS.startupTimeoutMs);
 });
 
-test("Installer repairs a missing executable even when release metadata is current", async () => {
+test("Bundled installer runs at startup, preserves custom paths, and supports switching back", async () => {
   const bundle = await build({ entryPoints: ["src/installer/InstallerService.ts"], bundle: true, platform: "node", format: "cjs", write: false,
-    external: ["obsidian", "../installer.js"] });
+    external: ["obsidian", "./bundledInstall.js"] });
   const realRequire = createRequire(import.meta.url);
-  for (const exists of [false, true]) {
+  for (const custom of [false, true]) {
     let installs = 0;
-    const module = { exports: {} as { InstallerService: new (...args: unknown[]) => { installDesktopCsvzall(): Promise<boolean> } } };
+    const module = { exports: {} as { InstallerService: new (...args: unknown[]) => {
+      installDesktopCsvzall(): Promise<boolean>; ensureBundledCsvzall(): Promise<boolean>; getExecutablePath(): string;
+    } } };
     runInNewContext(bundle.outputFiles![0]!.text, { module, exports: module.exports, console, require: (name: string) => {
       if (name === "obsidian") return { Platform: { isDesktopApp: true }, Notice: class {} };
-      if (name === "fs/promises") return { stat: async () => { if (!exists) throw new Error("missing"); return { isFile: () => true }; } };
-      if (name === "../installer.js") return {
-        getLatestCsvzallReleaseInfo: async () => ({ tagName: "v1", assetName: "asset" }),
-        installCsvzallBinary: async () => { installs++; return { executablePath: "repaired", tagName: "v1", assetName: "asset", sha256: "hash" }; },
+      if (name === "./bundledInstall.js") return {
+        installBundledCsvzall: async () => { installs++; return { executablePath: "bundled", tagName: "0.5.0", assetName: "asset", sha256: "hash", changed: true }; },
       };
       return realRequire(name);
     } });
-    const settings = { ...DEFAULT_SETTINGS, csvzallPath: "missing", installedCsvzallVersion: "v1", installedCsvzallAssetName: "asset" };
+    const settings = { ...DEFAULT_SETTINGS, csvzallPath: "custom-command", csvzallExecutableMode: custom ? "custom" as const : "bundled" as const };
     const service = new module.exports.InstallerService(() => settings, async () => {}, { record: async () => {} }, { getPluginDataDir: () => "plugin" });
+    if (custom) assert.equal(service.getExecutablePath(), "custom-command");
+    else assert.throws(() => service.getExecutablePath(), /unavailable/);
+    assert.equal(await service.ensureBundledCsvzall(), true);
+    assert.equal(installs, custom ? 0 : 1);
+    assert.equal(settings.csvzallPath, custom ? "custom-command" : "bundled");
     assert.equal(await service.installDesktopCsvzall(), true);
-    assert.equal(installs, exists ? 0 : 1);
-    assert.equal(settings.csvzallPath, exists ? "missing" : "repaired");
+    assert.equal(settings.csvzallPath, "bundled");
+    assert.equal(settings.csvzallExecutableMode, "bundled");
+    assert.equal(settings.installedCsvzallVersion, "0.5.0");
+    assert.equal(service.getExecutablePath(), "bundled");
   }
+});
+
+test("a failed bundled extraction never falls back to an unpinned helper", async () => {
+  const bundle = await build({ entryPoints: ["src/installer/InstallerService.ts"], bundle: true,
+    platform: "node", format: "cjs", write: false, external: ["obsidian", "./bundledInstall.js"] });
+  const module = { exports: {} as any };
+  const settings = { ...DEFAULT_SETTINGS, csvzallPath: "old-managed-helper" };
+  let finish: () => void = () => {};
+  let installs = 0;
+  let fail = true;
+  runInNewContext(bundle.outputFiles[0]!.text, { module, exports: module.exports,
+    console: { error() {} }, require(name: string) {
+      if (name === "obsidian") return { Platform: { isDesktopApp: true }, Notice: class {} };
+      assert.equal(name, "./bundledInstall.js");
+      return { installBundledCsvzall: async () => {
+        installs++;
+        await new Promise<void>(resolve => { finish = resolve; });
+        if (fail) throw new Error("disk is read-only");
+        return { executablePath: "bundled", tagName: "0.5.0", assetName: "asset", sha256: "hash", changed: true };
+      } };
+    },
+  });
+  const service = new module.exports.InstallerService(() => settings, async () => {}, { record: async () => {} }, { getPluginDataDir: () => "plugin" });
+  const first = service.ensureBundledCsvzall();
+  const concurrent = service.installDesktopCsvzall();
+  assert.equal(installs, 1);
+  finish();
+  assert.equal(await first, false); assert.equal(await concurrent, false);
+  assert.equal(settings.csvzallPath, "old-managed-helper");
+  assert.throws(() => service.getExecutablePath(), /unavailable/);
+  fail = false;
+  const repair = service.installDesktopCsvzall();
+  settings.csvzallPath = "my-command";
+  settings.csvzallExecutableMode = "custom";
+  finish();
+  assert.equal(await repair, false, "a custom path selected during extraction takes precedence");
+  assert.equal(service.getExecutablePath(), "my-command");
 });

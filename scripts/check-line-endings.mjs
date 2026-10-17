@@ -1,19 +1,66 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ignore from "ignore";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// Community build verification uses source archives with no Git metadata.
+// Honor repository exclusions and -text attributes there as well as in Git.
+export function archiveFileInfo(root) {
+  const files = [], untouched = new Set();
+  const readOptional = path => existsSync(path) ? readFileSync(path, "utf8") : "";
+  function walk(directory, parents = []) {
+    const attributes = readOptional(join(root, directory, ".gitattributes"))
+      .split(/\r?\n/).flatMap(line => {
+        const [pattern, ...values] = line.trim().split(/\s+/);
+        if (!pattern || pattern.startsWith("#")) return [];
+        const text = values.filter(value => /^(?:-text|!?text|text=auto)$/.test(value)).at(-1);
+        return text ? [{ matcher: ignore().add(pattern), preserve: text === "-text" }] : [];
+      });
+    const scopes = [...parents, {
+      directory, ignored: ignore().add(readOptional(join(root, directory, ".gitignore"))), attributes,
+    }];
+    for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.isSymbolicLink()) continue;
+      const path = directory + entry.name;
+      const relativeTo = scope => path.slice(scope.directory.length) + (entry.isDirectory() ? "/" : "");
+      let excluded = false;
+      for (const scope of scopes) {
+        const match = scope.ignored.test(relativeTo(scope));
+        if (match.ignored || match.unignored) excluded = match.ignored;
+      }
+      if (excluded) continue;
+      if (entry.isDirectory()) walk(path + "/", scopes);
+      else if (entry.isFile()) {
+        files.push(path);
+        let preserve = false;
+        for (const scope of scopes) for (const attr of scope.attributes) {
+          if (attr.matcher.ignores(relativeTo(scope))) preserve = attr.preserve;
+        }
+        if (preserve) untouched.add(path);
+      }
+    }
+  }
+  walk("");
+  return { files, untouched };
+}
+
 export function checkLineEndings({ fix = false, root = repoRoot } = {}) {
-  const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
-  const files = [...new Set(git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))];
-  const attrs = execFileSync("git", ["check-attr", "--stdin", "-z", "text"], {
-    cwd: root, input: files.join("\0") + "\0", encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
-  }).split("\0");
-  const untouched = new Set();
-  for (let i = 0; i + 2 < attrs.length; i += 3) {
-    if (attrs[i + 2] === "unset") untouched.add(attrs[i]);
+  let files, untouched;
+  if (!existsSync(join(root, ".git"))) {
+    ({ files, untouched } = archiveFileInfo(root));
+  } else {
+    const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+    files = [...new Set(git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))];
+    const attrs = execFileSync("git", ["check-attr", "--stdin", "-z", "text"], {
+      cwd: root, input: files.join("\0") + "\0", encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+    }).split("\0");
+    untouched = new Set();
+    for (let i = 0; i + 2 < attrs.length; i += 3) {
+      if (attrs[i + 2] === "unset") untouched.add(attrs[i]);
+    }
   }
   const failures = [];
   for (const file of files) {

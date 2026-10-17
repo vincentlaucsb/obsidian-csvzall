@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-test("line-ending gate rejects mixed/CRLF text, fixes bytes safely, and respects exclusions", () => {
+for (const withGit of [true, false]) test(`line-ending gate preserves exclusions and rejects/fixes CRLF ${withGit ? "with Git" : "without Git installed"}`, () => {
   const root = mkdtempSync(join(tmpdir(), "csvzall-eol-"));
   const script = pathToFileURL(resolve("scripts/check-line-endings.mjs")).href;
   try {
-    execFileSync("git", ["init", "--quiet", root]);
+    if (withGit) execFileSync("git", ["init", "--quiet", root]);
     writeFileSync(join(root, ".gitattributes"), "* text=auto eol=lf\nimported.js -text\n");
     writeFileSync(join(root, ".gitignore"), "ignored.txt\n");
     writeFileSync(join(root, "mixed.txt"), "one\r\ntwo\nthree\rfour café\n");
@@ -22,7 +22,9 @@ test("line-ending gate rejects mixed/CRLF text, fixes bytes safely, and respects
       "--input-type=module", "-e",
       "const m = await import(process.argv[1]); m.checkLineEndings({root:process.argv[2],fix:process.argv[3]==='true'});",
       script, root, String(fix),
-    ], { stdio: "pipe" });
+    ], { stdio: "pipe", env: withGit ? process.env : {
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "path")), PATH: "",
+    } });
     assert.throws(() => run(false), /Expected LF line endings:[\s\S]*mixed.txt[\s\S]*windows.txt/);
     run(true);
     run(false);

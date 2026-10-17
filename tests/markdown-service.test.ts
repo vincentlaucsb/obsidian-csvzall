@@ -33,6 +33,7 @@ async function harness() {
     },
   });
   const note = new FakeFile('Reports/tasks.md');
+  const extraNotes = new Map<FakeFile, string>();
   const csv = new FakeFile(recipe.source);
   let text = `My prose\n\n${oldTable}\n\nAfterwards\n`;
   let writes = 0;
@@ -47,25 +48,39 @@ async function harness() {
     exists: async (path: string) => configs.has(path) || path.endsWith('.csvzall'),
     read: async (path: string) => { if (!configs.has(path)) throw new Error('File missing'); return configs.get(path)!; },
     write: async (path: string, value: string) => { if (failWrite) throw new Error('Disk full'); configs.set(path, value); },
-    rename: async (old: string, path: string) => { configs.set(path, configs.get(old)!); configs.delete(old); },
+    process: async (path: string, update: (text: string) => string) => {
+      if (!configs.has(path)) throw new Error('File missing');
+      const text = update(configs.get(path)!);
+      if (failWrite) throw new Error('Disk full');
+      configs.set(path, text);
+      return text;
+    },
+    rename: async (old: string, path: string) => {
+      if (configs.has(path)) throw new Error('Destination file already exists!');
+      configs.set(path, configs.get(old)!); configs.delete(old);
+    },
     remove: async (path: string) => { configs.delete(path); },
     mkdir: async () => {},
   };
   const app = { workspace: { getLeavesOfType: () => leaves, onLayoutReady: (callback: () => void) => { ready = callback; } }, vault: {
     adapter,
-    read: async () => text,
-    getMarkdownFiles: () => [note],
+    read: async (file: FakeFile) => file === note ? text : extraNotes.get(file)!,
+    getMarkdownFiles: () => [note, ...extraNotes.keys()],
     getFiles: () => [note, csv],
     on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); },
-    getAbstractFileByPath: (path: string) => path === note.path ? note : path === csv.path ? csv : null,
-    process: async (_file: FakeFile, fn: (value: string) => string) => { const next = fn(text); if (next !== text) { ++writes; text = next; } },
+    getAbstractFileByPath: (path: string) => path === note.path ? note : path === csv.path ? csv : Array.from(extraNotes.keys()).find(file => file.path === path) ?? null,
+    process: async (file: FakeFile, fn: (value: string) => string) => {
+      if (file !== note) { extraNotes.set(file, fn(extraNotes.get(file)!)); return; }
+      const next = fn(text); if (next !== text) { ++writes; text = next; }
+    },
   } };
   const service = new module.exports.MarkdownTableService(app, { getVaultRoot: () => 'vault' }, {
     captureCommand: async (args: string[]) => { queries.push(args); return await query(); },
   }, { record: async (_level: string, _message: string, detail: string) => { errors.push(detail); } });
   const settle = async () => { for (let i = 0; i < 30; ++i) await Promise.resolve(); };
   return { service, note, queries, errors, configs, adapter,
-    failWrites() { failWrite = true; },
+    addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; } }; },
+    failWrites(value = true) { failWrite = value; },
     async reindex() { await service.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
     get formOptions() { return formOptions; },
     get writes() { return writes; }, setQuery(fn: () => Promise<string>) { query = fn; },
@@ -109,6 +124,23 @@ test('query failure retains the previous table and deduplicates error notices', 
   assert.equal(f.text, original);
   assert.equal(f.writes, 0);
   assert.equal(f.errors.length, 1);
+  f.service.unload();
+});
+
+test('refresh adds Live Preview spacing to existing tables without accumulating blank lines', async () => {
+  const f = await harness();
+  const body = '| title |\n| --- |\n| Old |';
+  f.text = `Before\n\n<!-- csvzall:export tasks -->\n${body}\n<!-- /csvzall:export tasks -->\n\nAfter`;
+  f.setQuery(async () => body);
+  await f.service.refresh(f.note);
+  const formatted = `Before\n\n${managedTableText(recipe, body)}\n\nAfter`;
+  assert.equal(f.text, formatted);
+  assert.equal(f.writes, 1);
+  await f.service.refresh(f.note);
+  assert.equal(f.text, formatted);
+  assert.equal(f.writes, 1);
+  await f.service.detach(f.note, findManagedTables(f.text)[0]!);
+  assert.equal(f.text, `Before\n\n${body}\n\nAfter`);
   f.service.unload();
 });
 
@@ -396,7 +428,7 @@ test('changing inline scalar format to table inserts paragraph boundaries', asyn
   const config = JSON.parse(f.configs.get('.csvzall/exports.json')!); config.exports[0].format = 'table';
   f.configs.set('.csvzall/exports.json', JSON.stringify(config));
   await f.service.refresh(f.note);
-  assert.match(f.text, /There are \*\*\n\n<!-- csvzall:export tasks -->\n\| title \|/);
+  assert.match(f.text, /There are \*\*\n\n<!-- csvzall:export tasks -->\n\n\| title \|/);
   assert.match(f.text, /<!-- \/csvzall:export tasks -->\n\n\*\* open tasks\.$/);
   assert.doesNotMatch(f.text, /<span>/);
   f.service.unload();
@@ -412,5 +444,163 @@ test('converting an inline value to a static table retains Markdown paragraph bo
   await f.formOptions.submit({ source: f.csv.path, columns: [], sql: 'SELECT title FROM data', autoUpdate: false, format: 'table' }, new AbortController().signal);
   assert.equal(buffer.text, 'There are \n\n| title |\n| --- |\n| New |\n\n open tasks.');
   assert.equal(findManagedTables(buffer.text).length, 0);
+  f.service.unload();
+});
+
+
+test('deleting file exports detaches every note copy and keeps rendered content and unrelated scopes', async () => {
+  const f = await harness();
+  const copy = f.addNote('Reports/copy.md', `Copy\n\n${oldTable}\nEnd`);
+  f.configs.set('Other/.csvzall/exports.json', JSON.stringify({ exports: [{ id: recipe.id, input: 'other.csv' }] }));
+  const unrelated = f.addNote('Other/note.md', oldTable);
+  const before = f.text;
+  await f.service.removeExports(recipe.source, ['.csvzall/exports.json']);
+  assert.equal(findManagedTables(f.text).length, 0);
+  assert.equal(findManagedTables(copy.text).length, 0);
+  assert.match(f.text, /My prose\n\n\| title \|/);
+  assert.match(f.text, /\| Old \|\n\nAfterwards/);
+  assert.match(copy.text, /\| Old \|/);
+  assert.equal(unrelated.text, oldTable);
+  assert.deepEqual(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports, []);
+  assert.equal(f.queries.length, 0);
+  assert.notEqual(f.text, before);
+  f.service.unload();
+});
+
+for (const format of ['table', 'value'] as const) {
+test(`deleting one SQL ${format} detaches all its copies and preserves sibling exports and scopes`, async () => {
+  const f = await harness();
+  const selected = { ...recipe, format, sql: format === 'value' ? 'SELECT COUNT(*) FROM data' : '' };
+  const body = format === 'value' ? '7' : '| title |\n| --- |\n| Old |';
+  const region = managedTableText(selected, body);
+  const sibling = managedTableText({ id: 'count', format: 'value' }, '12');
+  f.configs.set('.csvzall/exports.json', JSON.stringify({ metadata: 'keep', exports: [
+    { id: selected.id, input: selected.source, output: f.note.path, format, runOnSave: false, options: { sql: selected.sql } },
+    { id: 'count', input: selected.source, format: 'value', runOnSave: false, options: { sql: 'SELECT 12' } },
+  ] }));
+  f.text = `Before\n\n${region}\n\nTotal: ${sibling}.`;
+  const copy = f.addNote('Reports/copy.md', `Copy\n\n${region}\nEnd`);
+  f.configs.set('Other/.csvzall/exports.json', JSON.stringify({ exports: [
+    { id: selected.id, input: '../Data/tasks.csv', format, runOnSave: false },
+  ] }));
+  const unrelated = f.addNote('Other/note.md', region);
+  const buffer = f.installEditor(`${f.text}\nUnsaved prose`);
+  const saved = (await f.service.listExports([])).find((entry: any) => entry.recipe.id === selected.id);
+  await f.service.removeExport(saved);
+  assert.equal(buffer.text, `Before\n\n${body}\n\nTotal: ${sibling}.\nUnsaved prose`);
+  assert.equal(copy.text, `Copy\n\n${body}\nEnd`);
+  assert.equal(unrelated.text, region);
+  assert.deepEqual(findManagedTables(buffer.text).map(table => table.id), ['count']);
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+  assert.equal(config.metadata, 'keep');
+  assert.deepEqual(config.exports.map((entry: any) => entry.id), ['count']);
+  assert.equal(f.queries.length, 0);
+  f.service.unload();
+});
+}
+
+test('stale SQL deletion leaves linked notes and the changed configuration intact', async () => {
+  const f = await harness(), original = f.text;
+  const saved = (await f.service.listExports([]))[0];
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+  config.exports[0].options.sql = 'SELECT 99';
+  const current = JSON.stringify(config); f.configs.set('.csvzall/exports.json', current);
+  await assert.rejects(f.service.removeExport(saved), /export changed/);
+  assert.equal(f.text, original);
+  assert.equal(f.configs.get('.csvzall/exports.json'), current);
+  f.service.unload();
+});
+
+for (const individual of [false, true]) {
+test(`${individual ? 'individual' : 'group'} export deletion preserves unrelated orphan references`, async () => {
+  const f = await harness();
+  const orphan = '<!-- csvzall:export orphan -->\n\nPrevious output\n\n<!-- /csvzall:export orphan -->';
+  const legacy = '<!-- csvzall:table missing -->\n\nLegacy output\n\n<!-- /csvzall:table missing -->';
+  const unrelated = f.addNote('Other/orphan.md', `${orphan}\n\n${legacy}`);
+  const saved = (await f.service.listExports([]))[0];
+  if (individual) await f.service.removeExport(saved);
+  else await f.service.removeExports(recipe.source, ['.csvzall/exports.json']);
+  assert.equal(unrelated.text, `${orphan}\n\n${legacy}`);
+  assert.equal(findManagedTables(f.text).length, 0);
+  assert.match(f.text, /\| Old \|/);
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
+  f.service.unload();
+});
+}
+
+test('a failed note detach keeps the SQL definition and can be retried', async () => {
+  const f = await harness();
+  const buffer = f.installEditor(f.text), original = buffer.text;
+  const saved = (await f.service.listExports([]))[0];
+  const replace = buffer.editor.replaceRange;
+  buffer.editor.replaceRange = () => { throw new Error('Editor unavailable'); };
+  await assert.rejects(f.service.removeExport(saved), /Editor unavailable/);
+  assert.equal(buffer.text, original);
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
+  buffer.editor.replaceRange = replace;
+  await f.service.removeExport(saved);
+  assert.equal(findManagedTables(buffer.text).length, 0);
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
+  f.service.unload();
+});
+
+test('failed SQL definition removal keeps rendered content and allows retry', async () => {
+  const f = await harness(), original = f.configs.get('.csvzall/exports.json');
+  const saved = (await f.service.listExports([]))[0];
+  f.failWrites();
+  await assert.rejects(f.service.removeExport(saved), /Disk full/);
+  assert.equal(f.configs.get('.csvzall/exports.json'), original);
+  assert.equal(findManagedTables(f.text).length, 0);
+  assert.match(f.text, /\| Old \|/);
+  f.failWrites(false);
+  await f.service.removeExport(saved);
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
+  f.service.unload();
+});
+
+test('deleting a SQL export invalidates an in-flight refresh', async () => {
+  const f = await harness();
+  const saved = (await f.service.listExports([]))[0];
+  let finish!: (value: string) => void;
+  f.setQuery(() => new Promise(resolve => { finish = resolve; }));
+  const pending = f.service.refresh(f.note);
+  while (!finish) await Promise.resolve();
+  await f.service.removeExport(saved);
+  finish('Stale output'); await pending;
+  assert.equal(findManagedTables(f.text).length, 0);
+  assert.match(f.text, /\| Old \|/);
+  assert.doesNotMatch(f.text, /Stale output/);
+  f.service.unload();
+});
+
+test('deleting exports respects unsaved buffers and invalidates a running refresh', async () => {
+  const f = await harness();
+  const editor = f.installEditor(`Unsaved prose\n\n${oldTable}\nLast line`);
+  let finish: (value: string) => void = () => {};
+  f.setQuery(() => new Promise(resolve => { finish = resolve; }));
+  const pending = f.service.refresh(f.note);
+  for (let i = 0; i < 50; ++i) await Promise.resolve();
+  await f.service.removeExports(recipe.source, ['.csvzall/exports.json']);
+  finish('| title |\n| --- |\n| Stale |'); await pending;
+  assert.match(editor.text, /^Unsaved prose/);
+  assert.match(editor.text, /\| Old \|/);
+  assert.doesNotMatch(editor.text, /csvzall:|Stale/);
+  assert.equal(f.writes, 0);
+  f.service.unload();
+});
+
+test('settings configure updates an existing export identity and preserves the pause state', async () => {
+  const f = await harness();
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+  config.exports[0].runOnSave = false; f.configs.set('.csvzall/exports.json', JSON.stringify(config));
+  const saved = (await f.service.listExports([]))[0];
+  let savedCalls = 0;
+  f.service.configureExport(saved, () => { savedCalls++; });
+  assert.equal(f.formOptions.value.autoUpdate, false);
+  await f.formOptions.submit({ ...f.formOptions.value, sql: 'SELECT title FROM data', columns: [] }, new AbortController().signal);
+  const updated = JSON.parse(f.configs.get('.csvzall/exports.json')!).exports;
+  assert.equal(updated.length, 1); assert.equal(updated[0].id, recipe.id);
+  assert.equal(updated[0].options.sql, 'SELECT title FROM data');
+  assert.equal(updated[0].runOnSave, false); assert.equal(savedCalls, 1);
   f.service.unload();
 });

@@ -8,6 +8,7 @@ coverage/
 data.json
 mobile-src/wasmViewerAssets.generated.ts
 node_modules/
+src/installer/bundledBinaries.generated.ts
 *.log
 *.tmp
 .DS_Store

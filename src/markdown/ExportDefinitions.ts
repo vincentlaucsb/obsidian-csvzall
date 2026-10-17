@@ -19,6 +19,7 @@ export interface ResolvedExport {
   recipe: TableRecipe;
   runOnSave: boolean;
 }
+export interface SavedExport extends ResolvedExport { output?: string }
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -91,6 +92,60 @@ export class ExportDefinitions {
   private writes: Promise<unknown> = Promise.resolve();
   constructor(private readonly adapter: DataAdapter, private readonly stopped: () => boolean) {}
 
+  async list(folders: string[]): Promise<SavedExport[]> {
+    const result: SavedExport[] = [];
+    for (const folder of new Set(['', ...folders])) {
+      const path = folder ? `${folder}/${EXPORT_CONFIG_PATH}` : EXPORT_CONFIG_PATH;
+      await this.migrate(path);
+      const saved = await this.read(path);
+      for (const entry of saved?.config.exports ?? []) result.push({ configPath: path,
+        runOnSave: entry.runOnSave !== false, output: entry.output === undefined ? undefined : resolvePath(path, entry.output),
+        recipe: { version: 1, id: entry.id, source: validateSource(resolvePath(path, entry.input)),
+          columns: entry.options?.columns ?? [], sql: entry.options?.sql ?? '', format: entry.format ?? 'table' } });
+    }
+    return result;
+  }
+
+  async removeSource(source: string, paths: string[]): Promise<void> {
+    for (const path of new Set(paths)) await this.mutate(path, config => {
+      config.exports = config.exports.filter(entry => resolvePath(path, entry.input) !== source);
+    });
+  }
+
+  private currentEntry(config: TableConfig, saved: SavedExport): TableDefinition {
+    const entry = config.exports.find(candidate => candidate.id === saved.recipe.id);
+    if (!entry || validateSource(resolvePath(saved.configPath, entry.input)) !== saved.recipe.source ||
+      JSON.stringify(entry.options?.columns ?? []) !== JSON.stringify(saved.recipe.columns) ||
+      (entry.options?.sql ?? '') !== saved.recipe.sql || (entry.format ?? 'table') !== (saved.recipe.format ?? 'table') ||
+      (entry.runOnSave !== false) !== saved.runOnSave ||
+      (entry.output === undefined ? undefined : resolvePath(saved.configPath, entry.output)) !== saved.output) {
+      throw new Error('The export changed. Reopen Configure and try again.');
+    }
+    return entry;
+  }
+
+  /** Validate before detaching notes, then check again inside the final mutation. */
+  async checkCurrent(saved: SavedExport): Promise<void> {
+    const current = await this.read(saved.configPath);
+    this.currentEntry(current?.config ?? { exports: [] }, saved);
+  }
+
+  removeExport(saved: SavedExport): Promise<void> {
+    return this.mutate(saved.configPath, config => {
+      const entry = this.currentEntry(config, saved);
+      config.exports = config.exports.filter(candidate => candidate !== entry);
+    });
+  }
+
+  update(saved: SavedExport, recipe: TableRecipe, runOnSave: boolean, cancelled: () => boolean): Promise<void> {
+    return this.mutate(saved.configPath, config => {
+      const entry = this.currentEntry(config, saved);
+      entry.options = { ...entry.options, columns: recipe.columns, sql: recipe.sql };
+      entry.format = recipe.format ?? 'table';
+      entry.runOnSave = runOnSave;
+    }, cancelled);
+  }
+
   private candidates(note: string): string[] {
     const parts = note.split('/').slice(0, -1), paths: string[] = [];
     while (parts.length) { paths.push(`${parts.join('/')}/${EXPORT_CONFIG_PATH}`); parts.pop(); }
@@ -103,7 +158,7 @@ export class ExportDefinitions {
     return { text, config: parseConfig(text, context) };
   }
 
-  async resolve(note: string, id: string, legacy = false): Promise<ResolvedExport> {
+  async find(note: string, id: string, legacy = false): Promise<ResolvedExport | undefined> {
     let fallback: ResolvedExport | undefined;
     for (const configPath of this.candidates(note)) {
       await this.migrate(configPath);
@@ -118,7 +173,12 @@ export class ExportDefinitions {
         if (!fallback && resolved.recipe.format === 'table') fallback = resolved;
       }
     }
-    if (fallback) return fallback;
+    return fallback;
+  }
+
+  async resolve(note: string, id: string, legacy = false): Promise<ResolvedExport> {
+    const resolved = await this.find(note, id, legacy);
+    if (resolved) return resolved;
     throw new Error(`Table ${id} is missing from exports.json. The previous table has been kept.`);
   }
 
@@ -152,7 +212,16 @@ export class ExportDefinitions {
       const current = await this.adapter.exists(path) ? await this.adapter.read(path) : null;
       if (current !== saved) throw new Error(`${path} changed while saving. Please try again.`);
       if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
-      await this.adapter.rename(temporary, path);
+      if (saved === null) await this.adapter.rename(temporary, path);
+      else {
+        // Obsidian's rename rejects existing destinations. Check and replace
+        // existing contents atomically so edits made while waiting are kept.
+        await this.adapter.process(path, current => {
+          if (current !== saved) throw new Error(`${path} changed while saving. Please try again.`);
+          if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
+          return text;
+        });
+      }
       if (await this.adapter.read(path) !== text) throw new Error('Could not verify exports.json.');
     } finally {
       if (await this.adapter.exists(temporary)) await this.adapter.remove(temporary);

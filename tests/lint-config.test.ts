@@ -15,6 +15,10 @@ type Union = any | string;
 void Promise.reject("not an Error");
 setTimeout(() => {}, 10);
 clearTimeout(1);
+import { TFile } from "obsidian";
+declare const file: unknown;
+void (file as TFile);
+void /[\\x00-\\x1f]/;
 `;
 
 test("desktop and mobile lint reject every reported type-safety category", async () => {
@@ -36,11 +40,27 @@ test("desktop and mobile lint reject every reported type-safety category", async
     assert.equal(messages.some((message) => message.fatal), false);
     assert.ok(messages.some((message) => message.ruleId === "no-restricted-syntax" && message.severity === 2),
       `${filePath} must reject ambiguous timer calls`);
+    for (const rule of ["obsidianmd/no-tfile-tfolder-cast", "no-control-regex"]) {
+      assert.ok(messages.some(message => message.ruleId === rule && message.severity === 2), `${filePath} must reject ${rule}`);
+    }
     for (const rule of rules) {
       assert.ok(messages.some((message) => message.ruleId === `@typescript-eslint/${rule}` && message.severity === 2),
         `${filePath} must reject ${rule}`);
     }
   }
+});
+
+test("desktop settings reject leftover display overrides after declarative migration", async () => {
+  const eslint = new ESLint({ overrideConfig: {
+    languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },
+  } });
+  const result = await eslint.lintText(`import { PluginSettingTab } from "obsidian";
+    class Tab extends PluginSettingTab {
+      display(): void { this.update(); }
+      getSettingDefinitions() { return []; }
+    }`, { filePath: "src/settings/SettingsTab.ts" });
+  assert.ok(result.flatMap(item => item.messages).some(message =>
+    message.ruleId === "obsidianmd/settings-tab/no-deprecated-display" && message.severity === 2));
 });
 
 test("production entry points gate bundling, including direct mobile sync builds", () => {

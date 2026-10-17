@@ -654,12 +654,12 @@ export class CsvzallTableView extends FileView {
     const panel = state.createDiv({ cls: "csvzall-view-recovery" });
     panel.createEl("h3", { text: "csvzall was not found" });
     panel.createEl("p", {
-      text: "The configured executable is missing. Install a managed copy, or choose a different executable path in settings.",
+      text: "The configured executable is missing. Use the helper included with this plugin, or choose a different executable path in settings.",
     });
 
     const actions = panel.createDiv({ cls: "csvzall-view-recovery-actions" });
     const installButton = actions.createEl("button", {
-      text: "Install csvzall",
+      text: "Use bundled helper",
       cls: "mod-cta",
     });
     installButton.addEventListener("click", () => {

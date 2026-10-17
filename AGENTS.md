@@ -17,6 +17,7 @@
 - `src/process/`: `csvzall` child-process startup, command execution, viewer sessions, and process failure handling.
 - `src/installer.ts`: Pure download, release asset selection, checksum verification, ZIP extraction, and binary install logic.
 - `src/installer/`: Obsidian-facing installer service glue.
+- `src/installer/archive.ts` and `src/installer/bundledInstall.ts`: Offline archive extraction, integrity checks, and pinned native helper materialization. Keep the legacy downloader out of the desktop runtime dependency graph.
 - `src/logging/`: Event log mutation helpers.
 - `src/obsidian/`: Obsidian adapter and filesystem helpers.
 - `src/commands/`: Command and context-menu registration.
@@ -51,6 +52,7 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - `demo-vault/` is the canonical Obsidian test bed. Keep representative CSV fixtures, demo notes, and portable vault configuration in this repository so behavior can be reproduced from a clean checkout.
 - Keep local workspace state, caches, plugin installations/builds, helper binaries, credentials, and machine-specific plugin settings untracked. Never copy through plugin symlinks or junctions when importing vault content.
 - Development plugin files should resolve to this checkout's build outputs, with vault-local plugin settings isolated from other vaults. Keep setup instructions in `docs/`, and preserve local settings when refreshing the development build.
+- Mobile fixtures live in `mobile-demo-vault/` and generate the sibling mobile repository's `demo-vault/`. Sync preserves existing fixture edits and ignored vault state; mobile setup copies ordinary build files for device transfer. See `docs/mobile-demo-vault.md`.
 
 ## Runtime Import Rule
 
@@ -72,11 +74,18 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - The mobile Community plugin is generated from `mobile-src/` with `npm run build:mobile`, validated with `npm run check:mobile`, and synced into the sibling `obsidian-csvzall-mobile` repo with `npm run sync:mobile-repo`.
 - Keep `mobile-src/` free of desktop services, installer code, child processes, Node.js built-ins, and Electron APIs. The generated mobile `main.js` must pass the no-Node marker scan in `scripts/check-mobile-dist.mjs`.
 - The mobile distribution embeds the WASM viewer assets into `main.js` and writes them into the plugin directory at runtime, because Obsidian Community installs only `main.js`, `manifest.json`, and optional `styles.css`.
-- Keep the desktop plugin manifest `isDesktopOnly` set to `true`. The desktop plugin owns `.csv` on desktop; the generated mobile plugin owns `.csv` only when `Platform.isMobileApp` is true.
+- Keep the native desktop plugin manifest `isDesktopOnly` set to `true`. The generated mobile plugin is a lightweight WASM CSV viewer/editor on both desktop and mobile, with no native helper. Enable only one CSV handler on desktop; do not restore the mobile-only load gate. Keep mobile keyboard and navigation UI gated to mobile in the shared view.
 - Mobile plugin metadata and versioning live in `mobile-src/manifest.json`, not the desktop `manifest.json`. Update the mobile manifest when cutting a mobile release.
+- The generated plugin's display name is `csvzall Lite`. Preserve its `csvzall-mobile` ID, view and command identifiers, and `obsidian-csvzall-mobile` repository name when changing branding.
 
 ## Obsidian Review Rules
 
+- Run [the warning remediation workflow](docs/obsidian-warning-remediation.md) for Obsidian scorecard, submission, or validation feedback. Use supplied feedback when available; otherwise retrieve `https://community.obsidian.md/plugins/csvzall#scorecard`. Download current official guidance on each run with `npm run review:obsidian` (or `-- --warnings <file>`), then record findings, dispositions, verification, and unavailable checks in `docs/`.
+- Direct Filesystem Access and Shell Execution are required desktop capabilities for native helper installation and execution. Preserve them, keep `isDesktopOnly: true`, and disclose outside-vault helper access in README. Do not hide APIs or weaken checks to remove capability warnings. Keep process arguments separate from executable paths, avoid shell interpolation, verify managed downloads, and keep mobile free of these dependencies.
+- Narrow `TFile`/`TFolder` with `instanceof`, including collection values; do not cast to these types. Keep scalar CSV C0/DEL sanitization free of control-character regexes while preserving run collapsing, Unicode, and literal Markdown escaping.
+- Desktop settings use `getSettingDefinitions()` and `update()` with minimum Obsidian 1.13.0. Do not add a leftover `display()` override; keep indexing cheap and side effects in render/action callbacks. Evaluate mobile against its own manifest minimum.
+- Production builds must succeed from a clean source archive without `.git` or Git installed. Keep the LF gate and imported `-text` byte preservation active in this mode. Run `npm run check:source-archive` before release and keep its CI check enabled.
+- Check dependency advisory ranges and dependency paths, update the lockfile with fixes, and review the Moment override when Obsidian's dependency constraints change. Do not assume an external runtime API removes the need to fix a flagged lockfile dependency.
 - In Obsidian-hosted UI, preserve Obsidian defaults and the user's active theme/CSS styling. Use the standard Modal title element and built-in semantic classes such as `mod-cta` for the user's accent. Do not add custom heading typography, control colors, fonts, line heights, padding, or vertical-alignment overrides to restyle native controls. Keep custom CSS limited to necessary feature layout; shared viewer components must inherit host styling.
 - Follow the official Obsidian developer policies, plugin submission requirements, and plugin guidelines before cutting a release.
 - Settings tabs: keep general settings at the top without a heading. Do not use top-level headings like `General`, `Settings`, or the plugin name. If a settings section heading is needed, use `new Setting(containerEl).setName(...).setHeading()` and avoid the word `settings` in the heading.
@@ -91,8 +100,16 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 - `versions.json`: Obsidian plugin compatibility map from plugin version to minimum supported Obsidian app version.
 - `package.json`: npm package version.
 - `package.json` `engines.node`: supported Node.js versions for the lint/build toolchain.
+- `package.json` `overrides.moment`: patched transitive dependency version, independent of plugin releases.
+- Ignored `.test-build/obsidian-review/complete.json` `guidanceCommit`: official documentation revision used for a remediation run, independent of plugin releases.
 - `package-lock.json`: npm lockfile root package version.
+- `native-binaries/build.json`: bundled csvzall source version/commit, dependency commit pins, build-tool versions, platform runners, and CMake configuration. The native helper build identity also hashes its workflow and recipe scripts. Changes require release preparation before tagging.
+- `.github/workflows/build-obsidian-helpers.yml`: reusable native release build configuration, including action versions and the Node toolchain policy; included in the helper build identity.
+- Generated `.test-build/native-results/<target>/receipt.json` (also cached/uploaded by CI): native provenance schema version, helper version/source commit, build identity, and archive/executable checksums, independent of the plugin version.
+- `native-binaries/manifest.json`: frozen helper source version/commit, build identity, archive SHA-256 and executable SHA-256 pins, independent of the plugin version. Release preparation commits these archives before tagging; publication verifies this snapshot without native compilation. `src/installer/bundledBinaries.generated.ts` derives its version and payloads from this manifest during desktop builds; its checked-in `.d.ts` contract supports clean-checkout linting.
 - `mobile-src/manifest.json`: generated mobile plugin version and minimum supported Obsidian app version.
+- Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases.
+- Upstream `src/viewer_wasm/web/src/host-bridge.js` `HOST_CAPABILITIES` and `scripts/wasm-viewer-contract.mjs` `requiredHostCapabilities`: versioned viewer capabilities, including compact layout, shared shell, editing, and host save protocols. Packaging requires the corresponding source implementation.
 - `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
 - `src/views/CsvzallTableView.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
 - `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.

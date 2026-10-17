@@ -60,7 +60,8 @@ if (binary) {
   if (!settings || Array.isArray(settings) || typeof settings !== "object") {
     throw new Error("Plugin data.json must contain an object.");
   }
-  writeFileSync(settingsPath, JSON.stringify({ ...settings, csvzallPath: binary }, null, 2) + "\n");
+  writeFileSync(settingsPath, JSON.stringify({ ...settings, csvzallPath: binary, csvzallExecutableMode: "custom",
+    installedCsvzallVersion: "", installedCsvzallAssetName: "", csvzallLastUpdateCheckAt: "" }, null, 2) + "\n");
 }
 console.log(`Demo vault ready: ${vault}`);
 console.log("Open this folder as an Obsidian vault and enable community plugins. Reload Obsidian after rebuilding; reopen CSV panes to restart the viewer.");

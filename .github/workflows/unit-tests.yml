@@ -28,3 +28,6 @@ jobs:
 
       - name: Test desktop and mobile builds
         run: npm test
+
+      - name: Verify clean source archive build
+        run: npm run check:source-archive

@@ -1,8 +1,14 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { mobileDemoFiles } from "./setup-mobile-demo-vault.mjs";
 
 const distDir = ".mobile-dist";
 const requiredFiles = [
+  ...mobileDemoFiles.map(file => `demo-vault/${file}`),
+  "scripts/setup-mobile-demo-vault.mjs",
+  "docs/mobile-demo-vault.md",
+  ".gitattributes",
+  ".editorconfig",
   "AGENTS.md",
   "LICENSE",
   "README.md",
@@ -15,6 +21,7 @@ const requiredFiles = [
   ".github/workflows/validate.yml",
   "mobile-src/main.ts",
   "mobile-src/WasmAssetInstaller.ts",
+  "mobile-src/EmbeddedViewerDocument.ts",
   "mobile-src/manifest.json",
   "src/csv/csvFiles.ts",
   "src/views/CsvzallTableView.ts",
@@ -45,7 +52,7 @@ const tableViewSource = readFileSync(join(distDir, "src/views/CsvzallTableView.t
 if (manifest.id !== "csvzall-mobile") {
   fail(`unexpected manifest id: ${manifest.id}`);
 }
-if (manifest.name !== "csvzall Mobile") {
+if (manifest.name !== "csvzall Lite") {
   fail(`unexpected manifest name: ${manifest.name}`);
 }
 if (manifest.version !== sourceManifest.version) {
@@ -70,6 +77,9 @@ for (const marker of [
 }
 if (!tableViewSource.includes("showWasmViewer") || !tableViewSource.includes("wasmViewerMessageFromData")) {
   fail("mobile source snapshot is missing the WASM viewer bridge implementation");
+}
+if (mobileSource.includes("Platform.isMobileApp")) {
+  fail("the lightweight plugin must load on desktop and mobile; platform-specific UI belongs in the shared view");
 }
 
 const bannedPatterns = [
@@ -106,4 +116,4 @@ if (/assets=\([^)]*(wasm-viewer|csvzall-plugin\.zip)/.test(releaseWorkflow)) {
   fail("release workflow should not publish extra WASM files; they are embedded in main.js");
 }
 
-console.log(`csvzall Mobile distribution OK (${manifest.version}).`);
+console.log(`csvzall Lite distribution OK (${manifest.version}).`);

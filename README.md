@@ -5,7 +5,7 @@
 
 Open, edit, create, and chart CSV files directly inside Obsidian.
 
-This plugin relies on the [csvzall](https://github.com/vincentlaucsb/csvzall) command line application, which can be downloaded through the plugin via GitHub Releases.
+This plugin includes a pinned version of the [csvzall](https://github.com/vincentlaucsb/csvzall) helper. It is ready to use offline and updates together with the plugin.
 
 On phones and tablets, install
 [`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile).
@@ -27,22 +27,32 @@ users find the plugin and helps me gauge demand for continued development.
 
 - Obsidian desktop.
 - A local filesystem vault.
-- The `csvzall` helper binary. The plugin can download this for you from its
-  settings tab, or from the missing-binary screen when opening a CSV.
+- Windows x64, macOS Apple Silicon, or Linux x64 for the bundled helper.
+  Other desktop architectures require a compatible custom executable.
 
 For mobile creating, viewing, and editing, install the generated
 [`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile)
 plugin instead. The mobile plugin uses the bundled WASM viewer and does not
 install or run the desktop helper binary.
 
-Downloaded binaries are verified with SHA-256 before they are installed under
-the plugin-managed directory.
+The included helper is verified with SHA-256 and extracted into the plugin's
+directory automatically. Update the plugin through Obsidian to receive helper
+updates. You can set a **Custom executable path** to use an independently managed
+helper, including a command on PATH. Choose **Use bundled helper** to switch back.
 
 ## Privacy and Network Use
 
-The plugin does not collect telemetry. It contacts GitHub Releases only when
-you choose to install or update the managed `csvzall` helper. CSV viewing and
-charting run through the local helper process on your machine.
+The plugin does not collect telemetry or contact GitHub to install or update
+the helper. CSV viewing and charting run through the local helper process on
+your machine.
+
+The desktop plugin uses direct filesystem access to install the helper and
+pass real file paths to it. It can execute a helper outside your vault when
+you configure its path or use an executable on your system PATH. This access
+is required for the native viewer, editing, charts, and SQL. Helper processes
+run with your user account's filesystem permissions.
+Configured chart paths can also direct the helper to read inputs or write
+outputs outside the vault.
 
 ## Limitations
 
@@ -96,35 +106,14 @@ a new note. Generated tables remain readable when the plugin is disabled.
 Generation and automatic refresh require the desktop plugin and csvzall helper;
 the mobile companion can display the saved notes.
 
-## Development
+## Manage exports
 
-```powershell
-npm install
-npm run dev
-npm test
-```
-
-To refresh the packaged WASM viewer from a local `csvzall` checkout:
-
-```powershell
-npm run sync:wasm-viewer
-npm run check:wasm-viewer
-```
-
-The sync script copies `..\csvzall\src\viewer_wasm\web\dist` into
-`wasm-viewer/` and writes provenance metadata. Treat `wasm-viewer/` like a
-generated release asset: commit it, but do not edit it by hand.
-
-The desktop release workflow publishes Obsidian's standard plugin assets:
-`manifest.json`, `main.js`, and `styles.css`.
-
-Maintainer notes for the generated mobile distribution live in
-[`docs/mobile-distribution.md`](docs/mobile-distribution.md).
-
-For local testing, copy or link this folder to:
-
-```text
-<Vault>/.obsidian/plugins/csvzall/
-```
-
-Then reload Obsidian and enable the plugin.
+In the plugin's settings, **Active exports** lists CSV files with saved chart,
+table, or value export configurations, including paused exports. **Configure**
+lists each chart, SQL table, or value export with **Configure** and **Delete**
+actions, including files with only one export. Deleting an individual export
+removes only its configuration and keeps the CSV and generated content.
+Linked note regions become ordinary Markdown when their export is deleted.
+The **Delete** action beside the CSV removes all of that file's export
+configurations while preserving the CSV and generated content. Linked note
+regions become ordinary Markdown.

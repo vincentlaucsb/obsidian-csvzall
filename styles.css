@@ -158,3 +158,65 @@
 .csvzall-table-modal {
   width: min(760px, 94vw);
 }
+.csvzall-settings-exports {
+  width: 100%;
+}
+
+.setting-item:has(> .csvzall-settings-exports) {
+  flex-wrap: wrap;
+}
+
+.csvzall-chart-options-modal {
+  width: min(960px, 90vw);
+}
+
+.csvzall-chart-options-modal .chart-dialog-layout {
+  display: flex;
+  gap: 16px;
+}
+
+.csvzall-chart-options-modal .chart-list-pane {
+  display: none;
+}
+
+.csvzall-chart-options-modal .dialog-form,
+.csvzall-chart-options-modal .chart-form-pane,
+.csvzall-chart-options-modal .chart-range,
+.csvzall-chart-options-modal .dialog-form label:not(.toggle-row) {
+  display: grid;
+  gap: var(--size-4-2);
+  min-width: 0;
+}
+
+.csvzall-chart-options-modal .toggle-row {
+  display: flex;
+  gap: var(--size-4-2);
+}
+
+.csvzall-chart-options-modal .chart-form-pane {
+  flex: 1;
+  min-width: 0;
+}
+
+.csvzall-chart-options-modal .dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--size-4-3);
+}
+
+.csvzall-chart-options-modal .dialog-form input:not([type="checkbox"]):not([type="radio"]),
+.csvzall-chart-options-modal .dialog-form select {
+  width: 100%;
+  min-width: 0;
+}
+
+.csvzall-chart-options-modal .dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+}
+
+.csvzall-chart-options-modal [hidden] {
+  display: none !important;
+}

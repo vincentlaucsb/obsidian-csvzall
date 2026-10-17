@@ -42,7 +42,8 @@ function parseRecipe(encoded: string): TableRecipe {
 }
 
 export function managedTableText(recipe: Pick<TableRecipe, 'id' | 'format'>, markdown: string): string {
-  const body = recipe.format === 'value' ? markdown : `\n${markdown.replace(/\r\n?/g, '\n').trimEnd()}\n`;
+  // Blank lines separate the table from its HTML markers in Live Preview.
+  const body = recipe.format === 'value' ? markdown : `\n\n${markdown.replace(/\r\n?/g, '\n').trimEnd()}\n\n`;
   const text = `<!-- csvzall:export ${recipe.id} -->${body}<!-- /csvzall:export ${recipe.id} -->`;
   // A comment at line start is a Markdown HTML block. A standard inline span
   // keeps scalar escaping active even at the start of a paragraph or new note.
@@ -106,7 +107,8 @@ export function findManagedTables(text: string): ManagedTable[] {
       let from = pending.from, to = comment.index + comment[0].length;
       if (text.slice(from - 6, from) === '<span>' && text.slice(to, to + 7) === '</span>') { from -= 6; to += 7; }
       let body = text.slice(pending.bodyFrom, comment.index);
-      if (/^\r?\n/.test(body) && /\r?\n$/.test(body)) body = body.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+      // Read both the original single-newline framing and blank-line framing.
+      if (/^\r?\n/.test(body) && /\r?\n$/.test(body)) body = body.replace(/^(?:\r?\n){1,2}/, '').replace(/(?:\r?\n){1,2}$/, '');
       tables.push({ id: pending.id, marker, recipe: pending.recipe, from, to, text: text.slice(from, to), body });
       pending = null;
     }
@@ -152,7 +154,15 @@ export function scalarMarkdown(csv: string): string {
   if (quoted) throw new Error('Incomplete CSV result.');
   if (started || row.length) { row.push(value); rows.push(row); }
   if (rows.length !== 2 || rows.some(values => values.length !== 1)) throw new Error('A value export must return exactly one row and one column. The previous value has been kept.');
-  return Array.from(rows[1]![0]!.replace(/[\r\n\t\x00-\x1f\x7f]+/g, ' '), char => {
+  // Collapse C0/DEL runs without a control-character regular expression.
+  let normalized = '', inControls = false;
+  for (const char of rows[1]![0]!) {
+    const code = char.charCodeAt(0);
+    const control = code <= 31 || code === 127;
+    if (!control || !inControls) normalized += control ? ' ' : char;
+    inControls = control;
+  }
+  return Array.from(normalized, char => {
     const code = char.charCodeAt(0);
     return ((code >= 33 && code <= 47) || (code >= 58 && code <= 64) || (code >= 91 && code <= 96) || (code >= 123 && code <= 126)) ? `\\${char}` : char;
   }).join('');

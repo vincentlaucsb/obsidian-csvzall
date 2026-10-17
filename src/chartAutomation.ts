@@ -45,7 +45,15 @@ export function chartConfigRoot(configPath = DEFAULT_CHART_CONFIG_PATH): string 
 export function resolveChartPath(configPath: string, path: string): string {
   const normalized = normalizeVaultPath(path);
   const root = chartConfigRoot(configPath);
-  return root ? normalizeVaultPath(`${root}/${normalized}`) : normalized;
+  const parts: string[] = [];
+  for (const part of (root ? `${root}/${normalized}` : normalized).split("/")) {
+    if (part === "." || !part) continue;
+    if (part === "..") {
+      if (parts.length && parts[parts.length - 1] !== "..") parts.pop();
+      else parts.push(part);
+    } else parts.push(part);
+  }
+  return parts.join("/");
 }
 
 export function chartRunKey(chart: Pick<ConfiguredChart, "configPath" | "id">): string {

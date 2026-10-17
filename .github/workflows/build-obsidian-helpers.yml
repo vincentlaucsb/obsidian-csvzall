@@ -1,0 +1,131 @@
+name: Build pinned Obsidian helpers
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Intended desktop plugin release version
+        required: true
+        type: string
+    outputs:
+      artifact:
+        description: Verified native helper snapshot
+        value: native-helper-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    outputs:
+      key: ${{ steps.plan.outputs.key }}
+      reuse: ${{ steps.plan.outputs.reuse }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: plan
+        name: Verify committed helpers and calculate build identity
+        run: |
+          node scripts/validate-release.mjs "$RELEASE_TAG"
+          node scripts/native-helper-contract.mjs plan
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.reuse != 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Read pinned Python version
+        id: tools
+        run: node -e "const fs=require('fs'); const config=JSON.parse(fs.readFileSync('native-binaries/build.json')); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'python='+config.tools.python+'\n');"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.tools.outputs.python }}
+      - name: Restore exact verified helper candidate
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .test-build/native-results/${{ matrix.target }}
+          key: obsidian-helper-${{ needs.plan.outputs.key }}-${{ matrix.target }}
+      - name: Install locked build tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $config = Get-Content native-binaries/build.json -Raw | ConvertFrom-Json
+          python -m pip install "cmake==$($config.tools.cmake)" "ninja==$($config.tools.ninja)"
+      - name: Install Linux C++23 compiler
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y g++-14
+      - name: Configure MSVC developer environment
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Build pinned source and smoke-test packaged helper
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: node scripts/build-native-helper.mjs build ${{ matrix.target }} .test-build/native-results/${{ matrix.target }}
+      - name: Verify cached archive, provenance, architecture, and viewer startup
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: node scripts/build-native-helper.mjs verify ${{ matrix.target }} .test-build/native-results/${{ matrix.target }}
+      - name: Save verified helper
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .test-build/native-results/${{ matrix.target }}
+          key: obsidian-helper-${{ needs.plan.outputs.key }}-${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-result-${{ matrix.target }}
+          path: .test-build/native-results/${{ matrix.target }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  collect:
+    needs: [plan, build]
+    if: always() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download freshly built or cached helpers
+        if: needs.plan.outputs.reuse != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-result-*
+          path: .test-build/native-downloads
+      - name: Assemble verified helper snapshot
+        if: needs.plan.outputs.reuse != 'true'
+        shell: bash
+        run: |
+          mkdir -p .test-build/native-input
+          for target in linux-x64 darwin-arm64 win32-x64; do
+            mv ".test-build/native-downloads/native-result-${target}" ".test-build/native-input/${target}"
+          done
+          node scripts/native-helper-contract.mjs collect .test-build/native-input .test-build/native-snapshot
+      - name: Reuse committed helper snapshot
+        if: needs.plan.outputs.reuse == 'true'
+        shell: bash
+        run: |
+          node scripts/native-helper-contract.mjs verify
+          mkdir -p .test-build/native-snapshot
+          cp native-binaries/manifest.json native-binaries/*.zip native-binaries/*.gz .test-build/native-snapshot/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-helper-snapshot
+          path: .test-build/native-snapshot/
+          if-no-files-found: error
+          retention-days: 7

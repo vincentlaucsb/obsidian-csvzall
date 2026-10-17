@@ -5,6 +5,21 @@ runs the Node regression suite, then builds and validates the mobile
 distribution. CI runs the same command. Generated desktop `main.js` belongs in
 the commit; `.mobile-dist/` does not.
 
+Native release-pipeline regressions also run the standard-library Python
+packager, so `npm test` needs Python 3 on PATH (or `NATIVE_HELPER_PYTHON` pointing
+to it). They cover build-identity reuse, stale/corrupt receipts, complete-platform
+collection, deterministic archives, and safe extraction without compiling C++.
+Actual native builds use the pinned tools in `native-binaries/build.json`; see
+the [helper release pipeline](bundled-helper.md).
+
+For Community feedback, use the [warning remediation workflow](obsidian-warning-remediation.md)
+to retrieve current warnings and official guidance. Before release, run
+`npm run check:source-archive` to validate `npm ci` and the production build
+without `.git` or preinstalled dependencies. It needs registry access.
+CI runs this independently of the normal desktop/mobile regression suite.
+The archive LF scan honors ignore rules and text attributes without Git;
+imported `-text` assets remain byte-preserved in both modes.
+
 ## Type-safety gate
 
 The lint/build gate also checks tracked and non-ignored new text files for LF
@@ -28,9 +43,18 @@ The enforced TypeScript ESLint rules are `no-unsafe-call`,
 injects invalid code for every category into both desktop and mobile lint
 contexts to verify that the gate rejects it.
 
-Bare timer calls are also rejected. UI code uses its window's timers; the
-desktop-only installer imports Node timers explicitly so a download timeout
-does not depend on a popout window and remains testable without a DOM.
+The gate also rejects `TFile`/`TFolder` assertions and control-character regular
+expressions in both distributions. Desktop settings reject deprecated
+`display()` overrides once `getSettingDefinitions()` is implemented. Keep
+desktop tests on the declarative `update()` entry point; mobile retains its
+own API minimum. Scalar tests exercise every C0/DEL character, run collapsing,
+Unicode, and literal Markdown escaping.
+
+Bare timer calls are also rejected. UI code uses its window's timers. Legacy
+download helpers use explicit Node timers and remain covered by pure tests;
+the shipped desktop plugin extracts its pinned bundled helper without downloads.
+See [bundled helper maintenance](bundled-helper.md) for the version pin,
+archive verification, migration, and release checks.
 
 The lint project explicitly loads Node types and ES2018 standard library
 declarations (including `Promise.finally`). Keep dependencies available:
@@ -58,6 +82,10 @@ destructive scenarios:
   starts. Confirm the remaining pane shows the correct file.
 - On Obsidian 1.13.0 or later, find the plugin's controls through settings search
   and confirm install/update and clear-log actions refresh the settings rows.
+- Check Active exports for both running and paused configurations. Configure
+  a file with several exports and verify the chooser opens the right options.
+  Delete its configurations and confirm the CSV, generated files, and rendered
+  note content survive, with note regions detached into ordinary Markdown.
 - Disable the desktop plugin while a viewer is starting. Confirm its helper
   process exits.
 - Edit a desktop CSV, rename or move it, then restore its original path.

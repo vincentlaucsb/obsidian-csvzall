@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "repository": "vincentlaucsb/csvzall",
+  "sourceCommit": "34bab618cbf91b78f016430fcff7c0c27805835e",
+  "version": "0.6.0",
+  "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12" },
+  "cmakeOptions": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CSVZALL_CXX_STANDARD": "23",
+    "CSVZALL_OBSIDIAN_BUILD": "ON",
+    "CSVZALL_ENABLE_POSTGRESQL": "OFF",
+    "CSVZALL_ENABLE_KEYCHAIN": "OFF",
+    "CSVZALL_ENABLE_COMPRESSED_INPUT": "OFF",
+    "CSVZALL_PREFER_SYSTEM_SIMDJSON": "OFF",
+    "CSVZALL_PREFER_SYSTEM_NLOHMANN_JSON": "OFF",
+    "CSVZALL_PREFER_SYSTEM_SVGPLOT": "OFF",
+    "CSVZALL_PREFER_SIBLING_CSV_PARSER": "OFF",
+    "CSVZALL_ENABLE_SVGPLOT": "ON",
+    "BUILD_TESTING": "OFF"
+  },
+  "dependencies": {
+    "csv-parser": { "repository": "vincentlaucsb/csv-parser", "commit": "f5d24ab4a38ba0b74cbc7057f21543014d2ec472", "cmakeVariable": "CSV_PARSER_ROOT" },
+    "argparse": { "repository": "p-ranav/argparse", "commit": "68fd0277eea5412aff9b91c0b70efc698359dae0", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_ARGPARSE" },
+    "indicators": { "repository": "p-ranav/indicators", "commit": "26d39ad8fb438f5f50fb16427f554045d8431030", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_INDICATORS" },
+    "sqlitecpp": { "repository": "SRombauts/SQLiteCpp", "commit": "08aa70a45ea52abcd8ee6b5d1ab1542140b3c7f5", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SQLITECPP" },
+    "simdjson": { "repository": "simdjson/simdjson", "commit": "0c0ce1bd48baa0677dc7c0945ea7cd1e8b52b297", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SIMDJSON" },
+    "nlohmann_json": { "repository": "nlohmann/json", "commit": "55f93686c01528224f448c19128836e7df245f72", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON" },
+    "svgplot": { "repository": "vincentlaucsb/svgplot", "commit": "0b6562a55ff3a346b4226150c42ce8776636d967", "cmakeVariable": "SVGPLOT_ROOT" },
+    "svg": { "repository": "vincentlaucsb/svg", "commit": "12d9d9edb9e42e678d0c91083e10666151a75486", "cmakeVariable": "SVGPLOT_SIBLING_SVG_DIR" },
+    "catch2": { "repository": "catchorg/Catch2", "commit": "fa43b77429ba76c462b1898d6cd2f2d7a9416b14", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_CATCH2" }
+  },
+  "targets": {
+    "linux-x64": { "runner": "ubuntu-24.04", "platform": "linux", "arch": "x64", "generator": "Ninja", "cmakeOptions": { "CMAKE_C_COMPILER": "gcc-14", "CMAKE_CXX_COMPILER": "g++-14" } },
+    "darwin-arm64": { "runner": "macos-15", "platform": "darwin", "arch": "arm64", "generator": "Ninja", "cmakeOptions": { "CMAKE_OSX_ARCHITECTURES": "arm64", "CMAKE_OSX_DEPLOYMENT_TARGET": "13.3" } },
+    "win32-x64": { "runner": "windows-2022", "platform": "win32", "arch": "x64", "generator": "Ninja", "cmakeOptions": { "CMAKE_C_COMPILER": "cl", "CMAKE_CXX_COMPILER": "cl" } }
+  }
+}

@@ -1,7 +1,9 @@
 import type { App, PluginManifest } from "obsidian";
 import { embeddedWasmViewerAssets } from "./wasmViewerAssets.generated.js";
+import { createEmbeddedViewerDocument } from "./EmbeddedViewerDocument.js";
 
 const EMBEDDED_VIEWER_MARKER = "csvzall-mobile-embedded-wasm-viewer-v1";
+let viewerDocument: ReturnType<typeof createEmbeddedViewerDocument> | null = null;
 
 type PluginManifestWithDirectory = PluginManifest & {
   dir?: string;
@@ -12,7 +14,6 @@ type DataAdapterLike = App["vault"]["adapter"] & {
   mkdir(normalizedPath: string): Promise<void>;
   write(normalizedPath: string, data: string): Promise<void>;
   writeBinary(normalizedPath: string, data: ArrayBuffer): Promise<void>;
-  getResourcePath(normalizedPath: string): string;
 };
 
 function normalizeVaultPath(path: string): string {
@@ -69,7 +70,12 @@ export async function ensureEmbeddedWasmViewerAssets(
   console.debug(`${EMBEDDED_VIEWER_MARKER}: wrote ${embeddedWasmViewerAssets.length} viewer assets`);
 }
 
-export function embeddedWasmViewerUrl(app: App, manifest: PluginManifestWithDirectory): string {
-  const adapter = app.vault.adapter as DataAdapterLike;
-  return adapter.getResourcePath(normalizeVaultPath(`${pluginDirectory(app, manifest)}/wasm-viewer/index.html`));
+export function embeddedWasmViewerUrl(_app: App, _manifest: PluginManifestWithDirectory): string {
+  viewerDocument ??= createEmbeddedViewerDocument(embeddedWasmViewerAssets);
+  return viewerDocument.url;
+}
+
+export function releaseEmbeddedWasmViewer(): void {
+  viewerDocument?.dispose();
+  viewerDocument = null;
 }

@@ -4,3 +4,5 @@
 wasm-viewer/assets/*.js -text
 *.wasm -text
 *.png -text
+native-binaries/*.zip -text
+native-binaries/*.gz -text
