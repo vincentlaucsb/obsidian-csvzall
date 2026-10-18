@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "repository": "vincentlaucsb/csvzall",
-  "sourceCommit": "34bab618cbf91b78f016430fcff7c0c27805835e",
-  "version": "0.6.0",
+  "sourceCommit": "2ed8ee6e677ed62d7471b34d4fdffcf449edd861",
+  "version": "0.7.0",
   "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12" },
   "cmakeOptions": {
     "CMAKE_BUILD_TYPE": "Release",
@@ -25,8 +25,8 @@
     "sqlitecpp": { "repository": "SRombauts/SQLiteCpp", "commit": "08aa70a45ea52abcd8ee6b5d1ab1542140b3c7f5", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SQLITECPP" },
     "simdjson": { "repository": "simdjson/simdjson", "commit": "0c0ce1bd48baa0677dc7c0945ea7cd1e8b52b297", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SIMDJSON" },
     "nlohmann_json": { "repository": "nlohmann/json", "commit": "55f93686c01528224f448c19128836e7df245f72", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON" },
-    "svgplot": { "repository": "vincentlaucsb/svgplot", "commit": "0b6562a55ff3a346b4226150c42ce8776636d967", "cmakeVariable": "SVGPLOT_ROOT" },
-    "svg": { "repository": "vincentlaucsb/svg", "commit": "12d9d9edb9e42e678d0c91083e10666151a75486", "cmakeVariable": "SVGPLOT_SIBLING_SVG_DIR" },
+    "svgplot": { "repository": "vincentlaucsb/svgplot", "commit": "ae5f0ca59db0da3bf37d5e0f1168abf50b8868a7", "cmakeVariable": "SVGPLOT_ROOT" },
+    "svg": { "repository": "vincentlaucsb/svg", "commit": "895daeea9a8f70c00281255ea244f05f5d6c077a", "cmakeVariable": "SVGPLOT_SIBLING_SVG_DIR" },
     "catch2": { "repository": "catchorg/Catch2", "commit": "fa43b77429ba76c462b1898d6cd2f2d7a9416b14", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_CATCH2" }
   },
   "targets": {
