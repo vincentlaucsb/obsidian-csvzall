@@ -14,7 +14,10 @@ import {
   type CsvzallPluginSettings,
 } from "./settings/settings.js";
 import { CsvzallTableView } from "./views/CsvzallTableView.js";
-import { VIEW_TYPE_CSVZALL } from "./views/viewTypes.js";
+import { VIEW_TYPE_CSVZALL, VIEW_TYPE_CSVZALL_EXPORTS } from "./views/viewTypes.js";
+import { CsvzallExportsView, openExportsView } from "./views/ExportsView.js";
+import { registerExportCommands } from "./commands/registerExportCommands.js";
+import { openPluginSettings } from "./obsidian/settingsModal.js";
 import { registerVaultWatchers } from "./watchers/registerVaultWatchers.js";
 import { MarkdownTableService } from "./markdown/MarkdownTableService.js";
 import { registerMarkdownCommands } from "./commands/registerMarkdownCommands.js";
@@ -30,6 +33,7 @@ export default class CsvzallPlugin extends Plugin {
   private chartService!: ChartService;
   private installerService!: InstallerService;
   private markdownTables!: MarkdownTableService;
+  private exportSettings!: ExportSettingsService;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -39,18 +43,21 @@ export default class CsvzallPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
     this.registerExtensions(["csv"], VIEW_TYPE_CSVZALL);
+    this.registerView(VIEW_TYPE_CSVZALL_EXPORTS, (leaf) => new CsvzallExportsView(leaf, this.exportSettings));
     this.addSettingTab(new CsvzallSettingTab(this, {
       getSettings: () => this.settings,
       saveSettings: () => this.saveSettings(),
       eventLog: this.eventLog,
       installer: this.installerService,
-      exports: new ExportSettingsService(this.app, this.chartService, this.markdownTables, this.filesystem, this.processService),
+      exports: this.exportSettings,
+      openExports: () => openExportsView(this.app),
     }));
 
     registerCsvCommands(this, this.csvService);
     registerChartCommands(this, this.chartService, this.csvService);
     registerVaultWatchers(this, this.chartService, this.csvService);
     registerMarkdownCommands(this, this.markdownTables);
+    registerExportCommands(this);
     this.markdownTables.register(this);
   }
 
@@ -89,14 +96,7 @@ export default class CsvzallPlugin extends Plugin {
   }
 
   openCsvzallSettings(): void {
-    const setting = (this.app as unknown as {
-      setting?: {
-        open(): void;
-        openTabById(id: string): void;
-      };
-    }).setting;
-    setting?.open();
-    setting?.openTabById(this.manifest.id);
+    openPluginSettings(this.app, this.manifest.id);
   }
 
   private createServices(): void {
@@ -130,5 +130,6 @@ export default class CsvzallPlugin extends Plugin {
       this.filesystem,
     );
     this.markdownTables = new MarkdownTableService(this.app, this.filesystem, this.processService, this.eventLog);
+    this.exportSettings = new ExportSettingsService(this.app, this.chartService, this.markdownTables, this.filesystem, this.processService);
   }
 }

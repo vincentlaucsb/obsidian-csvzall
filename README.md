@@ -108,10 +108,14 @@ the mobile companion can display the saved notes.
 
 ## Manage exports
 
-In the plugin's settings, **Active exports** lists CSV files with saved chart,
-table, or value export configurations, including paused exports. **Configure**
-lists each chart, SQL table, or value export with **Configure** and **Delete**
-actions, including files with only one export. Deleting an individual export
+The plugin's settings show how many exports are saved. Select **Configure**
+under **Exports**, or run the **Open exports** command, to open the exports tab.
+It lists CSV files with saved chart, table, or value export configurations,
+including paused exports; use **Refresh** after editing configuration files
+directly. **Configure** lists each chart, SQL table, or value export with
+**Configure** and **Delete** actions, including files with only one export.
+A SQL table or value export's options show the note that contains it, with a
+**Go to note** button. Deleting an individual export
 removes only its configuration and keeps the CSV and generated content.
 Linked note regions become ordinary Markdown when their export is deleted.
 The **Delete** action beside the CSV removes all of that file's export

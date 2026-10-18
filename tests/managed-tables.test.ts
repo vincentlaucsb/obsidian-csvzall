@@ -2,7 +2,7 @@ import { HtmlRenderer, Parser } from 'commonmark';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { csvHeader, findManagedTables, managedTableText, replaceManagedTable, scalarMarkdown, validateSource, type TableRecipe } from '../src/markdown/managedTables.js';
+import { csvHeader, exportMarkerLine, findManagedTables, managedTableText, replaceManagedTable, scalarMarkdown, validateSource, type TableRecipe } from '../src/markdown/managedTables.js';
 
 const recipe: TableRecipe = { version: 1, id: 'tasks', source: 'Data/tasks.csv', columns: [], sql: '' };
 const markdown = '| title |\n| --- |\n| Buy milk |';
@@ -156,4 +156,13 @@ test('distributed desktop bundle includes licenses for its Markdown parser depen
   assert.ok(bundle.includes(notices));
   assert.match(notices, /John MacFarlane/); assert.match(notices, /Redistributions in binary form/);
   assert.match(notices, /mdurl/); assert.match(notices, /Mathias Bynens/);
+});
+
+test('export marker lines are located from note text, ignoring code blocks and malformed markers', () => {
+  const region = managedTableText(recipe, markdown);
+  assert.equal(exportMarkerLine(`# Title\r\n\r\n${region}\n`, 'tasks'), 2);
+  assert.equal(exportMarkerLine(region, 'tasks'), 0);
+  assert.equal(exportMarkerLine('```\n<!-- csvzall:export tasks -->\n```\n', 'tasks'), undefined);
+  assert.equal(exportMarkerLine(`Intro\n${region}`, 'other'), undefined);
+  assert.equal(exportMarkerLine('<!-- csvzall:export tasks -->\nunclosed', 'tasks'), undefined);
 });

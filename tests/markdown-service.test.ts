@@ -17,7 +17,8 @@ class FakeFile {
 class FakeView {}
 
 async function harness() {
-  let formOptions: any;
+  let formOptions: any, noteLink: any;
+  const opened: Array<{ kind: unknown; file: unknown; state: unknown }> = [];
   const result = await build({ entryPoints: ['src/markdown/MarkdownTableService.ts'], bundle: true,
     platform: 'node', format: 'cjs', write: false, external: ['obsidian'],
     plugins: [{ name: 'mock-modal', setup(builder) {
@@ -28,7 +29,7 @@ async function harness() {
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports, console,
     crypto: webcrypto, window: { setTimeout, clearTimeout, setInterval, clearInterval }, require(name: string) {
       if (name === 'obsidian') return { TFile: FakeFile, MarkdownView: FakeView, Notice: class {} };
-      if (name === 'mock-modal') return { TableModal: class { constructor(_app: unknown, options: unknown) { formOptions = options; } open() {} } };
+      if (name === 'mock-modal') return { TableModal: class { constructor(_app: unknown, options: unknown, note: unknown) { formOptions = options; noteLink = note; } open() {} } };
       return require(name);
     },
   });
@@ -62,7 +63,8 @@ async function harness() {
     remove: async (path: string) => { configs.delete(path); },
     mkdir: async () => {},
   };
-  const app = { workspace: { getLeavesOfType: () => leaves, onLayoutReady: (callback: () => void) => { ready = callback; } }, vault: {
+  const app = { workspace: { getLeavesOfType: () => leaves,
+    getLeaf: (kind: unknown) => ({ openFile: async (file: unknown, state: unknown) => { opened.push({ kind, file, state }); } }), onLayoutReady: (callback: () => void) => { ready = callback; } }, vault: {
     adapter,
     read: async (file: FakeFile) => file === note ? text : extraNotes.get(file)!,
     getMarkdownFiles: () => [note, ...extraNotes.keys()],
@@ -82,7 +84,7 @@ async function harness() {
     addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; } }; },
     failWrites(value = true) { failWrite = value; },
     async reindex() { await service.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
-    get formOptions() { return formOptions; },
+    get formOptions() { return formOptions; }, get noteLink() { return noteLink; }, opened,
     get writes() { return writes; }, setQuery(fn: () => Promise<string>) { query = fn; },
     async start() { service.register({ register() {}, registerEvent() {} }); ready(); await settle(); },
     async event(name: string, ...args: unknown[]) { events.get(name)?.(...args); await settle(); },
@@ -602,5 +604,31 @@ test('settings configure updates an existing export identity and preserves the p
   assert.equal(updated.length, 1); assert.equal(updated[0].id, recipe.id);
   assert.equal(updated[0].options.sql, 'SELECT title FROM data');
   assert.equal(updated[0].runOnSave, false); assert.equal(savedCalls, 1);
+  f.service.unload();
+});
+
+test('settings configure links a SQL export to its note and opens it at the marker line', async () => {
+  const f = await harness();
+  const saved = (await f.service.listExports([]))[0];
+  f.service.configureExport(saved, () => {});
+  assert.equal(f.noteLink.path, 'Reports/tasks.md');
+  assert.equal(f.noteLink.exists, true);
+  await f.noteLink.open();
+  assert.equal(f.opened.length, 1);
+  assert.equal(f.opened[0]!.kind, 'tab');
+  assert.equal(f.opened[0]!.file, f.note);
+  assert.equal(JSON.stringify(f.opened[0]!.state), JSON.stringify({ active: true, eState: { line: 2 } }));
+  f.service.unload();
+});
+
+test('legacy exports without an output note are shown as unlinked without scanning the vault', async () => {
+  const f = await harness();
+  f.configs.set('.csvzall/exports.json', JSON.stringify({ exports: [{ id: recipe.id, input: recipe.source, options: { columns: [], sql: '' } }] }));
+  const saved = (await f.service.listExports([]))[0];
+  f.service.configureExport(saved, () => {});
+  assert.equal(f.noteLink.path, undefined);
+  assert.equal(f.noteLink.exists, false);
+  await assert.rejects(f.noteLink.open(), /not linked to a note/);
+  assert.equal(f.opened.length, 0);
   f.service.unload();
 });

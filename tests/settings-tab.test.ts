@@ -45,8 +45,16 @@ class Row extends Element {
   addButton(callback: (control: Control) => void) { return this.addText(callback); }
 }
 
+async function bundle(entry: string, globals: Record<string, unknown> = {}) {
+  const result = await build({ entryPoints: [entry], bundle: true, platform: "node", format: "cjs", write: false, external: ["obsidian"] });
+  const module = { exports: {} as any };
+  runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports,
+    require: () => ({ Setting: Row, Notice: class {}, ...globals }) });
+  return module.exports;
+}
+
 async function loadTab() {
-  class BaseTab { containerEl = new Element(); updates = 0;  }
+  class BaseTab { containerEl = new Element(); updates = 0; constructor(public app: unknown) {} }
   Object.assign(BaseTab.prototype, {
     update(this: any) {
       this.updates++;
@@ -92,7 +100,7 @@ test("declarative settings persist controls and refresh install/log actions", as
     const definitions = tab.getSettingDefinitions();
     assert.equal(tab.containerEl.children.length, 0, "indexing must not render or perform actions");
     assert.equal(installs + saves, 0);
-    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Startup timeout", "Report a bug", "Active exports", "Files with exports", "Log", "Chart and error log"]);
+    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Startup timeout", "Report a bug", "Exports", "Saved exports", "Log", "Chart and error log"]);
     tab.update();
     const row = (name: string): Row => tab.containerEl.children.find((r: Row) => r.name === name);
     assert.equal(tab.containerEl.children.length, 9);
@@ -125,27 +133,35 @@ test("declarative settings persist controls and refresh install/log actions", as
     assert.ok(tab.updates > 1);
 });
 
-test('active exports load only during rendering and route both file actions', async () => {
+test('settings show only an export summary and open the exports tab from Configure', async () => {
   const Tab = await loadTab();
   const file = { source: 'Data/tasks.csv', missing: false, entries: [{ kind: 'chart', chart: { definition: { type: 'bar' } } }, { kind: 'table' }] };
-  const missing = { ...file, source: 'missing.csv', missing: true };
-  let reads = 0, configured: unknown, deleted: unknown;
-  const tab = new Tab({ app: {} }, {
+  let reads = 0, opened = 0, closed = 0;
+  const tab = new Tab({ app: { setting: { close: () => { closed++; } } } }, {
     getSettings: () => DEFAULT_SETTINGS, installer: {}, eventLog: {},
-    exports: { list: async () => { reads++; return [file, missing]; },
-      configure: (value: unknown) => { configured = value; }, confirmDelete: (value: unknown) => { deleted = value; } },
+    exports: { list: async () => { reads++; return [file, { ...file, source: 'b.csv' }]; } },
+    openExports: async () => { opened++; },
   });
   tab.getSettingDefinitions(); assert.equal(reads, 0);
   tab.update(); await Promise.resolve();
-  const container = tab.containerEl.children.find((row: Row) => row.name === 'Files with exports').children[0];
-  const rows = container.children as Row[];
-  assert.equal(rows[0]!.name, file.source);
-  assert.equal(rows[0]!.description, '1 chart, 1 table or value export');
-  assert.deepEqual(rows[0]!.controls.map(button => button.label), ['Configure', 'Delete']);
-  await rows[0]!.controls[0]!.click(); await rows[0]!.controls[1]!.click();
-  assert.equal(configured, file); assert.equal(deleted, file);
-  assert.equal(rows[1]!.controls[0]!.disabled, true);
-  assert.equal(rows[1]!.controls[1]!.disabled, false);
+  const row = tab.containerEl.children.find((r: Row) => r.name === 'Saved exports') as Row;
+  assert.equal(row.descEl.children[0]!.children[0]!.options.text, '2 files · 2 charts, 2 table or value exports');
+  assert.deepEqual(row.controls.map(button => button.label), ['Configure']);
+  await row.controls[0]!.click();
+  assert.equal(opened, 1); assert.equal(closed, 1);
+  assert.equal(row.children.length, 0, 'settings must not render per-file export rows');
+});
+
+test('Configure still opens the exports tab when the settings modal API is unavailable', async () => {
+  const Tab = await loadTab();
+  let opened = 0;
+  const tab = new Tab({ app: {} }, { getSettings: () => DEFAULT_SETTINGS,
+    exports: { list: async () => [] }, openExports: async () => { opened++; } });
+  tab.update(); await Promise.resolve();
+  const row = tab.containerEl.children.find((r: Row) => r.name === 'Saved exports') as Row;
+  assert.equal(row.descEl.children[0]!.children[0]!.options.text, 'No exports yet.');
+  await row.controls[0]!.click();
+  assert.equal(opened, 1);
 });
 
 test('stale export listings cannot overwrite a refreshed or closed settings tab', async () => {
@@ -156,5 +172,37 @@ test('stale export listings cannot overwrite a refreshed or closed settings tab'
   tab.update(); const first = tab.containerEl.children;
   tab.update(); tab.hide();
   finish[0]!([]); finish[1]!([]); await Promise.resolve();
-  assert.equal(first[6].children[0].children[0].options.text, 'Loading exports...');
+  assert.equal(first[6].descEl.children[0].children[0].options.text, 'Loading exports...');
+});
+
+test('the shared export list routes both file actions and disables Configure for missing CSVs', async () => {
+  const { renderExportRows, loadExports } = await bundle('src/settings/exportList.ts');
+  const file = { source: 'Data/tasks.csv', missing: false, entries: [{ kind: 'chart', chart: { definition: { type: 'bar' } } }, { kind: 'table' }] };
+  const missing = { ...file, source: 'missing.csv', missing: true };
+  let configured: unknown, deleted: unknown, refreshes = 0;
+  const service = { configure: (value: unknown, done: () => void) => { configured = value; done(); },
+    confirmDelete: (value: unknown, done: () => void) => { deleted = value; done(); } };
+  const container = new Element();
+  renderExportRows(container, [file, missing], service, () => { refreshes++; });
+  const rows = container.children as Row[];
+  assert.equal(rows[0]!.name, file.source);
+  assert.equal(rows[0]!.description, '1 chart, 1 table or value export');
+  assert.equal(rows[1]!.description, '1 chart, 1 table or value export · CSV missing');
+  assert.deepEqual(rows[0]!.controls.map(button => button.label), ['Configure', 'Delete']);
+  await rows[0]!.controls[0]!.click(); await rows[0]!.controls[1]!.click();
+  assert.equal(configured, file); assert.equal(deleted, file); assert.equal(refreshes, 2);
+  assert.equal(rows[1]!.controls[0]!.disabled, true);
+  assert.equal(rows[1]!.controls[1]!.disabled, false);
+
+  const empty = new Element();
+  renderExportRows(empty, [], service, () => {});
+  assert.equal(empty.children[0]!.options.text, 'No exports yet.');
+
+  const failed = new Element();
+  let retries = 0;
+  loadExports(failed, { list: async () => { throw new Error('bad json'); } }, () => true, () => {}, () => { retries++; });
+  await Promise.resolve(); await Promise.resolve();
+  assert.match(String(failed.children[0]!.options.text), /^Could not load exports: .*bad json/);
+  await (failed.children[1] as Row).controls[0]!.click();
+  assert.equal(retries, 1);
 });

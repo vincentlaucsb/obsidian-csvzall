@@ -130,6 +130,14 @@ export function shortenManagedTable(table: ManagedTable, id: string): string {
 
 export function tableBody(table: ManagedTable): string { return table.body; }
 
+/** Zero-based line of the opening marker for export `id`; undefined if absent or the note's markers are malformed. */
+export function exportMarkerLine(text: string, id: string): number | undefined {
+  let tables: ManagedTable[];
+  try { tables = findManagedTables(text); } catch { return undefined; }
+  const table = tables.find(candidate => candidate.id === id);
+  return table ? text.slice(0, table.from).split('\n').length - 1 : undefined;
+}
+
 /** Preserve exact CSV cell strings (including large integers) without JSON number conversion. */
 export function scalarMarkdown(csv: string): string {
   const rows: string[][] = [], row: string[] = [];
