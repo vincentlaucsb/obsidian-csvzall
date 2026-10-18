@@ -2,7 +2,7 @@ import { MarkdownView, Notice, TFile, type App, type Editor, type Plugin } from 
 import type { EventLog } from '../logging/EventLog.js';
 import type { ObsidianFilesystem } from '../obsidian/filesystem.js';
 import type { CsvzallProcessService } from '../process/CsvzallProcessService.js';
-import { csvHeader, findManagedTables, managedTableText, replaceManagedTable, scalarMarkdown, shortenManagedTable, tableBody, validateSource, type ManagedTable, type TableRecipe } from './managedTables.js';
+import { csvHeader, exportMarkerLine, findManagedTables, managedTableText, replaceManagedTable, scalarMarkdown, shortenManagedTable, tableBody, validateSource, type ManagedTable, type TableRecipe } from './managedTables.js';
 import { tableQuery, type TableValue } from './table-form.mjs';
 import { ExportDefinitions, type ResolvedExport, type SavedExport } from './ExportDefinitions.js';
 import { TableModal } from './TableModal.js';
@@ -330,7 +330,25 @@ export class MarkdownTableService {
         await this.initialize();
         onSaved();
       },
-    }).open();
+    }, { path: saved.output, exists: this.exportNote(saved) !== null, open: () => this.openExportNote(saved) }).open();
+  }
+
+  /** `output` is the note that holds the export's marker. Legacy entries have none; do not scan the vault for them. */
+  private exportNote(saved: SavedExport): TFile | null {
+    const file = saved.output ? this.app.vault.getAbstractFileByPath(saved.output) : null;
+    return file instanceof TFile ? file : null;
+  }
+
+  async openExportNote(saved: SavedExport): Promise<void> {
+    const file = this.exportNote(saved);
+    if (!file) throw new Error(saved.output ? `Note not found: ${saved.output}` : 'This export is not linked to a note.');
+    const line = exportMarkerLine(await this.textFor(file), saved.recipe.id);
+    const eState = line === undefined ? undefined : { line };
+    const existing = this.app.workspace.getLeavesOfType('markdown').find(leaf => leaf.view instanceof MarkdownView && leaf.view.file === file);
+    if (!existing) { await this.app.workspace.getLeaf('tab').openFile(file, { active: true, eState }); return; }
+    await this.app.workspace.revealLeaf(existing);
+    this.app.workspace.setActiveLeaf(existing, { focus: true });
+    if (eState) existing.setEphemeralState(eState);
   }
 
   async removeExport(saved: SavedExport): Promise<void> {

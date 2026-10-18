@@ -82,8 +82,12 @@ destructive scenarios:
   starts. Confirm the remaining pane shows the correct file.
 - On Obsidian 1.13.0 or later, find the plugin's controls through settings search
   and confirm install/update and clear-log actions refresh the settings rows.
-- Check Active exports for both running and paused configurations. Configure
+- Check the settings export summary, then use its Configure button and the
+  Open exports command. Confirm settings close, an existing exports tab is
+  reused, and the list shows running and paused configurations. Configure
   a file with several exports and verify the chooser opens the right options.
+  In a SQL export's options, confirm Go to note opens its note at the marker,
+  and that legacy entries without an output show Not linked to a note.
   Delete its configurations and confirm the CSV, generated files, and rendered
   note content survive, with note regions detached into ordinary Markdown.
 - Disable the desktop plugin while a viewer is starting. Confirm its helper

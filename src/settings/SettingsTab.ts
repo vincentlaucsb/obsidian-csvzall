@@ -6,7 +6,9 @@ import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
 import type { ExportSettingsService } from "./ExportSettingsService.js";
 import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledBinaries.generated.js";
-import { addExportActions } from "./exportActions.js";
+import { loadExports } from "./exportList.js";
+import { exportSummaryText } from "./exportSummary.js";
+import { closeSettings } from "../obsidian/settingsModal.js";
 
 const BUG_REPORT_URL = "https://github.com/vincentlaucsb/obsidian-csvzall/issues/new";
 
@@ -15,7 +17,8 @@ export interface CsvzallSettingTabServices {
   saveSettings(): Promise<void>;
   eventLog: EventLog;
   installer: InstallerService;
-  exports: ExportSettingsService;
+  exports: Pick<ExportSettingsService, "list">;
+  openExports(): Promise<void>;
 }
 
 export class CsvzallSettingTab extends PluginSettingTab {
@@ -139,9 +142,9 @@ export class CsvzallSettingTab extends PluginSettingTab {
         },
       },
 
-      { name: "Active exports", render: setting => { setting.setHeading(); } },
-      { name: "Files with exports", desc: "Manage saved chart and note export configurations, including paused exports.",
-        render: setting => { this.renderExports(setting); } },
+      { name: "Exports", render: setting => { setting.setHeading(); } },
+      { name: "Saved exports", desc: "Chart and note export configurations, including paused exports.",
+        render: setting => { this.renderExportSummary(setting); } },
       { name: "Log", render: (setting) => { setting.setHeading(); } },
       {
         name: "Chart and error log",
@@ -162,33 +165,17 @@ export class CsvzallSettingTab extends PluginSettingTab {
     ];
   }
 
-  private renderExports(setting: Setting): void {
+  /** Settings only show counts; the exports tab owns the full list and its actions. */
+  private renderExportSummary(setting: Setting): void {
     const revision = ++this.exportsRevision;
-    const container = setting.settingEl.createDiv({ cls: "csvzall-settings-exports" });
-    const status = container.createDiv({ text: "Loading exports..." });
-    const refresh = () => { if (this.exportsRevision === revision) this.refreshSettings(); };
-    void this.services.exports.list().then(files => {
-      if (this.exportsRevision !== revision) return;
-      status.remove();
-      if (files.length === 0) container.createDiv({ text: "No active exports." });
-      for (const file of files) {
-        const charts = file.entries.filter(entry => entry.kind === "chart" && entry.chart.definition.type !== "markdown-table").length;
-        const tables = file.entries.length - charts;
-        const counts = [charts ? `${charts} chart${charts === 1 ? "" : "s"}` : "", tables ? `${tables} table or value export${tables === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
-        addExportActions(new Setting(container).setName(file.source).setDesc(`${counts}${file.missing ? " · CSV missing" : ""}`), {
-          configureDisabled: file.missing,
-          configure: () => {
-            try { this.services.exports.configure(file, refresh); }
-            catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
-          },
-          remove: () => { this.services.exports.confirmDelete(file, refresh); },
-        });
-      }
-    }).catch((error: unknown) => {
-      if (this.exportsRevision !== revision) return;
-      status.setText(`Could not load exports: ${error instanceof Error ? error.message : String(error)}`);
-      new Setting(container).addButton(button => button.setButtonText("Retry").onClick(refresh));
-    });
+    setting.addButton(button => button.setButtonText("Configure").onClick(() => {
+      // Close settings so the exports tab is visible; a no-op if Obsidian's private API changes.
+      closeSettings(this.app);
+      void this.services.openExports().catch((error: unknown) => new Notice(error instanceof Error ? error.message : String(error)));
+    }));
+    const summary = setting.descEl.createDiv();
+    loadExports(summary, this.services.exports, () => this.exportsRevision === revision,
+      files => { summary.createDiv({ text: exportSummaryText(files) }); });
   }
 
   private renderLog(containerEl: HTMLElement): void {
