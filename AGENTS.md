@@ -140,3 +140,6 @@ Generated WASM data uses a checked-in declaration contract for clean-checkout
 type checking. Behavioral lint regressions live in `tests/lint-config.test.ts`.
 Preserve callback receivers and avoid unnecessary type assertions or deprecated
 APIs; enforce these requirements with the corresponding TypeScript ESLint rules.
+Every ESLint directive comment, including a closing `eslint-enable`, must include
+a `--` description explaining why it is necessary. Enforce this for both runtime
+distributions with `eslint-comments/require-description`.

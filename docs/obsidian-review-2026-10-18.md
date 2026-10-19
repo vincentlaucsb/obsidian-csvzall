@@ -108,3 +108,46 @@ The browser form checks do not establish full Obsidian integration or device
 behavior. Public warnings remain associated with 0.6.0 until a separately
 authorized release and subsequent hosted scan verify the fixes. Filesystem,
 process, and bundle-size warnings are expected to remain with this design.
+
+## Follow-up: 0.7.0 directive-comment error, fixed in 0.7.1
+
+The user supplied a Community review screenshot for desktop 0.7.0 (source
+`196376a9d36f6026a5d69de92ed28b2454da97ff`). It reports an undescribed ESLint
+directive at `src/views/CsvzallTableView.ts:403`. The opening suppression already
+explained the receiver-preserving method captures; the closing `eslint-enable`
+comment lacked its own description. Added that description without changing
+navigation behavior or broadening the suppression.
+
+Refreshed all five official guidance documents at
+`2026-10-19T04:51:29.363Z` (October 18 in America/Phoenix), confirming the same
+revision `c56c7e770ba25dd0ea392aacf4588f9425970d36`. The new completion marker,
+source URLs, hashes, and supplied feedback are in `.test-build/obsidian-review/`.
+This follow-up addresses the supplied finding; it does not claim a new full
+hosted scorecard review or passing unavailable hosted scans.
+
+Enabled `eslint-comments/require-description` for both desktop and mobile
+runtime source. The already-locked ESLint comments plugin is now an explicit
+dev dependency. Regression coverage checks undescribed and described opening,
+next-line, and closing directives in both distributions. Added the lasting rule
+to `AGENTS.md`. Desktop version markers agree at 0.7.1 with minimum Obsidian
+1.13.0; native helper pins remain unchanged. Mobile 0.2.1 preparation is separate
+and is excluded from this desktop commit.
+
+The earlier missing-release-assets errors were a timing gap: release 0.7.0 was
+published at 04:42:40 UTC and the workflow uploaded all standard assets by
+04:43:30 UTC. The workflow succeeded and all three public asset URLs returned
+HTTP 200. No release workflow change is required for that completed upload.
+
+Validation:
+
+- LF normalization and diff checks passed; no byte-preserved assets changed.
+- Desktop/mobile lint passed with zero warnings.
+- Full tests passed: 217 desktop and 14 mobile cases. The latter include the two
+  separately prepared packaged-worker parity regressions, which are not part of
+  the desktop commit.
+- Dependency audit reported zero vulnerabilities, including dev dependencies.
+- Clean source-archive build passed after npm ci, without .git or inherited node_modules.
+- Runtime navigation/save/discard regression tests passed. This patch changes
+  comment documentation and build-time checks; no additional UI changes were made.
+- No 0.7.1 tag or release has been created by this remediation. Hosted clearance
+  remains unverified until the new release is published and reviewed.

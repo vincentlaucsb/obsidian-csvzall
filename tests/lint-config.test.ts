@@ -71,6 +71,22 @@ test("desktop settings reject leftover display overrides after declarative migra
     message.ruleId === "obsidianmd/settings-tab/no-deprecated-display" && message.severity === 2));
 });
 
+test("desktop and mobile lint require descriptions on opening and closing directive comments", async () => {
+  const eslint = new ESLint({ overrideConfig: {
+    languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },
+  } });
+  for (const filePath of ["src/main.ts", "mobile-src/main.ts"]) {
+    for (const directive of ["eslint-disable", "eslint-disable-next-line", "eslint-enable"]) {
+      const undescribed = await eslint.lintText(`/* ${directive} @typescript-eslint/unbound-method */\n`, { filePath });
+      assert.ok(undescribed.flatMap(item => item.messages).some(message =>
+        message.ruleId === "eslint-comments/require-description" && message.severity === 2), `${filePath}: ${directive}`);
+      const described = await eslint.lintText(`/* ${directive} @typescript-eslint/unbound-method -- Receiver is supplied explicitly. */\n`, { filePath });
+      assert.equal(described.flatMap(item => item.messages).some(message =>
+        message.ruleId === "eslint-comments/require-description"), false, `${filePath}: described ${directive}`);
+    }
+  }
+});
+
 test("production entry points gate bundling, including direct mobile sync builds", () => {
   const desktop = readFileSync("esbuild.config.mjs", "utf8");
   const mobile = readFileSync("scripts/build-mobile.mjs", "utf8");

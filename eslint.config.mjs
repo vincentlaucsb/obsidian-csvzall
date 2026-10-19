@@ -1,5 +1,6 @@
 import tseslint from "typescript-eslint";
 import obsidianmd from "eslint-plugin-obsidianmd";
+import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -14,8 +15,9 @@ export default [
         tsconfigRootDir: fileURLToPath(new URL(".", import.meta.url)),
       },
     },
-    plugins: { "@typescript-eslint": tseslint.plugin, obsidianmd },
+    plugins: { "@typescript-eslint": tseslint.plugin, obsidianmd, "eslint-comments": eslintComments },
     rules: {
+      "eslint-comments/require-description": "error",
       "obsidianmd/no-unsupported-api": "error",
       "obsidianmd/no-tfile-tfolder-cast": "error",
       "no-control-regex": "error",
