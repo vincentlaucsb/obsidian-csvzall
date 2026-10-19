@@ -114,9 +114,12 @@ test('inline code spans, fenced and indented code examples stay inert', () => {
 
 test('scalar CSV conversion keeps precise values and escapes Markdown, HTML and comment delimiters', () => {
   assert.equal(scalarMarkdown('value\r\n9007199254740993\r\n'), '9007199254740993');
-  assert.equal(scalarMarkdown('value\n"a,b"\n'), 'a\\,b');
-  assert.equal(scalarMarkdown('value\n"say ""hello""\nnext"\n'), 'say \\"hello\\" next');
-  assert.equal(scalarMarkdown('value\n"<b>*hi* &amp; <!-- /csvzall:export x -->"\n'), '\\<b\\>\\*hi\\* \\&amp\\; \\<\\!\\-\\- \\/csvzall\\:export x \\-\\-\\>');
+  assert.equal(scalarMarkdown('value\n"a,b"\n'), 'a,b');
+  assert.equal(scalarMarkdown('value\n"say ""hello""\nnext"\n'), 'say "hello" next');
+  const literal = scalarMarkdown('value\n"<b>*hi* &amp; <!-- /csvzall:export x -->"\n');
+  const html = new HtmlRenderer().render(new Parser().parse(literal));
+  assert.match(html, /&lt;b&gt;\*hi\* &amp;amp; &lt;!-- \/csvzall:export x --&gt;/);
+  assert.doesNotMatch(html, /<b>|<em>|<!--/);
   assert.equal(scalarMarkdown('value\n\n'), '');
   for (const csv of ['value\n', 'value\n1\n2\n', 'a,b\n1,2\n', 'value\n"unclosed']) assert.throws(() => scalarMarkdown(csv));
 });
@@ -166,4 +169,19 @@ test('export marker lines are located from note text, ignoring code blocks and m
   assert.equal(exportMarkerLine('```\n<!-- csvzall:export tasks -->\n```\n', 'tasks'), undefined);
   assert.equal(exportMarkerLine(`Intro\n${region}`, 'other'), undefined);
   assert.equal(exportMarkerLine('<!-- csvzall:export tasks -->\nunclosed', 'tasks'), undefined);
+});
+
+
+test('standalone dates match table values without escape slashes and literal backslashes survive', () => {
+  for (const input of ['5/26/2026', String.raw`C:\Reports\5/26/2026`, 'a,b: "quoted"', '[link](https://example.com)', '$math$ ==highlight== ^note']) {
+    const csv = `v\n"${input.replace(/"/g, '""')}"\n`;
+    const value = scalarMarkdown(csv);
+    assert.ok(!value.includes('\\/'));
+    for (const note of [value, managedTableText({ id: 'date', format: 'value' }, value)]) {
+      const html = new HtmlRenderer().render(new Parser().parse(note));
+      assert.ok(html.includes(input.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')));
+      assert.doesNotMatch(html, /<a |<em>|<code>/);
+    }
+  }
+  assert.equal(scalarMarkdown('date\n5/26/2026\n'), '5/26/2026');
 });

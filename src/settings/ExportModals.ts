@@ -38,6 +38,10 @@ export class ChartOptionsModal extends Modal {
     this.form = mountChartForm(root, {
       schema: { file: this.chart.source, columns }, existingOnly: true,
       previewTable: value => this.tables.render({ ...value, source: this.chart.source, format: "table" }, 20),
+      previewChart: value => this.definitions.preview(this.chart, value, async temporary => {
+        if (this.closed) throw new Error("Chart options closed.");
+        await this.process.captureCommand(["charts", "run", this.chart.definition.id, "--config", temporary], this.vaultRoot);
+      }),
       fetchJson: async () => ({ charts: [this.chart.definition] }),
       postJson: async (path, body) => {
         if (this.closed) throw new Error("Chart options closed.");

@@ -60,6 +60,7 @@ export default class CsvzallPlugin extends Plugin {
     registerMarkdownCommands(this, this.markdownTables);
     registerExportCommands(this);
     this.markdownTables.register(this);
+    this.exportSettings.register(this);
   }
 
   onunload(): void {

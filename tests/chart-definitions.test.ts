@@ -160,3 +160,27 @@ for (const type of ["bar", "line", "heatmap"]) {
     });
   }
 }
+
+
+for (const failure of [false, true]) {
+  test(`chart preview uses staged unsaved options, preserves saved output, and cleans up after ${failure ? 'failure' : 'success'}`, async () => {
+    const f = fixture(), chart = (await f.store.list([f.path]))[0]!;
+    const original = f.files.get(f.path);
+    const payload = { type: 'bar', title: 'Preview title', output: '../Data/sales.csv', values: [] } as unknown as ChartFormPayload;
+    const operation = f.store.preview(chart, payload, async temporary => {
+      const config = JSON.parse(f.files.get(temporary)!);
+      const entry = config.charts[0];
+      assert.equal(entry.options.title, 'Preview title');
+      assert.equal(entry.options.xLabel, 'Custom axis');
+      assert.match(entry.output, /^\.csvzall\/\.preview-.*\.svg$/);
+      f.files.set(resolveChartPath(f.path, entry.output), '<svg>Preview title</svg>');
+      if (failure) throw new Error('render failed');
+    });
+    if (failure) await assert.rejects(operation, /render failed/);
+    else assert.deepEqual(await operation, { svg: '<svg>Preview title</svg>' });
+    assert.equal(f.files.get(f.path), original);
+    assert.equal(f.files.get('Project/sales.svg'), 'generated output');
+    assert.equal(f.files.get('Data/sales.csv'), 'name,amount\nA,1');
+    assert.equal(f.files.size, 3);
+  });
+}

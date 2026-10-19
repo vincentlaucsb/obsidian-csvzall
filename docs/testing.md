@@ -142,3 +142,25 @@ copy for this check.
 These browser checks cover the native viewer host. Check note insertion,
 managed region refresh and the Obsidian modal separately in the canonical
 demo vault when supported native UI access is available.
+
+
+## Chart previews and export cleanup (#15)
+
+In chart options, Preview follows Cancel. Change the title or series, then click
+Preview: the chart appears beside the form without saving configuration or
+replacing the configured output. Editing again clears the stale preview and does
+not render another chart until Preview is clicked. Cancel must leave saved files
+unchanged. Test both the native viewer and the plugin's Configure chart modal.
+
+Remove a managed table or value from a note, including from an unsaved editing
+buffer. Its linked definition should disappear from exports.json and the open
+Exports tab once detected. A remaining copy in another note keeps the definition
+alive. Incomplete markers, unreadable notes, and legacy definitions with no linked
+output are preserved. Deleting a generated chart file (or its folder) prunes its
+chart definitions; a chart with an output that has never been observed deleted
+remains available for regeneration.
+
+Export `5/26/2026` as a standalone SQL value and as a table. Both should display
+the exact date in the rendered note. Also check literal backslashes, Markdown
+syntax, HTML, Unicode, and multiline values. The regression suites cover these
+cases, preview cleanup on success/failure, and cancellation during pruning.

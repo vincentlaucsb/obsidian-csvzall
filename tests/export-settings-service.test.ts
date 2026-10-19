@@ -58,7 +58,8 @@ async function fixture() {
         open() { modal = "choose"; }
       }, DeleteExportsModal: class {} };
     } });
-  const app = { vault: { adapter, getAllLoadedFiles: () => [new Folder("/"), new Folder("Project"), new Folder("Data")],
+  const events = new Map<string, (...args: any[]) => void>();
+  const app = { vault: { adapter, on: (name: string, callback: (...args: any[]) => void) => { events.set(name, callback); }, getAllLoadedFiles: () => [new Folder("/"), new Folder("Project"), new Folder("Data")],
     getAbstractFileByPath: (path: string) => files.has(path) ? new File(path) : null } };
   const service = new module.exports.ExportSettingsService(app, { reloadChartConfig: async () => { reloads++; } }, {
     listExports: (folders: string[]) => definitions.list(folders),
@@ -66,7 +67,8 @@ async function fixture() {
     removeExport: (saved: SavedExport) => definitions.removeExport(saved),
     configureExport: (value: unknown) => { configured = value; },
   }, { getVaultRoot: () => "vault" }, {});
-  return { service, files, get modal() { return modal; }, get reloads() { return reloads; }, get configured() { return configured; },
+  return { service, files, register() { service.register({ register() {}, registerEvent() {} }); },
+    async event(name: string, file: unknown) { events.get(name)?.(file); await service.pruning; }, get modal() { return modal; }, get reloads() { return reloads; }, get configured() { return configured; },
     get chooseOptions() { return chooseOptions; } };
 }
 
@@ -138,4 +140,25 @@ test("file deletion removes nested chart and table configurations while retainin
   assert.equal(f.files.get("Project/note.md"), "Markdown");
   assert.equal(JSON.parse(f.files.get(".csvzall/charts.json")!).owner, "keep");
   assert.equal(f.reloads, 1);
+});
+
+
+test('deleting a generated chart immediately prunes only its definitions and reloads scheduling', async () => {
+  const f = await fixture(); f.register();
+  f.files.delete('sales.svg');
+  await f.event('delete', new File('sales.svg'));
+  const root = JSON.parse(f.files.get('.csvzall/charts.json')!);
+  assert.deepEqual(root.charts.map((chart: any) => chart.id), ['missing']);
+  assert.equal(root.owner, 'keep');
+  assert.equal(JSON.parse(f.files.get('Project/.csvzall/charts.json')!).charts.length, 1);
+  assert.equal(f.reloads, 1);
+  assert.ok(f.files.has('Data/sales.csv'));
+});
+
+test('chart cleanup preserves outputs restored before deletion is processed and ignores unrelated notes', async () => {
+  const f = await fixture(); f.register();
+  await f.event('delete', new File('sales.svg'));
+  await f.event('delete', new File('Project/note.md'));
+  assert.equal(JSON.parse(f.files.get('.csvzall/charts.json')!).charts.length, 2);
+  assert.equal(f.reloads, 0);
 });

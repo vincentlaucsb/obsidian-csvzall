@@ -216,3 +216,18 @@
 .csvzall-chart-options-modal [hidden] {
   display: none;
 }
+
+.csvzall-chart-options-modal .chart-dialog-layout:not([hidden]) {
+  flex-wrap: wrap;
+}
+
+.csvzall-chart-options-modal .chart-preview:not([hidden]) {
+  flex: 1 1 22rem;
+  min-width: 0;
+  overflow: auto;
+}
+
+.csvzall-chart-options-modal .chart-preview img {
+  max-width: 100%;
+  height: auto;
+}

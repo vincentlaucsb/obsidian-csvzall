@@ -35,7 +35,7 @@ export class ChartDefinitions {
     return entries;
   }
 
-  private mutate(path: string, update: (config: ChartConfig) => void, validate?: (temporary: string) => Promise<void>): Promise<void> {
+  private mutate(path: string, update: (config: ChartConfig) => void, validate?: (temporary: string) => Promise<void>, commit = true, cancelled: () => boolean = () => false): Promise<void> {
     const work = this.writes.catch(() => {}).then(async () => {
       const saved = await this.adapter.read(path);
       const config = parse(saved, path);
@@ -47,13 +47,16 @@ export class ChartDefinitions {
         await this.adapter.write(temporary, text);
         if (await this.adapter.read(temporary) !== text) throw new Error("Could not verify chart configuration.");
         await validate?.(temporary);
+        if (!commit) return;
+        if (cancelled()) return;
         if (await this.adapter.read(path) !== saved) throw new Error(`${path} changed while saving. Please try again.`);
         // Obsidian's rename cannot replace an existing configuration.
         await this.adapter.process(path, current => {
+          if (cancelled()) return current;
           if (current !== saved) throw new Error(`${path} changed while saving. Please try again.`);
           return text;
         });
-        if (await this.adapter.read(path) !== text) throw new Error("Could not verify chart configuration.");
+        if (!cancelled() && await this.adapter.read(path) !== text) throw new Error("Could not verify chart configuration.");
       } finally {
         if (await this.adapter.exists(temporary)) await this.adapter.remove(temporary);
       }
@@ -68,17 +71,36 @@ export class ChartDefinitions {
     })), Promise.resolve());
   }
 
-  removeChart(chart: SavedChart): Promise<void> {
+  removeChart(chart: SavedChart, cancelled?: () => boolean): Promise<void> {
     return this.mutate(chart.configPath, config => {
       const index = config.charts.findIndex(entry => entry.id === chart.definition.id);
       if (index < 0 || JSON.stringify(config.charts[index]) !== JSON.stringify(chart.definition)) {
         throw new Error("The chart changed. Reopen Configure and try again.");
       }
       config.charts.splice(index, 1);
-    });
+    }, undefined, true, cancelled);
   }
 
   update(chart: SavedChart, payload: ChartFormPayload, validate: (temporary: string) => Promise<void>): Promise<void> {
+    return this.change(chart, payload, validate);
+  }
+
+  async preview(chart: SavedChart, payload: ChartFormPayload, render: (temporary: string) => Promise<void>): Promise<{ svg?: string; markdown?: string }> {
+    const name = `.preview-${crypto.randomUUID()}.${payload.type === "markdown-table" ? "md" : "svg"}`;
+    const output = `${chart.configPath.slice(0, chart.configPath.lastIndexOf("/"))}/${name}`;
+    let text = "";
+    try {
+      await this.change(chart, { ...payload, output: `.csvzall/${name}` }, async temporary => {
+        await render(temporary);
+        text = await this.adapter.read(output);
+      }, false);
+      return payload.type === "markdown-table" ? { markdown: text } : { svg: text };
+    } finally {
+      if (await this.adapter.exists(output)) await this.adapter.remove(output);
+    }
+  }
+
+  private change(chart: SavedChart, payload: ChartFormPayload, validate: (temporary: string) => Promise<void>, commit = true): Promise<void> {
     return this.mutate(chart.configPath, config => {
       const entry = config.charts.find(candidate => candidate.id === chart.definition.id);
       if (!entry || JSON.stringify(entry) !== JSON.stringify(chart.definition)) throw new Error("The chart changed. Reopen Configure and try again.");
@@ -110,6 +132,6 @@ export class ChartDefinitions {
         } else delete options.values;
       }
       Object.assign(entry, { output: payload.output, runOnSave: payload.runOnSave, options });
-    }, validate);
+    }, validate, commit);
   }
 }

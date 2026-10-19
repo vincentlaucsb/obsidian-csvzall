@@ -130,11 +130,11 @@ export class ExportDefinitions {
     this.currentEntry(current?.config ?? { exports: [] }, saved);
   }
 
-  removeExport(saved: SavedExport): Promise<void> {
+  removeExport(saved: SavedExport, cancelled: () => boolean = () => false): Promise<void> {
     return this.mutate(saved.configPath, config => {
       const entry = this.currentEntry(config, saved);
       config.exports = config.exports.filter(candidate => candidate !== entry);
-    });
+    }, cancelled);
   }
 
   update(saved: SavedExport, recipe: TableRecipe, runOnSave: boolean, cancelled: () => boolean): Promise<void> {

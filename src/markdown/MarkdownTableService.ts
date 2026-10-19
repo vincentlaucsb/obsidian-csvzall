@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, TFile, type App, type Editor, type Plugin } from 'obsidian';
+import { MarkdownView, Notice, TFile, TFolder, type App, type Editor, type Plugin } from 'obsidian';
 import type { EventLog } from '../logging/EventLog.js';
 import type { ObsidianFilesystem } from '../obsidian/filesystem.js';
 import type { CsvzallProcessService } from '../process/CsvzallProcessService.js';
@@ -10,7 +10,11 @@ import { isCsv } from '../csv/csvFiles.js';
 
 export class MarkdownTableService {
   private stopped = false;
+  private pendingWrites = 0;
+  private pruneRevision = 0;
+  private pruning: Promise<void> = Promise.resolve();
   private readonly definitions: ExportDefinitions;
+  private readonly exportListeners = new Set<() => void>();
   private poll: number | null = null;
   private indexing = false;
   private timer: number | null = null;
@@ -34,18 +38,27 @@ export class MarkdownTableService {
     plugin.registerEvent(this.app.vault.on('modify', file => {
       if (!(file instanceof TFile)) return;
       if (isCsv(file)) { this.sourceChanged(file.path); void this.initialize(); }
-      if (file.extension === 'md') void this.index(file).catch(error => this.report(file, error));
+      if (file.extension === 'md') { ++this.pruneRevision; void this.index(file).then(changed => changed ? this.pruneDeadExports() : undefined).catch(error => this.report(file, error)); }
     }));
     plugin.registerEvent(this.app.vault.on('create', file => {
+      ++this.pruneRevision;
       if (file instanceof TFile && file.extension === 'md') void this.index(file).catch(error => this.report(file, error));
       if (file instanceof TFile && isCsv(file)) this.sourceChanged(file.path);
     }));
     plugin.registerEvent(this.app.vault.on('delete', file => {
       if (file instanceof TFile) { this.sources.delete(file); this.bindings.delete(file); this.signatures.delete(file); this.queued.delete(file); this.indexRevisions.delete(file); }
       this.sourceChanged(file.path);
+      ++this.pruneRevision;
+      void this.pruneDeadExports().catch(error => this.report(null, error));
     }));
     plugin.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      void this.renameSource(oldPath, file.path).catch(error => this.report(null, error));
+      ++this.pendingWrites; ++this.pruneRevision;
+      void this.renameSource(oldPath, file.path).catch(error => this.report(null, error)).finally(() => { --this.pendingWrites; });
+    }));
+    plugin.registerEvent(this.app.workspace.on('editor-change', (_editor, view) => {
+      if (!(view instanceof MarkdownView) || !view.file) return;
+      ++this.pruneRevision;
+      void this.index(view.file).then(changed => changed ? this.pruneDeadExports() : undefined).catch(error => this.report(view.file, error));
     }));
     this.app.workspace.onLayoutReady(() => {
       void this.initialize().catch(error => this.report(null, error));
@@ -64,25 +77,30 @@ export class MarkdownTableService {
   private async initialize(): Promise<void> {
     if (this.indexing || this.stopped) return;
     this.indexing = true;
+    let failed = false;
     try {
       for (const file of this.app.vault.getMarkdownFiles()) {
         if (this.stopped) return;
-        try { await this.index(file); } catch (error) { await this.report(file, error); }
+        try { await this.index(file); } catch (error) { failed = true; await this.report(file, error); }
       }
     } finally { this.indexing = false; }
+    if (!failed) await this.pruneDeadExports().catch(error => this.report(null, error));
   }
 
   private async prepare(file: TFile): Promise<ManagedTable[]> {
-    for (const table of findManagedTables(await this.textFor(file))) {
-      if (!table.recipe && table.marker !== 'table') continue;
-      const legacy = table.recipe ? undefined : await this.definitions.resolve(file.path, table.id, true);
-      // Rebind in the note's current scope so a nearer, unrelated export ID
-      // cannot shadow the migrated table once its marker becomes canonical.
-      const recipe = await this.definitions.save(file.path, table.recipe ?? legacy!.recipe, undefined, legacy?.runOnSave ?? true);
-      // Persist the definition first. A failed or concurrent note edit keeps its inline recipe.
-      await this.replace(file, table, shortenManagedTable(table, recipe.id));
-    }
-    return findManagedTables(await this.textFor(file));
+    ++this.pendingWrites;
+    try {
+      for (const table of findManagedTables(await this.textFor(file))) {
+        if (!table.recipe && table.marker !== 'table') continue;
+        const legacy = table.recipe ? undefined : await this.definitions.resolve(file.path, table.id, true);
+        // Rebind in the note's current scope so a nearer, unrelated export ID
+        // cannot shadow the migrated table once its marker becomes canonical.
+        const recipe = await this.definitions.save(file.path, table.recipe ?? legacy!.recipe, undefined, legacy?.runOnSave ?? true);
+        // Persist the definition first. A failed or concurrent note edit keeps its inline recipe.
+        await this.replace(file, table, shortenManagedTable(table, recipe.id));
+      }
+      return findManagedTables(await this.textFor(file));
+    } finally { --this.pendingWrites; }
   }
 
   private editorFor(file: TFile): Editor | null {
@@ -96,7 +114,7 @@ export class MarkdownTableService {
     return this.editorFor(file)?.getValue() ?? await this.app.vault.read(file);
   }
 
-  private async index(file: TFile): Promise<void> {
+  private async index(file: TFile): Promise<boolean> {
     const revision = (this.indexRevisions.get(file) ?? 0) + 1;
     this.indexRevisions.set(file, revision);
     const tables = await this.prepare(file);
@@ -106,13 +124,14 @@ export class MarkdownTableService {
       if (result.status === 'fulfilled') resolved.push(result.value);
       else await this.report(file, result.reason);
     }
-    if (this.stopped || this.indexRevisions.get(file) !== revision || this.app.vault.getAbstractFileByPath(file.path) !== file) return;
+    if (this.stopped || this.indexRevisions.get(file) !== revision || this.app.vault.getAbstractFileByPath(file.path) !== file) return false;
     this.bindings.set(file, resolved);
     this.sources.set(file, resolved.filter(table => table.runOnSave).map(table => table.recipe.source));
     const signature = JSON.stringify(resolved);
     const changed = this.signatures.get(file) !== signature;
     this.signatures.set(file, signature);
     if (changed && resolved.some(table => table.runOnSave)) this.schedule(file);
+    return changed;
   }
 
   private sourceChanged(path: string): void {
@@ -275,29 +294,32 @@ export class MarkdownTableService {
       },
       preview: value => this.render(value, 20),
       submit: async (value, signal) => {
-        const markdown = await this.render(value);
-        if (this.stopped || signal.aborted) throw new Error('Export insertion cancelled.');
-        let recipe: TableRecipe = { version: 1, id: crypto.randomUUID(), source: validateSource(value.source), columns: value.columns, sql: value.sql, format: value.format ?? 'table' };
-        const path = source ? value.destination.replace(/\\/g, '/') : file!.path;
-        if (source && (!path.endsWith('.md') || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..'))) throw new Error('Enter a new Markdown note path inside an existing vault folder.');
-        if (view && file && (view.file !== file || view.getMode() !== 'source')) throw new Error('Return to the original note in editing mode to insert this table.');
-        if (existing && file) replaceManagedTable(await this.textFor(file), existing, existing.text);
-        if (value.autoUpdate) recipe = await this.definitions.save(path, recipe, () => signal.aborted);
-        if (this.stopped || signal.aborted) throw new Error('Export insertion cancelled.');
-        const text = value.autoUpdate ? managedTableText(recipe, markdown) : recipe.format === 'value' ? markdown : markdown.trimEnd();
-        if (source) {
-          const note = await this.app.vault.create(path, `${text}\n`);
-          await this.index(note);
-          if (!signal.aborted && !this.stopped) await this.app.workspace.getLeaf(true).openFile(note);
-        } else if (view && file) {
-          if (view.file !== file || view.getMode() !== 'source') throw new Error('Return to the original note in editing mode to insert this table.');
-          if (existing) await this.replace(file, existing, this.regionText(existing, recipe, markdown, value.autoUpdate));
-          else {
-            const cursor = view.editor.getCursor();
-            view.editor.replaceRange(recipe.format === 'value' ? text : `\n\n${text}\n\n`, cursor);
+        ++this.pendingWrites;
+        try {
+          const markdown = await this.render(value);
+          if (this.stopped || signal.aborted) throw new Error('Export insertion cancelled.');
+          let recipe: TableRecipe = { version: 1, id: crypto.randomUUID(), source: validateSource(value.source), columns: value.columns, sql: value.sql, format: value.format ?? 'table' };
+          const path = source ? value.destination.replace(/\\/g, '/') : file!.path;
+          if (source && (!path.endsWith('.md') || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..'))) throw new Error('Enter a new Markdown note path inside an existing vault folder.');
+          if (view && file && (view.file !== file || view.getMode() !== 'source')) throw new Error('Return to the original note in editing mode to insert this table.');
+          if (existing && file) replaceManagedTable(await this.textFor(file), existing, existing.text);
+          if (value.autoUpdate) recipe = await this.definitions.save(path, recipe, () => signal.aborted);
+          if (this.stopped || signal.aborted) throw new Error('Export insertion cancelled.');
+          const text = value.autoUpdate ? managedTableText(recipe, markdown) : recipe.format === 'value' ? markdown : markdown.trimEnd();
+          if (source) {
+            const note = await this.app.vault.create(path, `${text}\n`);
+            await this.index(note);
+            if (!signal.aborted && !this.stopped) await this.app.workspace.getLeaf(true).openFile(note);
+          } else if (view && file) {
+            if (view.file !== file || view.getMode() !== 'source') throw new Error('Return to the original note in editing mode to insert this table.');
+            if (existing) await this.replace(file, existing, this.regionText(existing, recipe, markdown, value.autoUpdate));
+            else {
+              const cursor = view.editor.getCursor();
+              view.editor.replaceRange(recipe.format === 'value' ? text : `\n\n${text}\n\n`, cursor);
+            }
+            await this.index(file);
           }
-          await this.index(file);
-        }
+        } finally { --this.pendingWrites; }
       },
     }).open();
   }
@@ -308,7 +330,51 @@ export class MarkdownTableService {
     await this.index(file);
   }
 
-  listExports(folders: string[]): Promise<SavedExport[]> { return this.definitions.list(folders); }
+  async listExports(folders: string[]): Promise<SavedExport[]> {
+    await this.pruneDeadExports(folders);
+    return this.definitions.list(folders);
+  }
+
+  onExportsChanged(listener: () => void): () => void {
+    this.exportListeners.add(listener);
+    return () => { this.exportListeners.delete(listener); };
+  }
+
+  /** Remove only linked definitions with no remaining live marker in their scope. */
+  pruneDeadExports(folders?: string[]): Promise<void> {
+    const work = this.pruning.catch(() => {}).then(async () => {
+      if (this.stopped || this.pendingWrites) return;
+      const revision = this.pruneRevision;
+      const cancelled = () => this.stopped || this.pendingWrites > 0 || revision !== this.pruneRevision;
+      const directories = folders ?? this.app.vault.getAllLoadedFiles()
+        .filter(file => file instanceof TFolder).map(file => file.path === '/' ? '' : file.path);
+      const saved = (await this.definitions.list(directories)).filter(entry => entry.output !== undefined);
+      if (!saved.length || cancelled()) return;
+      const notes = this.app.vault.getMarkdownFiles();
+      const markers: Array<{ file: TFile; tables: ManagedTable[] }> = [];
+      // An unreadable note or incomplete edit is not evidence that its export died.
+      try {
+        for (const file of notes) markers.push({ file, tables: findManagedTables(await this.textFor(file)) });
+      } catch { return; }
+      const live = new Set<string>();
+      for (const { file, tables } of markers) for (const table of tables) {
+        if (table.recipe) continue;
+        const resolved = await this.definitions.find(file.path, table.id, table.marker === 'table');
+        if (resolved) live.add(`${resolved.configPath}\0${resolved.recipe.id}`);
+      }
+      let changed = false;
+      for (const entry of saved) {
+        if (cancelled()) break;
+        if (!live.has(`${entry.configPath}\0${entry.recipe.id}`)) {
+          try { await this.definitions.removeExport(entry, cancelled); if (!cancelled()) changed = true; }
+          catch (error) { if (!cancelled()) throw error; }
+        }
+      }
+      if (changed) for (const listener of this.exportListeners) listener();
+    });
+    this.pruning = work;
+    return work;
+  }
 
   async loadColumns(source: string): Promise<string[]> {
     const root = this.filesystem.getVaultRoot();
