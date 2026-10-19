@@ -12,6 +12,7 @@ plugins register as the CSV handler.
 - [[Tasks.csv]] has text, status, and priority columns for editing and sorting.
 - [[CSV edge cases.csv]] has commas, quotes, multiline text, Unicode, and blank cells.
 - [[Projects/Project tasks.csv]] exercises CSV files and new-file creation in a folder.
+- [[Variable width.tsv]] has uneven tab-separated rows and an incomplete header.
 
 ## Test checklist
 
@@ -34,6 +35,11 @@ plugins register as the CSV handler.
    CSV, close/reopen panes, and restart Obsidian; check that the right file loads.
 8. After the first successful load, enable airplane mode and reopen a CSV.
    Confirm viewing and saving still work.
+9. Open Variable width.tsv. Check that all four rows and the SURPRISE cell are
+   visible under A, B, C. On mobile, Options should be absent from the toolbar
+   and More actions. In a disposable copy, edit and save; confirm the file still
+   uses tabs and keeps every row. On desktop, Options should explain why headers
+   are disabled and how to repair the first row.
 
 Keep temporary edits in a disposable copy, or review fixture diffs after testing.
 The sample notes contain no desktop chart automation or helper configuration.

@@ -1,5 +1,6 @@
 // Stable capabilities are emitted by the upstream source bridge's ready message.
 export const requiredHostCapabilities = [
+  "csvzall-host-mobile-ui-v1",
   "csvzall-csv-options-v1",
   "csvzall-shared-shell-v1",
   "csvzall-compact-layout-v1",
