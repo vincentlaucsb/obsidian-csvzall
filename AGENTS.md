@@ -36,9 +36,17 @@ do not normalize them or change their recorded digest to silence a failure.
 
 Keep new behavior in the narrowest module that owns the concern. Do not add process, installer, chart, settings UI, or CSV workflow logic directly to `src/main.ts`; add or extend a focused service/module and wire it from `main.ts` instead.
 
-`README.md` is consumer-facing copy for the Obsidian Community plugin page. Do
-not put maintainer-only release, generated asset, sync, packaging, or workflow
-notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
+## README writing
+
+`README.md` is consumer-facing copy for the Obsidian Community plugin page.
+
+- Write for someone casually browsing plugins: lead with why they would want to use this one, concrete benefits, and useful examples. Keep the opening focused on what users can accomplish.
+- Favor plain language, short paragraphs, and concise feature bullets. Preserve the author's voice; avoid pedantic qualifications and wording changes that do not improve a user's understanding.
+- Let self-explanatory controls explain themselves. Document behavior that could surprise a user or affect their decisions, such as Delete removing export configurations while preserving source files and generated content. Keep export management to a concise bulleted list.
+- Keep essential platform requirements, limitations, and privacy disclosures brief and practical. Avoid redundant prerequisites, hypothetical edge cases, and explanations of consequences already obvious from a user's explicit choices.
+- Verify suspected factual problems against the implementation or authoritative sources before challenging capability or performance claims. Distinguish a dependency's abilities from how the plugin uses it; do not turn an unverified concern into a README caveat.
+- Put detailed tutorials, configuration schemas, implementation explanations, and troubleshooting in `docs/`, linking them when useful. Do not expand the README into an operating manual.
+- Do not put maintainer-only release, generated asset, sync, packaging, or workflow notes in the README. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 
 ## Viewer theme design
 
