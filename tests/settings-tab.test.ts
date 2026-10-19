@@ -24,7 +24,7 @@ class Control {
   setValue(value: unknown) { this.value = value; return this; }
   setPlaceholder(_value: string) { return this; }
   setButtonText(value: string) { this.label = value; return this; }
-  setWarning() { return this; }
+  setDestructive() { return this; }
   setDisabled(value: boolean) { this.disabled = value; return this; }
   onChange(callback: typeof this.change) { this.change = callback; return this; }
   onClick(callback: typeof this.click) { this.click = callback; return this; }

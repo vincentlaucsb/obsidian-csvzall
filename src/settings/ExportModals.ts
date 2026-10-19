@@ -93,7 +93,7 @@ class DeleteConfigurationModal extends Modal {
     this.contentEl.createEl("p", { text: this.description });
     const actions = new Setting(this.contentEl);
     actions.addButton(button => button.setButtonText("Cancel").onClick(() => { if (!this.pending) this.close(); }));
-    actions.addButton(button => button.setButtonText("Delete").setWarning().onClick(async () => {
+    actions.addButton(button => button.setButtonText("Delete").setDestructive().onClick(async () => {
       if (this.pending) return;
       this.pending = true; button.setDisabled(true);
       try { await this.remove(); this.close(); }

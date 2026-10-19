@@ -6,6 +6,7 @@ import { csvHeader, exportMarkerLine, findManagedTables, managedTableText, repla
 import { tableQuery, type TableValue } from './table-form.mjs';
 import { ExportDefinitions, type ResolvedExport, type SavedExport } from './ExportDefinitions.js';
 import { TableModal } from './TableModal.js';
+import { isCsv } from '../csv/csvFiles.js';
 
 export class MarkdownTableService {
   private stopped = false;
@@ -32,12 +33,12 @@ export class MarkdownTableService {
     plugin.register(() => this.unload());
     plugin.registerEvent(this.app.vault.on('modify', file => {
       if (!(file instanceof TFile)) return;
-      if (file.extension.toLowerCase() === 'csv') { this.sourceChanged(file.path); void this.initialize(); }
+      if (isCsv(file)) { this.sourceChanged(file.path); void this.initialize(); }
       if (file.extension === 'md') void this.index(file).catch(error => this.report(file, error));
     }));
     plugin.registerEvent(this.app.vault.on('create', file => {
       if (file instanceof TFile && file.extension === 'md') void this.index(file).catch(error => this.report(file, error));
-      if (file instanceof TFile && file.extension.toLowerCase() === 'csv') this.sourceChanged(file.path);
+      if (file instanceof TFile && isCsv(file)) this.sourceChanged(file.path);
     }));
     plugin.registerEvent(this.app.vault.on('delete', file => {
       if (file instanceof TFile) { this.sources.delete(file); this.bindings.delete(file); this.signatures.delete(file); this.queued.delete(file); this.indexRevisions.delete(file); }
@@ -256,7 +257,7 @@ export class MarkdownTableService {
     const file = view?.file;
     if (!source && (!view || !file)) return;
     if (!existing && view && this.currentTable(view.editor)) { new Notice('Place the cursor outside the existing CSV export to insert another export.'); return; }
-    const sources = this.app.vault.getFiles().filter(candidate => candidate.extension.toLowerCase() === 'csv').map(candidate => candidate.path).sort();
+    const sources = this.app.vault.getFiles().filter(candidate => isCsv(candidate)).map(candidate => candidate.path).sort();
     const initial = existing ? existing.recipe ?? (await this.definitions.resolve(file!.path, existing.id, existing.marker === 'table')).recipe : undefined;
     if (this.stopped) return;
     new TableModal(this.app, {

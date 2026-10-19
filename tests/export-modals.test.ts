@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import type { FileExports } from "../src/settings/ExportSettingsService.js";
+import type { Setting } from "obsidian";
+import { addExportActions } from "../src/settings/exportActions.js";
 
 const compiled = buildSync({ entryPoints: ["src/settings/ExportModals.ts"], bundle: true, write: false,
   platform: "node", format: "cjs", external: ["obsidian"] }).outputFiles[0]!.text;
@@ -23,7 +25,7 @@ class Button {
   warning = false;
   click: () => void | Promise<void> = () => {};
   setButtonText(label: string) { this.label = label; return this; }
-  setWarning() { this.warning = true; return this; }
+  setDestructive() { this.warning = true; return this; }
   setDisabled(disabled: boolean) { this.disabled = disabled; return this; }
   onClick(click: typeof this.click) { this.click = click; return this; }
 }
@@ -63,6 +65,19 @@ function fixture() {
     Notice: class { constructor(message: string) { notices.push(message); } } }) });
   return { modals: module.exports, opened, notices };
 }
+
+test("export action callbacks preserve their receiver", async () => {
+  const row = new Row(new Element());
+  const actions = {
+    calls: [] as string[],
+    configure() { this.calls.push("configure"); },
+    remove() { this.calls.push("remove"); },
+  };
+  addExportActions(row as unknown as Setting, actions);
+  await row.buttons[0]!.click();
+  await row.buttons[1]!.click();
+  assert.deepEqual(actions.calls, ["configure", "remove"]);
+});
 
 for (const [index, label] of ["chart", "SQL table", "SQL value"].entries()) {
 test(`Configure offers ${label} deletion with confirmation and preserves the picker on cancel`, async () => {

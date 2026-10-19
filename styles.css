@@ -162,15 +162,11 @@
   width: 100%;
 }
 
-.setting-item:has(> .csvzall-settings-exports) {
-  flex-wrap: wrap;
-}
-
 .csvzall-chart-options-modal {
   width: min(960px, 90vw);
 }
 
-.csvzall-chart-options-modal .chart-dialog-layout {
+.csvzall-chart-options-modal .chart-dialog-layout:not([hidden]) {
   display: flex;
   gap: 16px;
 }
@@ -179,16 +175,16 @@
   display: none;
 }
 
-.csvzall-chart-options-modal .dialog-form,
-.csvzall-chart-options-modal .chart-form-pane,
-.csvzall-chart-options-modal .chart-range,
-.csvzall-chart-options-modal .dialog-form label:not(.toggle-row) {
+.csvzall-chart-options-modal .dialog-form:not([hidden]),
+.csvzall-chart-options-modal .chart-form-pane:not([hidden]),
+.csvzall-chart-options-modal .chart-range:not([hidden]),
+.csvzall-chart-options-modal .dialog-form label:not(.toggle-row):not([hidden]) {
   display: grid;
   gap: var(--size-4-2);
   min-width: 0;
 }
 
-.csvzall-chart-options-modal .toggle-row {
+.csvzall-chart-options-modal .toggle-row:not([hidden]) {
   display: flex;
   gap: var(--size-4-2);
 }
@@ -210,7 +206,7 @@
   min-width: 0;
 }
 
-.csvzall-chart-options-modal .dialog-actions {
+.csvzall-chart-options-modal .dialog-actions:not([hidden]) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -218,5 +214,5 @@
 }
 
 .csvzall-chart-options-modal [hidden] {
-  display: none !important;
+  display: none;
 }

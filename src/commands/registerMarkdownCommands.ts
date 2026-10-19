@@ -1,5 +1,6 @@
 import { MarkdownView, Notice, TFile, type Editor, type Plugin } from 'obsidian';
 import type { MarkdownTableService } from '../markdown/MarkdownTableService.js';
+import { isCsv } from '../csv/csvFiles.js';
 
 export function registerMarkdownCommands(plugin: Plugin, tables: MarkdownTableService): void {
   const run = (work: Promise<void>) => { void work.catch((error: unknown) => new Notice(error instanceof Error ? error.message : String(error))); };
@@ -26,7 +27,7 @@ export function registerMarkdownCommands(plugin: Plugin, tables: MarkdownTableSe
     if (tables.currentTable(editor)) for (const action of actions) menu.addItem(item => item.setTitle(action.name).onClick(() => action.run(editor, context)));
   }));
   plugin.registerEvent(plugin.app.workspace.on('file-menu', (menu, file) => {
-    if (file instanceof TFile && file.extension.toLowerCase() === 'csv') {
+    if (file instanceof TFile && isCsv(file)) {
       menu.addItem(item => item.setTitle('Export to Markdown note').setIcon('table').onClick(() => tables.open(null, file)));
     }
   }));

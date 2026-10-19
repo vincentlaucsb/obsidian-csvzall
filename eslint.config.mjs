@@ -31,6 +31,9 @@ export default [
       "@typescript-eslint/no-unsafe-argument": "error",
       "@typescript-eslint/no-redundant-type-constituents": "error",
       "@typescript-eslint/prefer-promise-reject-errors": "error",
+      "@typescript-eslint/unbound-method": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
+      "@typescript-eslint/no-deprecated": "error",
     },
   },
   {

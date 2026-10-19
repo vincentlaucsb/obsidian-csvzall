@@ -80,19 +80,18 @@ notes there. Put maintainer guidance in `docs/` or `AGENTS.md` instead.
 
 ## Obsidian Review Rules
 
+- The repository-local agent skill [obsidian-warning-remediation](.agents/skills/obsidian-warning-remediation/SKILL.md) is the reusable entry point for this workflow. Invoke it as `$obsidian-warning-remediation`; keep detailed procedure in `docs/obsidian-warning-remediation.md`.
 - Run [the warning remediation workflow](docs/obsidian-warning-remediation.md) for Obsidian scorecard, submission, or validation feedback. Use supplied feedback when available; otherwise retrieve `https://community.obsidian.md/plugins/csvzall#scorecard`. Download current official guidance on each run with `npm run review:obsidian` (or `-- --warnings <file>`), then record findings, dispositions, verification, and unavailable checks in `docs/`.
 - Direct Filesystem Access and Shell Execution are required desktop capabilities for native helper installation and execution. Preserve them, keep `isDesktopOnly: true`, and disclose outside-vault helper access in README. Do not hide APIs or weaken checks to remove capability warnings. Keep process arguments separate from executable paths, avoid shell interpolation, verify managed downloads, and keep mobile free of these dependencies.
 - Narrow `TFile`/`TFolder` with `instanceof`, including collection values; do not cast to these types. Keep scalar CSV C0/DEL sanitization free of control-character regexes while preserving run collapsing, Unicode, and literal Markdown escaping.
 - Desktop settings use `getSettingDefinitions()` and `update()` with minimum Obsidian 1.13.0. Do not add a leftover `display()` override; keep indexing cheap and side effects in render/action callbacks. Evaluate mobile against its own manifest minimum.
 - Production builds must succeed from a clean source archive without `.git` or Git installed. Keep the LF gate and imported `-text` byte preservation active in this mode. Run `npm run check:source-archive` before release and keep its CI check enabled.
 - Check dependency advisory ranges and dependency paths, update the lockfile with fixes, and review the Moment override when Obsidian's dependency constraints change. Do not assume an external runtime API removes the need to fix a flagged lockfile dependency.
-- In Obsidian-hosted UI, preserve Obsidian defaults and the user's active theme/CSS styling. Use the standard Modal title element and built-in semantic classes such as `mod-cta` for the user's accent. Do not add custom heading typography, control colors, fonts, line heights, padding, or vertical-alignment overrides to restyle native controls. Keep custom CSS limited to necessary feature layout; shared viewer components must inherit host styling.
+- Preserve Obsidian defaults and the user's theme in hosted UI: use the standard Modal title, supported semantic button APIs (`setDestructive()` for deletion) and classes such as `mod-cta`. Limit custom CSS to feature layout; shared viewers inherit host styling. Do not restyle native heading typography, control colors, fonts, line heights, padding, or vertical alignment. In authored host CSS, use explicit layout classes instead of `:has()`, and make display rules respect `[hidden]` without `!important`. Preserve canonical imported modules; change shared source upstream and use its sync workflow.
 - Follow the official Obsidian developer policies, plugin submission requirements, and plugin guidelines before cutting a release.
 - Settings tabs: keep general settings at the top without a heading. Do not use top-level headings like `General`, `Settings`, or the plugin name. If a settings section heading is needed, use `new Setting(containerEl).setName(...).setHeading()` and avoid the word `settings` in the heading.
 - UI text should use sentence case. Do not repeat the plugin name in command names; Obsidian already shows the plugin name next to commands.
-- Keep `manifest.json` `minAppVersion` at the lowest Obsidian version required by the APIs actually used.
-- When adopting a newer Obsidian API, raise `manifest.json` `minAppVersion` and the current release entry in `versions.json` to at least the API's introduction version in the same change. Runtime guards or feature detection are not substitutes for updating this metadata. For mobile APIs, update `mobile-src/manifest.json` instead. Keep the official `obsidianmd/no-unsupported-api` lint rule enabled for each distribution against its own manifest.
-- If Node.js or Electron APIs are used, keep `isDesktopOnly` set to `true`.
+- Keep each distribution's minimum at the lowest version required by its APIs, enforced by `obsidianmd/no-unsupported-api`. Adopting a newer API requires updating the desktop `manifest.json` and current `versions.json` entry together, or `mobile-src/manifest.json` for mobile, to at least its introduction version. Runtime guards do not replace metadata updates. Desktop capability and `isDesktopOnly` requirements above still apply.
 
 ## Version Locations
 
@@ -131,3 +130,5 @@ cannot bypass it. Do not disable the unsafe-value rules to silence unresolved
 Node or standard-library types; fix dependency/type resolution instead.
 Generated WASM data uses a checked-in declaration contract for clean-checkout
 type checking. Behavioral lint regressions live in `tests/lint-config.test.ts`.
+Preserve callback receivers and avoid unnecessary type assertions or deprecated
+APIs; enforce these requirements with the corresponding TypeScript ESLint rules.

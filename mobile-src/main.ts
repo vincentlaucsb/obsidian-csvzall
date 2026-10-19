@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
-import { isCsv } from "../src/csv/csvFiles.js";
+import { CSV_EXTENSIONS, isCsv } from "../src/csv/csvFiles.js";
 import { CsvzallTableView } from "../src/views/CsvzallTableView.js";
 import {
   embeddedWasmViewerUrl,
@@ -35,7 +35,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       VIEW_TYPE_CSVZALL_MOBILE,
       (leaf) => new CsvzallTableView(leaf, this, VIEW_TYPE_CSVZALL_MOBILE),
     );
-    this.registerExtensions(["csv"], VIEW_TYPE_CSVZALL_MOBILE);
+    this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL_MOBILE);
     this.addRibbonIcon("table", "New CSV", () => void this.createCsvInActiveFolder());
     this.registerCsvCommands();
     this.registerCsvFileMenu();

@@ -22,8 +22,8 @@ export interface ManagedTable {
 
 export function validateSource(source: string): string {
   const path = source.replace(/\\/g, '/');
-  if (!path || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..') || !/\.csv$/i.test(path)) {
-    throw new Error('Choose a CSV file inside the vault.');
+  if (!path || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..') || !/\.(?:csv|tsv)$/i.test(path)) {
+    throw new Error('Choose a CSV or TSV file inside the vault.');
   }
   return path;
 }

@@ -49,7 +49,12 @@ export function parseScorecard(html) {
       const key = value[2];
       if (typeof key === "string" && /^(?:pass|info|low|medium|high|critical):\d+:/.test(key)) {
         const [, severity, , message] = /^(\w+):(\d+):([\s\S]*)$/.exec(key);
-        findings.push({ severity, message, details: render(value).trim() });
+        const summary = value[3]?.children?.find?.(child => Array.isArray(child) && child[1] === "summary");
+        const badge = summary?.[3]?.children?.find?.(child => Array.isArray(child)
+          && /\btabular-nums\b/.test(child[3]?.className ?? "") && typeof child[3]?.children === "number");
+        const count = badge?.[3]?.children ?? 1;
+        if (!Number.isSafeInteger(count) || count < 1) throw new Error("Invalid scorecard finding count.");
+        findings.push({ severity, message, count, details: render(value).trim() });
       }
       visit(value[3]?.children);
     } else for (const child of value) visit(child);
@@ -58,7 +63,8 @@ export function parseScorecard(html) {
   if (!findings.length) throw new Error("Scorecard findings could not be decoded. Inspect the page manually.");
   const text = render(scorecard).replace(/\n{3,}/g, "\n\n").trim();
   const warningCount = /Warnings\s*(\d+)/.exec(text);
-  if (warningCount && Number(warningCount[1]) !== findings.filter(item => !["pass", "info"].includes(item.severity)).length) {
+  if (warningCount && Number(warningCount[1]) !== findings.filter(item => !["pass", "info"].includes(item.severity))
+    .reduce((total, item) => total + item.count, 0)) {
     throw new Error("Scorecard warning count changed or could not be fully decoded. Inspect the page manually.");
   }
   return { text, findings };
@@ -96,7 +102,8 @@ async function main() {
     const scorecard = parseScorecard(html);
     save("warnings.md", scorecard.text + "\n", pageUrl + "#scorecard");
     save("findings.json", JSON.stringify(scorecard.findings, null, 2) + "\n", pageUrl + "#scorecard");
-    console.log(`Retrieved ${scorecard.findings.filter(item => !["pass", "info"].includes(item.severity)).length} warnings. Inspect warnings.md for details and locations.`);
+    const warnings = scorecard.findings.filter(item => !["pass", "info"].includes(item.severity));
+    console.log(`Retrieved ${warnings.reduce((total, item) => total + item.count, 0)} warnings in ${warnings.length} groups. Inspect warnings.md for details and locations.`);
   }
   const commit = JSON.parse(await download(`https://api.github.com/repos/${docsRepo}/commits/main`)).sha;
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error("Could not resolve the current official guidance revision.");

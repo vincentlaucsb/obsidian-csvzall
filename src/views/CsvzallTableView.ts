@@ -396,9 +396,11 @@ export class CsvzallTableView extends FileView {
     }
 
     const leaf = this.leaf as ProtectedLeaf;
+    /* eslint-disable @typescript-eslint/unbound-method -- Preserve identity for restoration; calls below explicitly use .call(leaf). */
     const originalDetach = leaf.detach;
     const originalOpenFile = leaf.openFile;
     const originalSetViewState = leaf.setViewState;
+    /* eslint-enable @typescript-eslint/unbound-method */
     const patchedDetach = (): void => {
       void this.runProtectedLeafAction(() => originalDetach.call(leaf));
     };

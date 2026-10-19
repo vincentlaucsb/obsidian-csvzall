@@ -39,7 +39,8 @@ release workflows run it through `npm test` before publishing assets.
 The enforced TypeScript ESLint rules are `no-unsafe-call`,
 `no-unsafe-member-access`, `no-unsafe-assignment`, `no-unsafe-return`,
 `no-unsafe-argument`, `no-redundant-type-constituents`,
-`prefer-promise-reject-errors`, and `no-explicit-any`. The regression suite
+`prefer-promise-reject-errors`, `no-explicit-any`, `unbound-method`,
+`no-unnecessary-type-assertion`, and `no-deprecated`. The regression suite
 injects invalid code for every category into both desktop and mobile lint
 contexts to verify that the gate rejects it.
 

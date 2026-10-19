@@ -3,7 +3,7 @@
 
 <img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
-Open, edit, create, and chart CSV files directly inside Obsidian.
+Open, edit, create, and chart CSV files directly inside Obsidian. Tab-separated `.tsv` files are also supported.
 
 This plugin includes a pinned version of the [csvzall](https://github.com/vincentlaucsb/csvzall) helper. It is ready to use offline and updates together with the plugin.
 
@@ -15,7 +15,7 @@ users find the plugin and helps me gauge demand for continued development.
 
 ## What It Does
 
-- Opens `.csv` files in an editable table view inside Obsidian.
+- Opens `.csv` and `.tsv` files in an editable table view inside Obsidian.
 - Adds a **New CSV** action to folder context menus.
 - Adds an **Open with csvzall** action to CSV file menus.
 - Can generate bar, line, and heatmap charts.
@@ -56,6 +56,9 @@ outputs outside the vault.
 
 ## Limitations
 
+- The desktop plugin's `main.js` exceeds 5 MB because it includes the offline
+  helpers for all supported platforms. Obsidian Sync Standard cannot sync this
+  file; install the plugin separately on each desktop.
 - This package is desktop-only. Use
   [`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile)
   for mobile CSV creating, viewing, and editing.

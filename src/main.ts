@@ -3,6 +3,7 @@ import { ChartService } from "./charts/ChartService.js";
 import { registerChartCommands } from "./commands/registerChartCommands.js";
 import { registerCsvCommands } from "./commands/registerCsvCommands.js";
 import { CsvService } from "./csv/CsvService.js";
+import { CSV_EXTENSIONS } from "./csv/csvFiles.js";
 import { InstallerService } from "./installer/InstallerService.js";
 import { EventLog } from "./logging/EventLog.js";
 import { ObsidianFilesystem } from "./obsidian/filesystem.js";
@@ -42,7 +43,7 @@ export default class CsvzallPlugin extends Plugin {
     await this.chartService.reloadChartConfig();
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
-    this.registerExtensions(["csv"], VIEW_TYPE_CSVZALL);
+    this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL);
     this.registerView(VIEW_TYPE_CSVZALL_EXPORTS, (leaf) => new CsvzallExportsView(leaf, this.exportSettings));
     this.addSettingTab(new CsvzallSettingTab(this, {
       getSettings: () => this.settings,

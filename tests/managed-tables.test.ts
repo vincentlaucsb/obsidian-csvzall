@@ -62,6 +62,7 @@ test('refresh refuses a region edited, removed, or detached while a query runs',
 test('recipes reject external paths, unsupported versions, and invalid types', () => {
   for (const path of ['../data.csv', 'C:/data.csv', '/data.csv', 'a/../data.csv', 'a//data.csv', 'note.md']) assert.throws(() => validateSource(path));
   assert.equal(validateSource('Data\\tasks.CSV'), 'Data/tasks.CSV');
+  assert.equal(validateSource('Data\\tasks.TSV'), 'Data/tasks.TSV');
   for (const value of [{ ...recipe, version: 2 }, { ...recipe, columns: [2] }, { ...recipe, sql: null }]) {
     const block = `<!-- csvzall:table ${encodeURIComponent(JSON.stringify(value))} -->\n${markdown}\n<!-- /csvzall:table tasks -->`;
     assert.throws(() => findManagedTables(block));
