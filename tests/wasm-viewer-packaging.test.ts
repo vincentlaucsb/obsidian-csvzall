@@ -15,6 +15,7 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
   try {
     mkdirSync(assets, { recursive: true });
     const bundle = JSON.stringify([
+      "csvzall-csv-options-v1",
       "csvzall-shared-shell-v1",
       "csvzall-compact-layout-v1",
       "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-host-save-request-v1", "csvzall-edit-revision-v1",
@@ -35,6 +36,11 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
     prepare();
     assert.equal(readFileSync(htmlPath, "utf8"), html);
     assert.equal(readFileSync(bundlePath, "utf8"), bundle);
+    const olderBundle = bundle.replace("csvzall-csv-options-v1", "csvzall-csv-options-unsupported");
+    writeFileSync(bundlePath, olderBundle);
+    assert.throws(prepare, /missing source capabilities csvzall-csv-options-v1/);
+    assert.equal(readFileSync(bundlePath, "utf8"), olderBundle);
+    assert.equal(readFileSync(htmlPath, "utf8"), html);
     writeFileSync(bundlePath, 'console.log("legacy bundle");');
     assert.throws(prepare, /Unsupported WASM viewer/);
     assert.equal(readFileSync(bundlePath, "utf8"), 'console.log("legacy bundle");');

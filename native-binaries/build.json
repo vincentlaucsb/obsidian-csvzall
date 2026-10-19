@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "repository": "vincentlaucsb/csvzall",
-  "sourceCommit": "2ed8ee6e677ed62d7471b34d4fdffcf449edd861",
-  "version": "0.7.0",
+  "sourceCommit": "e5267ae97f465d7b0a2a37bc98baf7eb4a50af3f",
+  "version": "0.8.0",
   "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12" },
   "cmakeOptions": {
     "CMAKE_BUILD_TYPE": "Release",
@@ -23,6 +23,7 @@
     "argparse": { "repository": "p-ranav/argparse", "commit": "68fd0277eea5412aff9b91c0b70efc698359dae0", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_ARGPARSE" },
     "indicators": { "repository": "p-ranav/indicators", "commit": "26d39ad8fb438f5f50fb16427f554045d8431030", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_INDICATORS" },
     "sqlitecpp": { "repository": "SRombauts/SQLiteCpp", "commit": "08aa70a45ea52abcd8ee6b5d1ab1542140b3c7f5", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SQLITECPP" },
+    "sqlean": { "repository": "nalgeon/sqlean", "commit": "c873e81cbe5ac951410ed11e2746d723ede5ec26", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SQLEAN" },
     "simdjson": { "repository": "simdjson/simdjson", "commit": "0c0ce1bd48baa0677dc7c0945ea7cd1e8b52b297", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_SIMDJSON" },
     "nlohmann_json": { "repository": "nlohmann/json", "commit": "55f93686c01528224f448c19128836e7df245f72", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON" },
     "svgplot": { "repository": "vincentlaucsb/svgplot", "commit": "ae5f0ca59db0da3bf37d5e0f1168abf50b8868a7", "cmakeVariable": "SVGPLOT_ROOT" },
