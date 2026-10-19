@@ -581,6 +581,7 @@ export class CsvzallTableView extends FileView {
         type: "open-file",
         name: file.name,
         buffer,
+        hostUi: { version: 1, mobile: Platform.isMobileApp },
       }, "*", [buffer]);
     } catch (error) {
       if (frame !== this.frame || file !== this.wasmFile) return;

@@ -69,6 +69,11 @@ stylesheet; host/mobile layout belongs upstream. Checks require the
 `csvzall-shared-shell-v1` and `csvzall-csv-options-v1` source capabilities and
 reject SQL/chart UI code in Lite. The CSV options capability requires the shared
 dialect/header controls and engine support; importing an older viewer must fail.
+`csvzall-host-mobile-ui-v1` additionally requires the versioned `open-file`
+`hostUi: { version: 1, mobile: boolean }` policy. Mobile hosts hide Options from
+both the toolbar and overflow menu; desktop hosts and standalone viewers keep
+their controls. Dialect preservation and automatic header safeguards remain
+active on every platform.
 
 `wasm-viewer/csvzall-wasm-viewer.json` records the source commit, dirty-checkout
 status, and imported JavaScript SHA-256. Asset validation ensures that the

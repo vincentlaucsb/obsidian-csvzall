@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 // An explicit allowlist prevents local state or private notes entering builds.
 export const mobileDemoFiles = [
   ".gitignore", "Start here.md", "Productivity Tracker.csv", "Tasks.csv",
-  "CSV edge cases.csv", "Projects/Project tasks.csv",
+  "CSV edge cases.csv", "Projects/Project tasks.csv", "Variable width.tsv",
 ];
 
 // Check every ancestor so copying never follows a vault or plugin junction.

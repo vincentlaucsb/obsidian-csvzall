@@ -4,7 +4,7 @@ import { buildSync } from "esbuild";
 import { runInNewContext } from "node:vm";
 
 const compiled = buildSync({entryPoints: ["src/views/CsvzallTableView.ts"], bundle: true, write: false, platform: "node", format: "cjs", external: ["obsidian"]}).outputFiles[0]!.text;
-function fixture() {
+function fixture(isMobileApp = false) {
   const notices: string[] = [];
   class Element {
     inert = false;
@@ -28,7 +28,7 @@ function fixture() {
     window: { setTimeout, clearTimeout, removeEventListener() {} },
     require: () => ({
     FileView: class {leaf: any; constructor(leaf: any) {this.leaf = leaf;}},
-    Modal: class {}, Platform: {isMobileApp: false}, Notice: class {constructor(message: string) {notices.push(message);}},
+    Modal: class {}, Platform: {isMobileApp}, Notice: class {constructor(message: string) {notices.push(message);}},
   })});
   const owner = {handleLeafClosed() {}, async openCsvInLeaf() {}, async installCsvzallFromView() {return false;}};
   const view = new module.exports.CsvzallTableView({}, owner);
@@ -87,6 +87,18 @@ test("late WASM read success cannot post an old file to a replacement frame", as
   f.view.frame = {};
   read.resolve(new ArrayBuffer(1)); await load;
   assert.equal(f.messages.length, 0);
+});
+
+test("WASM open messages carry versioned mobile UI policy without changing CSV bytes", async () => {
+  for (const mobile of [false, true]) {
+    const f = fixture(mobile);
+    const buffer = new TextEncoder().encode("a\tb\n1\t2\n").buffer;
+    f.view.app = {vault: {readBinary: async () => buffer}};
+    await f.view.postWasmFileToFrame(f.frame);
+    assert.equal(f.messages[0].buffer, buffer);
+    assert.equal(f.messages[0].hostUi.version, 1);
+    assert.equal(f.messages[0].hostUi.mobile, mobile);
+  }
 });
 
 test("WASM rename preserves the loaded editor and uses the renamed file object", async () => {

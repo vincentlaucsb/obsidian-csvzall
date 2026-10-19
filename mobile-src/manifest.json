@@ -1,7 +1,7 @@
 {
   "id": "csvzall-mobile",
   "name": "csvzall Lite",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minAppVersion": "1.5.0",
   "description": "Create, view, and edit CSV files on desktop and mobile with a bundled viewer. No helper binary required.",
   "author": "Vincent La",

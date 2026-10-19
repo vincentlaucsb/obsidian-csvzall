@@ -15,6 +15,7 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
   try {
     mkdirSync(assets, { recursive: true });
     const bundle = JSON.stringify([
+      "csvzall-host-mobile-ui-v1",
       "csvzall-csv-options-v1",
       "csvzall-shared-shell-v1",
       "csvzall-compact-layout-v1",
@@ -36,6 +37,11 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
     prepare();
     assert.equal(readFileSync(htmlPath, "utf8"), html);
     assert.equal(readFileSync(bundlePath, "utf8"), bundle);
+    const noMobilePolicy = bundle.replace("csvzall-host-mobile-ui-v1", "csvzall-host-mobile-ui-unsupported");
+    writeFileSync(bundlePath, noMobilePolicy);
+    assert.throws(prepare, /missing source capabilities csvzall-host-mobile-ui-v1/);
+    assert.equal(readFileSync(bundlePath, "utf8"), noMobilePolicy);
+    assert.equal(readFileSync(htmlPath, "utf8"), html);
     const olderBundle = bundle.replace("csvzall-csv-options-v1", "csvzall-csv-options-unsupported");
     writeFileSync(bundlePath, olderBundle);
     assert.throws(prepare, /missing source capabilities csvzall-csv-options-v1/);
