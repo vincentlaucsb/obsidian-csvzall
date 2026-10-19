@@ -164,3 +164,15 @@ Export `5/26/2026` as a standalone SQL value and as a table. Both should display
 the exact date in the rendered note. Also check literal backslashes, Markdown
 syntax, HTML, Unicode, and multiline values. The regression suites cover these
 cases, preview cleanup on success/failure, and cancellation during pruning.
+
+
+## Variable-width CSV/TSV rows
+
+Open `Variable width.tsv` in the demo vault. It has a two-field first row and a
+three-field data row. The viewer should show all four records as data under A,
+B, C, preserving SURPRISE in the third column and padding missing cells. Options
+must show the header checkbox unchecked and disabled, with an explanation and
+repair steps. Filling C in the first row with a header name, then saving and
+reopening, should restore normal header handling. The native and WASM regression
+suites cover whole-page/single-row reads, saving every value, API enforcement,
+shorter rows with valid headers, and clearing the restriction after input repair.
