@@ -6,7 +6,7 @@ import { VIEW_TYPE_CSVZALL_EXPORTS } from "./viewTypes.js";
 /**
  * Lists saved chart and note exports. Configurations live in `.csvzall/` dot
  * folders, which do not raise vault events, so the list refreshes after its own
- * actions, whenever this tab becomes active, and from its Refresh button.
+ * actions, whenever this tab becomes active, from its Refresh button, and after automatic pruning.
  */
 export class CsvzallExportsView extends ItemView {
   private revision = 0;
@@ -18,6 +18,7 @@ export class CsvzallExportsView extends ItemView {
   getIcon(): string { return "list"; }
 
   async onOpen(): Promise<void> {
+    if (this.exports.onChanged) this.register(this.exports.onChanged(() => this.refresh()));
     this.registerEvent(this.app.workspace.on("active-leaf-change", leaf => { if (leaf === this.leaf) this.refresh(); }));
     this.refresh();
   }

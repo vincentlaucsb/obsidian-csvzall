@@ -7,6 +7,6 @@ export function addExportActions(row: Setting, actions: {
   configureDisabled?: boolean;
 }): Setting {
   return row
-    .addButton(button => button.setButtonText("Configure").setDisabled(actions.configureDisabled ?? false).onClick(actions.configure))
-    .addButton(button => button.setButtonText("Delete").setWarning().onClick(actions.remove));
+    .addButton(button => button.setButtonText("Configure").setDisabled(actions.configureDisabled ?? false).onClick(() => actions.configure()))
+    .addButton(button => button.setButtonText("Delete").setDestructive().onClick(() => actions.remove()));
 }

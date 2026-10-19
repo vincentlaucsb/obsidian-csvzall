@@ -14,7 +14,7 @@ function fixture(isMobileApp, assetError = null) {
   const views = [], extensions = [], commands = [], menus = [], notices = [], opened = [], writes = [];
   let installs = 0, releases = 0, activeFile = null;
   class TFile {
-    constructor(path) { this.path = path; this.name = path.split("/").at(-1); this.basename = this.name.replace(/\.csv$/, ""); this.extension = "csv"; }
+    constructor(path) { this.path = path; this.name = path.split("/").at(-1); this.basename = this.name.replace(/\.[^.]+$/, ""); this.extension = this.name.split(".").at(-1); }
   }
   class TFolder { constructor(path) { this.path = path; } }
   class TableView {
@@ -61,7 +61,7 @@ for (const mobile of [false, true]) test(`bundled plugin registers and opens the
   await f.plugin.onload();
   assert.equal(f.installs(), 1);
   assert.equal(f.views[0][0], "csvzall-mobile-view");
-  assert.equal(f.extensions[0][0][0], "csv");
+  assert.deepEqual(Array.from(f.extensions[0][0]), ["csv", "tsv"]);
   assert.equal(f.extensions[0][1], "csvzall-mobile-view");
   assert.equal(f.commands.length, 2);
   assert.equal(f.menus.length, 1);
@@ -87,6 +87,30 @@ test("desktop New CSV keeps its folder, avoids filename collisions, and opens th
   assert.deepEqual(f.writes, [{ path: "Projects/Untitled 1.csv", text: "column\n" }]);
   assert.equal(f.opened[0].type, "csvzall-mobile-view");
   assert.equal(f.opened[0].state.file, "Projects/Untitled 1.csv");
+});
+
+test("TSV files use the same command and context menu on desktop and mobile", async () => {
+  for (const mobile of [false, true]) {
+    const f = fixture(mobile);
+    await f.plugin.onload();
+    const command = f.commands.find(item => item.id === "open-active-csv");
+    for (const extension of ["tsv", "TSV", "csv"]) {
+      f.setFile(new f.TFile(`Tasks.${extension}`));
+      assert.equal(command.checkCallback(true), true);
+      command.checkCallback(false);
+      assert.equal(f.opened.at(-1).state.file, `Tasks.${extension}`);
+      const items = [];
+      f.menus[0]({ addItem() { items.push("open"); return this; } }, { extension });
+      assert.equal(items.length, 0, "non-TFile values remain excluded");
+      f.menus[0]({ addItem(callback) {
+        const item = { setTitle() { return item; }, setIcon() { return item; }, onClick(fn) { items.push(fn); } };
+        callback(item);
+      } }, new f.TFile(`Tasks.${extension}`));
+      assert.equal(items.length, 1);
+    }
+    f.setFile(new f.TFile("Note.md"));
+    assert.equal(command.checkCallback(true), false);
+  }
 });
 
 test("failed asset installation keeps the desktop view available with an actionable error", async () => {

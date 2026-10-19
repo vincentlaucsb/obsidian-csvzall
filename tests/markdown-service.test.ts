@@ -15,6 +15,7 @@ class FakeFile {
   get basename() { return this.path.split('/').pop()!.replace(/\.[^.]+$/, ''); }
 }
 class FakeView {}
+class FakeFolder { constructor(public path: string) {} }
 
 async function harness() {
   let formOptions: any, noteLink: any;
@@ -28,7 +29,7 @@ async function harness() {
   const module = { exports: {} as any };
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports, console,
     crypto: webcrypto, window: { setTimeout, clearTimeout, setInterval, clearInterval }, require(name: string) {
-      if (name === 'obsidian') return { TFile: FakeFile, MarkdownView: FakeView, Notice: class {} };
+      if (name === 'obsidian') return { TFile: FakeFile, TFolder: FakeFolder, MarkdownView: FakeView, Notice: class {} };
       if (name === 'mock-modal') return { TableModal: class { constructor(_app: unknown, options: unknown, note: unknown) { formOptions = options; noteLink = note; } open() {} } };
       return require(name);
     },
@@ -63,10 +64,11 @@ async function harness() {
     remove: async (path: string) => { configs.delete(path); },
     mkdir: async () => {},
   };
-  const app = { workspace: { getLeavesOfType: () => leaves,
+  const app = { workspace: { on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); }, getLeavesOfType: () => leaves,
     getLeaf: (kind: unknown) => ({ openFile: async (file: unknown, state: unknown) => { opened.push({ kind, file, state }); } }), onLayoutReady: (callback: () => void) => { ready = callback; } }, vault: {
     adapter,
     read: async (file: FakeFile) => file === note ? text : extraNotes.get(file)!,
+    getAllLoadedFiles: () => [new FakeFolder('/'), new FakeFolder('Reports'), ...Array.from(extraNotes.keys(), file => new FakeFolder(file.path.split('/').slice(0, -1).join('/')))],
     getMarkdownFiles: () => [note, ...extraNotes.keys()],
     getFiles: () => [note, csv],
     on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); },
@@ -275,6 +277,7 @@ test('failed config writes and malformed configuration leave inline definitions 
 
 test('migration handles ID collisions without replacing an existing definition', async () => {
   const f = await harness(); f.text = legacyText('tasks', 'SELECT title FROM data');
+  f.addNote('Reports/original.md', oldTable);
   await f.reindex();
   const saved = JSON.parse(f.configs.get('.csvzall/exports.json')!);
   assert.equal(saved.exports.length, 2); assert.equal(saved.exports[0].options.sql, '');
@@ -630,5 +633,64 @@ test('legacy exports without an output note are shown as unlinked without scanni
   assert.equal(f.noteLink.exists, false);
   await assert.rejects(f.noteLink.open(), /not linked to a note/);
   assert.equal(f.opened.length, 0);
+  f.service.unload();
+});
+
+for (const format of ['table', 'value']) {
+  test(`manual removal immediately prunes linked SQL ${format} definitions, including unsaved edits`, async () => {
+    const f = await harness();
+    const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+    config.exports[0].format = format; config.exports[0].runOnSave = false;
+    f.configs.set('.csvzall/exports.json', JSON.stringify(config));
+    f.text = managedTableText({ ...recipe, format: format as 'table' | 'value' }, 'old');
+    const editing = f.installEditor(f.text);
+    await f.start();
+    editing.editor.replaceRange('Kept prose', { line: 0, ch: 0 } as any, { line: 0, ch: editing.text.length } as any);
+    await f.event('editor-change', editing.editor, editing.view);
+    await f.service.pruneDeadExports();
+    assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
+    assert.equal(editing.text, 'Kept prose');
+    assert.ok(f.text.includes('csvzall:export'), 'disk text can still contain the old marker');
+    f.service.unload();
+  });
+}
+
+test('startup/list pruning keeps copied, unlinked and malformed exports safe', async () => {
+  const f = await harness();
+  let changes = 0;
+  const unsubscribe = f.service.onExportsChanged(() => { ++changes; });
+  f.addNote('Reports/copy.md', oldTable);
+  f.text = 'Original removed';
+  await f.service.pruneDeadExports();
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+  config.exports.push({ id: 'unlinked', input: recipe.source });
+  config.exports.push({ id: 'dead', input: recipe.source, output: 'Deleted.md' });
+  f.configs.set('.csvzall/exports.json', JSON.stringify(config));
+  f.text = '<!-- csvzall:export broken -->incomplete edit';
+  await f.service.pruneDeadExports();
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 3);
+  f.text = 'Original removed';
+  const entries = await f.service.listExports(['Reports']);
+  assert.deepEqual(Array.from(entries, (entry: any) => entry.recipe.id), ['tasks', 'unlinked']);
+  assert.equal(changes, 1);
+  unsubscribe();
+  f.service.unload();
+});
+
+test('pruning rechecks live edits and preserves concurrent configuration changes', async () => {
+  const f = await harness();
+  f.text = 'removed';
+  const write = f.adapter.write;
+  f.adapter.write = async (path, text) => {
+    if (path.includes('.exports-')) {
+      f.text = oldTable;
+      await f.event('modify', f.note);
+    }
+    await write(path, text);
+  };
+  await f.start();
+  await f.service.pruneDeadExports();
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
   f.service.unload();
 });

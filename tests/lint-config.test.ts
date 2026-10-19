@@ -19,6 +19,13 @@ import { TFile } from "obsidian";
 declare const file: unknown;
 void (file as TFile);
 void /[\\x00-\\x1f]/;
+const receiver = { value: 1, method() { return this.value; } };
+const detached = receiver.method;
+declare const text: string;
+void (text as string);
+/** @deprecated Use current APIs. */
+function outdated(): void {}
+outdated();
 `;
 
 test("desktop and mobile lint reject every reported type-safety category", async () => {
@@ -33,6 +40,7 @@ test("desktop and mobile lint reject every reported type-safety category", async
     "no-explicit-any", "no-unsafe-call", "no-unsafe-member-access",
     "no-unsafe-assignment", "no-unsafe-return", "no-unsafe-argument",
     "no-redundant-type-constituents", "prefer-promise-reject-errors",
+    "unbound-method", "no-unnecessary-type-assertion", "no-deprecated",
   ];
   for (const filePath of ["src/main.ts", "mobile-src/main.ts"]) {
     const results = await eslint.lintText(unsafeFixture, { filePath });

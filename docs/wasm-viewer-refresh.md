@@ -66,7 +66,9 @@ Packaging requires explicit source capabilities and rejects older unsupported
 bundles before replacing existing assets. Update upstream source instead of
 adding compatibility string replacements. Packaging inlines the unchanged shared
 stylesheet; host/mobile layout belongs upstream. Checks require the
-`csvzall-shared-shell-v1` source capability and reject SQL/chart UI code in Lite.
+`csvzall-shared-shell-v1` and `csvzall-csv-options-v1` source capabilities and
+reject SQL/chart UI code in Lite. The CSV options capability requires the shared
+dialect/header controls and engine support; importing an older viewer must fail.
 
 `wasm-viewer/csvzall-wasm-viewer.json` records the source commit, dirty-checkout
 status, and imported JavaScript SHA-256. Asset validation ensures that the

@@ -22,8 +22,8 @@ export interface ManagedTable {
 
 export function validateSource(source: string): string {
   const path = source.replace(/\\/g, '/');
-  if (!path || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..') || !/\.csv$/i.test(path)) {
-    throw new Error('Choose a CSV file inside the vault.');
+  if (!path || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..') || !/\.(?:csv|tsv)$/i.test(path)) {
+    throw new Error('Choose a CSV or TSV file inside the vault.');
   }
   return path;
 }
@@ -170,9 +170,14 @@ export function scalarMarkdown(csv: string): string {
     if (!control || !inControls) normalized += control ? ' ' : char;
     inControls = control;
   }
+  // Entities stay literal in both Obsidian's inline HTML spans and Markdown.
+  // Backslash-escaping every punctuation mark leaks escapes such as \/ in
+  // Obsidian, whose supported escape set differs from CommonMark's.
   return Array.from(normalized, char => {
-    const code = char.charCodeAt(0);
-    return ((code >= 33 && code <= 47) || (code >= 58 && code <= 64) || (code >= 91 && code <= 96) || (code >= 123 && code <= 126)) ? `\\${char}` : char;
+    if (char === '&') return '&amp;';
+    if (char === '<') return '&lt;';
+    if (char === '>') return '&gt;';
+    return '\\`*_{}[]()#+-.!|~=$^'.includes(char) ? `&#${char.charCodeAt(0)};` : char;
   }).join('');
 }
 

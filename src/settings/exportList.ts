@@ -3,7 +3,7 @@ import type { ExportSettingsService, FileExports } from "./ExportSettingsService
 import { addExportActions } from "./exportActions.js";
 import { countExports, exportCountsText } from "./exportSummary.js";
 
-export type ExportListService = Pick<ExportSettingsService, "list" | "configure" | "confirmDelete">;
+export type ExportListService = Pick<ExportSettingsService, "list" | "configure" | "confirmDelete"> & Partial<Pick<ExportSettingsService, "onChanged">>;
 
 /**
  * Load saved exports into `container`, showing loading and error states.

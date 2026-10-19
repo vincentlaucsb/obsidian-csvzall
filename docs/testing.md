@@ -39,7 +39,8 @@ release workflows run it through `npm test` before publishing assets.
 The enforced TypeScript ESLint rules are `no-unsafe-call`,
 `no-unsafe-member-access`, `no-unsafe-assignment`, `no-unsafe-return`,
 `no-unsafe-argument`, `no-redundant-type-constituents`,
-`prefer-promise-reject-errors`, and `no-explicit-any`. The regression suite
+`prefer-promise-reject-errors`, `no-explicit-any`, `unbound-method`,
+`no-unnecessary-type-assertion`, and `no-deprecated`. The regression suite
 injects invalid code for every category into both desktop and mobile lint
 contexts to verify that the gate rejects it.
 
@@ -141,3 +142,37 @@ copy for this check.
 These browser checks cover the native viewer host. Check note insertion,
 managed region refresh and the Obsidian modal separately in the canonical
 demo vault when supported native UI access is available.
+
+
+## Chart previews and export cleanup (#15)
+
+In chart options, Preview follows Cancel. Change the title or series, then click
+Preview: the chart appears beside the form without saving configuration or
+replacing the configured output. Editing again clears the stale preview and does
+not render another chart until Preview is clicked. Cancel must leave saved files
+unchanged. Test both the native viewer and the plugin's Configure chart modal.
+
+Remove a managed table or value from a note, including from an unsaved editing
+buffer. Its linked definition should disappear from exports.json and the open
+Exports tab once detected. A remaining copy in another note keeps the definition
+alive. Incomplete markers, unreadable notes, and legacy definitions with no linked
+output are preserved. Deleting a generated chart file (or its folder) prunes its
+chart definitions; a chart with an output that has never been observed deleted
+remains available for regeneration.
+
+Export `5/26/2026` as a standalone SQL value and as a table. Both should display
+the exact date in the rendered note. Also check literal backslashes, Markdown
+syntax, HTML, Unicode, and multiline values. The regression suites cover these
+cases, preview cleanup on success/failure, and cancellation during pruning.
+
+
+## Variable-width CSV/TSV rows
+
+Open `Variable width.tsv` in the demo vault. It has a two-field first row and a
+three-field data row. The viewer should show all four records as data under A,
+B, C, preserving SURPRISE in the third column and padding missing cells. Options
+must show the header checkbox unchecked and disabled, with an explanation and
+repair steps. Filling C in the first row with a header name, then saving and
+reopening, should restore normal header handling. The native and WASM regression
+suites cover whole-page/single-row reads, saving every value, API enforcement,
+shorter rows with valid headers, and clearing the restriction after input repair.

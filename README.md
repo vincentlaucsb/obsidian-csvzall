@@ -3,37 +3,44 @@
 
 <img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/refs/heads/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
-Open, edit, create, and chart CSV files directly inside Obsidian.
+Open, edit, create, and chart CSV/TSV files directly inside Obsidian.
 
-This plugin includes a pinned version of the [csvzall](https://github.com/vincentlaucsb/csvzall) helper. It is ready to use offline and updates together with the plugin.
+Ever wanted to treat CSV files as a virtual SQL database, and export the query results to your notes? You can do that too.
 
-On phones and tablets, install
-[`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile).
+This plugin automatically includes a pinned version of the [csvzall](https://github.com/vincentlaucsb/csvzall) helper. It is a C++ app compiled for your specific operating system and CPU, giving you a lightning fast editing and viewing experience, even on files that are hundreds of megabytes big.
 
-If csvzall saves you time, please star this repository. It helps other Obsidian
+If csvzall saves you time, please [star this repository](https://github.com/vincentlaucsb/obsidian-csvzall) [![GitHub stars](https://img.shields.io/github/stars/vincentlaucsb/obsidian-csvzall?style=social)](https://github.com/vincentlaucsb/obsidian-csvzall). It helps other Obsidian
 users find the plugin and helps me gauge demand for continued development.
+
+## Phones and Tablets
+For mobile devices, install
+[`csvzall Lite`](https://community.obsidian.md/plugins/csvzall-mobile), a lightweight version for creating, viewing, and editing CSV/TSV files, based on the same code as the desktop version.
 
 ## What It Does
 
-- Opens `.csv` files in an editable table view inside Obsidian.
-- Adds a **New CSV** action to folder context menus.
-- Adds an **Open with csvzall** action to CSV file menus.
-- Can generate bar, line, and heatmap charts.
-- Can regenerate configured charts when CSV files change.
-- Can run SQLite queries over CSV files.
-- Supports generated Markdown table notes from chart config entries.
+- Opens `.csv` and `.tsv` files in an editable table view inside Obsidian.
+- Adds command palette and context-menu actions to create and open CSV/TSV files and configure, refresh, or delete exports.
+- Generates exports that update automatically when the source file changes:
+  - Bar, line, and heatmap charts.
+  - Markdown tables from the entire file, selected columns, or SQLite query results, inserted into notes or saved as standalone notes.
+  - Inline values from single-cell SQLite query results, inserted directly into a sentence.
+- Reformat non-standard CSV files to standard RFC 4180 dialect *with user approval*
+  - By default, we respect the existing format of the CSV/TSV file when saving edits
+
+### How does it handle different CSV dialects?
+The CSV parsing logic is based on a battle-tested [CSV parsing library](https://github.com/vincentlaucsb/csv-parser), which:
+ * Handles arbitrarily large CSV files into the gigabyte range
+ * Automatically detects common delimiter and quote character combinations
+ * Automatically skips comment and blank lines to find the header
+    * By default, a header row is assumed. This can be turned off on a file by file basis.
+
+When a data row has more fields than the first row, the viewer automatically disables headers and shows the first row as data so every value remains visible. CSV options explains how to fix the mismatch.
 
 ## Requirements
 
-- Obsidian desktop.
-- A local filesystem vault.
+- Obsidian desktop (use [`csvzall Lite`](https://community.obsidian.md/plugins/csvzall-mobile) on mobile devices)
 - Windows x64, macOS Apple Silicon, or Linux x64 for the bundled helper.
   Other desktop architectures require a compatible custom executable.
-
-For mobile creating, viewing, and editing, install the generated
-[`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile)
-plugin instead. The mobile plugin uses the bundled WASM viewer and does not
-install or run the desktop helper binary.
 
 The included helper is verified with SHA-256 and extracted into the plugin's
 directory automatically. Update the plugin through Obsidian to receive helper
@@ -42,82 +49,21 @@ helper, including a command on PATH. Choose **Use bundled helper** to switch bac
 
 ## Privacy and Network Use
 
-The plugin does not collect telemetry or contact GitHub to install or update
-the helper. CSV viewing and charting run through the local helper process on
-your machine.
-
-The desktop plugin uses direct filesystem access to install the helper and
-pass real file paths to it. It can execute a helper outside your vault when
-you configure its path or use an executable on your system PATH. This access
-is required for the native viewer, editing, charts, and SQL. Helper processes
-run with your user account's filesystem permissions.
-Configured chart paths can also direct the helper to read inputs or write
-outputs outside the vault.
+The plugin does not collect telemetry and works entirely offline. It uses direct filesystem access to install and run the bundled helper, or a custom helper you configure outside your vault.
 
 ## Limitations
 
-- This package is desktop-only. Use
-  [`csvzall Mobile`](https://community.obsidian.md/plugins/csvzall-mobile)
-  for mobile CSV creating, viewing, and editing.
-- Desktop CSV viewing and editing require a local filesystem vault so the
-  plugin can launch the local `csvzall` helper process against real file paths.
-- Save desktop edits before renaming or moving a CSV. If a file moves with
-  unsaved edits, the editor pauses until you restore its original path or
-  choose to discard the edits and reopen it.
-- In the mobile companion plugin, chart generation, SQLite queries, and helper
-  binary management are not available.
 - Multi-value graphs configured through Obsidian are limited to two value
   columns.
 
-## Chart Automation
-
-Create `.csvzall/charts.json` in your vault, or inside a folder, to define chart
-jobs. Entries with `runOnSave: true` are regenerated after their input CSV is
-saved.
-
-Besides chart image outputs, `type: "markdown-table"` can write generated
-Markdown notes that you embed with Obsidian's `![[path/to/output]]` syntax.
-
-## CSV exports in notes
-
-While editing a note, run **Insert from CSV**, or choose it from the
-editor context menu. Pick a CSV from your vault, then include the entire CSV,
-select columns, or enter a SQLite query against table `data`. **Preview** shows
-up to 20 rows; inserting a table includes the full result. Choose **Insert as: Value** to insert
-a single query result directly into a sentence. Value queries must return exactly
-one row and one column; text is escaped for Markdown and line breaks become spaces.
-
-**Keep updated when CSV changes** is enabled by default. The note contains an
-ordinary Markdown table or inline text with short ID markers in hidden HTML
-comments. Sources and queries are saved in `.csvzall/exports.json`, alongside
-chart definitions. Existing table definitions and markers migrate automatically;
-the original `tables.json` is retained as a backup.
-CSV saves refresh the table while the desktop plugin is running; enabling the
-plugin also refreshes saved tables. Text outside the table is preserved. If a
-source is missing or a query fails, the previous table is kept.
-
-Place the cursor inside a generated table to edit its source or query, refresh
-it, open its source, or stop automatic updates using the command palette or
-editor context menu. Stopping updates leaves a normal editable Markdown table.
-Changes made directly to a linked table may be replaced on its next refresh.
-
-You can also right-click a CSV and choose **Export to Markdown note** to create
-a new note. Generated tables remain readable when the plugin is disabled.
-Generation and automatic refresh require the desktop plugin and csvzall helper;
-the mobile companion can display the saved notes.
+### For Obsidian Sync Standard Users
+- The desktop plugin's `main.js` exceeds 5 MB because it includes the offline
+  helpers for all supported platforms. Obsidian Sync Standard cannot sync this
+  file; install the plugin separately on each desktop.
 
 ## Manage exports
 
-The plugin's settings show how many exports are saved. Select **Configure**
-under **Exports**, or run the **Open exports** command, to open the exports tab.
-It lists CSV files with saved chart, table, or value export configurations,
-including paused exports; use **Refresh** after editing configuration files
-directly. **Configure** lists each chart, SQL table, or value export with
-**Configure** and **Delete** actions, including files with only one export.
-A SQL table or value export's options show the note that contains it, with a
-**Go to note** button. Deleting an individual export
-removes only its configuration and keeps the CSV and generated content.
-Linked note regions become ordinary Markdown when their export is deleted.
-The **Delete** action beside the CSV removes all of that file's export
-configurations while preserving the CSV and generated content. Linked note
-regions become ordinary Markdown.
+- Run **Open exports**, or select **Configure** under **Exports** in the plugin settings.
+- Use **Configure** beside a CSV/TSV file to manage its chart, table, and value exports, including paused exports.
+- **Delete** removes export configurations and stops their automatic updates. Your source files and generated content are kept.
+- Unused configurations are removed automatically when linked exports are removed from notes or generated chart files are deleted.

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 const script = pathToFileURL(resolve("scripts/prepare-obsidian-review.mjs")).href;
 const element = (tag: string, key: string | null, children: unknown, props = {}) => ["$", tag, key, { ...props, children }];
 const flight = (records: string[]) => records.map(record => `<script>self.__next_f.push(${JSON.stringify([1, record])})</script>`).join("");
-function parse(html: string): { findings: Array<{ severity: string; message: string; details: string }> } {
+function parse(html: string): { findings: Array<{ severity: string; message: string; count: number; details: string }> } {
   return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
     "const {parseScorecard} = await import(process.argv[1]); console.log(JSON.stringify(parseScorecard(process.argv[2])));",
     script, html,
@@ -34,4 +34,20 @@ test("missing or incomplete scorecard data cannot be mistaken for zero warnings"
   assert.throws(() => parse(flight([`1:${JSON.stringify(card)}\n`])), /warning count/);
   const incomplete = element("div", null, "$L9", { id: "scorecard" });
   assert.throws(() => parse(flight([`1:${JSON.stringify(incomplete)}\n`])), /could not be decoded|Unresolved/);
+});
+
+test("grouped occurrences count toward warnings while disclosures remain separate", () => {
+  const grouped = element("details", "medium:0:Unbound method", [
+    element("summary", null, ["Unbound method", element("span", null, 2, { className: "tabular-nums" })]),
+    element("div", null, "src/one.ts:1 src/two.ts:2"),
+  ]);
+  const card = element("div", null, [element("h3", null, ["Warnings", 3]), grouped,
+    element("div", "medium:1:Capability", "Capability"),
+    element("div", "info:0:Disclosure", "Disclosure")], { id: "scorecard" });
+  const result = parse(flight([`1:${JSON.stringify(card)}\n`]));
+  assert.deepEqual(result.findings.map(item => item.count), [2, 1, 1]);
+  assert.match(result.findings[0]!.details, /src\/one.ts:1 src\/two.ts:2/);
+  const incomplete = element("div", null, [element("h3", null, ["Warnings", 4]), grouped,
+    element("div", "medium:1:Capability", "Capability")], { id: "scorecard" });
+  assert.throws(() => parse(flight([`1:${JSON.stringify(incomplete)}\n`])), /warning count/);
 });

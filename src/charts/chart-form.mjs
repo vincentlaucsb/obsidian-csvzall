@@ -101,6 +101,12 @@ export function mountChartForm(root, options) {
   const chartRunOnSave = root.querySelector('#chart-run-on-save');
   const chartError = root.querySelector('#chart-error');
   const cancelChart = root.querySelector('#cancel-chart');
+  const previewChartButton = root.querySelector('#preview-chart');
+  const previewPanel = root.querySelector('#chart-preview');
+  let previewRevision = 0;
+  const clearPreview = () => { ++previewRevision; previewPanel.hidden = true; previewPanel.replaceChildren(); previewPanel.parentElement.classList.remove('chart-has-preview'); };
+  on(chartForm, 'input', clearPreview);
+  on(chartForm, 'change', clearPreview);
   options.decorateButton?.(newChartButton, 'plus', 'New');
   options.decorateButton?.(cancelChart, 'x', 'Cancel');
   options.decorateButton?.(generateChartButton, 'chart-bar', 'Create chart');
@@ -300,6 +306,7 @@ export function mountChartForm(root, options) {
   };
 
   const applyChartValues = (values) => {
+    clearPreview();
     refreshChartColumnOptions(values);
     setChartType(values.type ?? 'heatmap');
     chartId.value = values.id ?? '';
@@ -407,6 +414,7 @@ export function mountChartForm(root, options) {
   };
 
   const open = async () => {
+    clearPreview();
     clearChartError();
     await loadChartList();
     if (!disposed) chartDateColumn.focus();
@@ -440,19 +448,16 @@ export function mountChartForm(root, options) {
       showChartError(error instanceof Error ? error.message : 'Chart generation failed', { markFields: true });
     } finally { busy = false; if (!disposed) generateChartButton.disabled = false; }
   });
-  on(chartForm, 'submit', async (event) => {
-    event.preventDefault();
-    if (busy || disposed) return;
+  const getPayload = () => {
     const valueColumns = selectedValueColumns();
     const multiValues = valueColumns.length > 1 ? valueColumns : [];
     let markdown = { columns: [], sql: '' };
     try {
       if (chartType.value === 'markdown-table') markdown = tableForm.getValue();
     } catch (error) {
-      showChartError(error.message);
-      return;
+      throw new Error(error.message);
     }
-    const payload = {
+    return {
       type: chartType.value,
       id: chartId.value.trim(),
       title: chartTitle.value.trim(),
@@ -476,6 +481,34 @@ export function mountChartForm(root, options) {
       output: chartOutput.value.trim(),
       runOnSave: chartRunOnSave.checked,
     };
+  };
+  on(previewChartButton, 'click', async () => {
+    if (busy || disposed) return;
+    clearPreview();
+    const revision = previewRevision;
+    busy = true; previewChartButton.disabled = true;
+    try {
+      const payload = getPayload();
+      const result = options.previewChart
+        ? await options.previewChart(payload)
+        : await postJson('/api/chart-config/preview', payload);
+      if (disposed || revision !== previewRevision) return;
+      const node = doc.createElement(result.svg ? 'img' : 'pre');
+      if (result.svg) { node.alt = 'Chart preview'; node.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`; }
+      else node.textContent = result.markdown ?? '';
+      previewPanel.replaceChildren(node); previewPanel.hidden = false;
+      previewPanel.parentElement.classList.add('chart-has-preview');
+      clearChartError();
+    } catch (error) {
+      if (!disposed && revision === previewRevision) showChartError(error instanceof Error ? error.message : 'Chart preview failed');
+    } finally { busy = false; if (!disposed) previewChartButton.disabled = false; }
+  });
+  on(chartForm, 'submit', async (event) => {
+    event.preventDefault();
+    if (busy || disposed) return;
+    let payload;
+    try { payload = getPayload(); }
+    catch (error) { showChartError(error.message); return; }
     busy = true;
     const submitButton = chartForm.querySelector('button[type="submit"]');
     submitButton.disabled = true;
@@ -504,6 +537,7 @@ export function mountChartForm(root, options) {
     open,
     dispose() {
       disposed = true;
+      ++previewRevision;
       tableForm.dispose();
       for (const remove of listeners) remove();
     },
@@ -512,7 +546,7 @@ export function mountChartForm(root, options) {
 
 /** Build the same controls for hosts that do not provide viewer HTML. */
 export function createChartForm(root) {
-  const tree = [["form",{"id":"heatmap-chart-form","class":"dialog-form","novalidate":null},[["div",{"class":"chart-dialog-layout"},[["aside",{"class":"chart-list-pane"},[["div",{"class":"chart-list-header"},[["h2",{},["Charts"]],["button",{"id":"new-chart","type":"button"},["New"]]]],["div",{"id":"chart-list","class":"chart-list","role":"listbox","aria-label":"Charts for this CSV"},[]]]],["section",{"class":"chart-form-pane"},[["h2",{"id":"chart-form-title"},["Heatmap"]],["label",{},[["span",{},["Chart type"]],["select",{"id":"chart-type"},[["option",{"value":"heatmap"},["Heatmap"]],["option",{"value":"bar"},["Bar"]],["option",{"value":"line"},["Line"]],["option",{"value":"markdown-table"},["Markdown Table"]]]]]],["label",{},[["span",{},["Chart id"]],["input",{"id":"chart-id","type":"text","autocomplete":"off"},[]]]],["label",{"id":"chart-title-field"},[["span",{},["Title"]],["input",{"id":"chart-title","type":"text","autocomplete":"off"},[]]]],["div",{"id":"chart-column-grid","class":"dialog-grid"},[["label",{},[["span",{"id":"chart-primary-column-label"},["Date column"]],["select",{"id":"chart-date-column"},[]]]],["label",{},[["span",{"id":"chart-value-column-label"},["Weight column"]],["select",{"id":"chart-value-column"},[]]]],["label",{"id":"chart-value-column-2-field"},[["span",{"id":"chart-value-column-2-label"},["Weight column 2"]],["select",{"id":"chart-value-column-2"},[]]]],["label",{},[["span",{"id":"chart-label-column-label"},["Label column"]],["select",{"id":"chart-label-column"},[]]]]]],["fieldset",{"id":"chart-markdown-table-section","class":"chart-range","hidden":null},[["legend",{},["Markdown table"]],["div",{"id":"chart-table-form"},[]]]],["fieldset",{"id":"chart-layout-section","class":"chart-range"},[["legend",{},["Layout"]],["label",{},[["span",{},["Orientation"]],["select",{"id":"chart-orientation"},[["option",{"value":"months-horizontal"},["Months across"]],["option",{"value":"months-vertical"},["Months down"]]]]]]]],["fieldset",{"id":"chart-range-section","class":"chart-range"},[["legend",{},["Range"]],["label",{"class":"toggle-row"},[["input",{"id":"chart-range-fixed","type":"radio","name":"chart-range-mode","value":"fixed","checked":null},[]],["span",{},["Fixed dates"]]]],["label",{"class":"toggle-row"},[["input",{"id":"chart-range-rolling","type":"radio","name":"chart-range-mode","value":"rolling"},[]],["span",{},["Rolling"]]]],["div",{"id":"chart-fixed-range","class":"dialog-grid"},[["label",{},[["span",{},["Start"]],["input",{"id":"chart-start","type":"date"},[]]]],["label",{},[["span",{},["End"]],["input",{"id":"chart-end","type":"date"},[]]]]]],["div",{"id":"chart-rolling-range","class":"dialog-grid","hidden":null},[["label",{},[["span",{},["Look back"]],["input",{"id":"chart-lookback-count","type":"number","min":"1","step":"1","value":"1"},[]]]],["label",{},[["span",{},["Unit"]],["select",{"id":"chart-lookback-unit"},[["option",{"value":"y"},["Years"]],["option",{"value":"d"},["Days"]]]]]]]]]],["label",{"id":"chart-presentation-field"},[["span",{},["Presentation"]],["select",{"id":"chart-presentation"},[["option",{"value":"stacked"},["Stacked"]],["option",{"value":"grouped"},["Grouped"]]]]]],["label",{"id":"chart-color-scheme-field"},[["span",{},["Color scheme"]],["select",{"id":"chart-color-scheme"},[["option",{"value":"sequential"},["Sequential"]],["option",{"value":"diverging"},["Diverging"]]]]]],["label",{},[["span",{},["Output path"]],["input",{"id":"chart-output","type":"text","autocomplete":"off"},[]]]],["label",{"class":"toggle-row"},[["input",{"id":"chart-run-on-save","type":"checkbox","checked":null},[]],["span",{},["Run on save"]]]]]]]],["p",{"id":"chart-error","class":"dialog-error","hidden":null},[]],["div",{"class":"dialog-actions"},[["button",{"id":"cancel-chart","type":"button"},["Cancel"]],["button",{"id":"generate-chart","type":"button"},["Create chart"]],["button",{"type":"submit"},["Save chart"]]]]]]];
+  const tree = [["form",{"id":"heatmap-chart-form","class":"dialog-form","novalidate":null},[["div",{"class":"chart-dialog-layout"},[["aside",{"class":"chart-list-pane"},[["div",{"class":"chart-list-header"},[["h2",{},["Charts"]],["button",{"id":"new-chart","type":"button"},["New"]]]],["div",{"id":"chart-list","class":"chart-list","role":"listbox","aria-label":"Charts for this CSV"},[]]]],["section",{"class":"chart-form-pane"},[["h2",{"id":"chart-form-title"},["Heatmap"]],["label",{},[["span",{},["Chart type"]],["select",{"id":"chart-type"},[["option",{"value":"heatmap"},["Heatmap"]],["option",{"value":"bar"},["Bar"]],["option",{"value":"line"},["Line"]],["option",{"value":"markdown-table"},["Markdown Table"]]]]]],["label",{},[["span",{},["Chart id"]],["input",{"id":"chart-id","type":"text","autocomplete":"off"},[]]]],["label",{"id":"chart-title-field"},[["span",{},["Title"]],["input",{"id":"chart-title","type":"text","autocomplete":"off"},[]]]],["div",{"id":"chart-column-grid","class":"dialog-grid"},[["label",{},[["span",{"id":"chart-primary-column-label"},["Date column"]],["select",{"id":"chart-date-column"},[]]]],["label",{},[["span",{"id":"chart-value-column-label"},["Weight column"]],["select",{"id":"chart-value-column"},[]]]],["label",{"id":"chart-value-column-2-field"},[["span",{"id":"chart-value-column-2-label"},["Weight column 2"]],["select",{"id":"chart-value-column-2"},[]]]],["label",{},[["span",{"id":"chart-label-column-label"},["Label column"]],["select",{"id":"chart-label-column"},[]]]]]],["fieldset",{"id":"chart-markdown-table-section","class":"chart-range","hidden":null},[["legend",{},["Markdown table"]],["div",{"id":"chart-table-form"},[]]]],["fieldset",{"id":"chart-layout-section","class":"chart-range"},[["legend",{},["Layout"]],["label",{},[["span",{},["Orientation"]],["select",{"id":"chart-orientation"},[["option",{"value":"months-horizontal"},["Months across"]],["option",{"value":"months-vertical"},["Months down"]]]]]]]],["fieldset",{"id":"chart-range-section","class":"chart-range"},[["legend",{},["Range"]],["label",{"class":"toggle-row"},[["input",{"id":"chart-range-fixed","type":"radio","name":"chart-range-mode","value":"fixed","checked":null},[]],["span",{},["Fixed dates"]]]],["label",{"class":"toggle-row"},[["input",{"id":"chart-range-rolling","type":"radio","name":"chart-range-mode","value":"rolling"},[]],["span",{},["Rolling"]]]],["div",{"id":"chart-fixed-range","class":"dialog-grid"},[["label",{},[["span",{},["Start"]],["input",{"id":"chart-start","type":"date"},[]]]],["label",{},[["span",{},["End"]],["input",{"id":"chart-end","type":"date"},[]]]]]],["div",{"id":"chart-rolling-range","class":"dialog-grid","hidden":null},[["label",{},[["span",{},["Look back"]],["input",{"id":"chart-lookback-count","type":"number","min":"1","step":"1","value":"1"},[]]]],["label",{},[["span",{},["Unit"]],["select",{"id":"chart-lookback-unit"},[["option",{"value":"y"},["Years"]],["option",{"value":"d"},["Days"]]]]]]]]]],["label",{"id":"chart-presentation-field"},[["span",{},["Presentation"]],["select",{"id":"chart-presentation"},[["option",{"value":"stacked"},["Stacked"]],["option",{"value":"grouped"},["Grouped"]]]]]],["label",{"id":"chart-color-scheme-field"},[["span",{},["Color scheme"]],["select",{"id":"chart-color-scheme"},[["option",{"value":"sequential"},["Sequential"]],["option",{"value":"diverging"},["Diverging"]]]]]],["label",{},[["span",{},["Output path"]],["input",{"id":"chart-output","type":"text","autocomplete":"off"},[]]]],["label",{"class":"toggle-row"},[["input",{"id":"chart-run-on-save","type":"checkbox","checked":null},[]],["span",{},["Run on save"]]]]]]]],["aside",{"id":"chart-preview","class":"chart-preview","aria-label":"Chart preview","aria-live":"polite","hidden":null},[]],["p",{"id":"chart-error","class":"dialog-error","hidden":null},[]],["div",{"class":"dialog-actions"},[["button",{"id":"cancel-chart","type":"button"},["Cancel"]],["button",{"id":"preview-chart","type":"button"},["Preview"]],["button",{"id":"generate-chart","type":"button"},["Create chart"]],["button",{"type":"submit"},["Save chart"]]]]]]];
   const append = (parent, items) => {
     for (const item of items) {
       if (typeof item === 'string') { parent.append(root.ownerDocument.createTextNode(item)); continue; }
@@ -524,4 +558,5 @@ export function createChartForm(root) {
     }
   };
   append(root, tree);
+  root.querySelector('#chart-form-title').parentElement.parentElement.append(root.querySelector('#chart-preview'));
 }

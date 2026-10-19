@@ -35,7 +35,7 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   const indexBundleName = assets.find((name) => /^index-.*\.js$/.test(name));
   assert.equal(typeof indexBundleName, "string");
   const indexBundle = readFileSync(join(assetsDir, indexBundleName ?? ""), "utf8");
-  for (const marker of ["csvzall-shared-shell-v1", "csvzall-compact-layout-v1", "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-host-save-request-v1", "csvzall-edit-revision-v1", "theme-ready", "data-csvzall-dialog-dismiss-v1"]) {
+  for (const marker of ["csvzall-csv-options-v1", "csvzall-shared-shell-v1", "csvzall-compact-layout-v1", "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-host-save-request-v1", "csvzall-edit-revision-v1", "theme-ready", "data-csvzall-dialog-dismiss-v1"]) {
     assert.ok(indexBundle.includes(marker), marker);
   }
   const stylesheetBundle = indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "";

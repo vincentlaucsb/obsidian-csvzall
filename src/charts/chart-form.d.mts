@@ -18,9 +18,10 @@ export function mountChartForm(root: HTMLElement, options: {
   schema: { file: string; columns: string[] };
   existingOnly?: boolean;
   previewTable?: (value: { columns: string[]; sql: string }) => Promise<string>;
+  previewChart?: (value: ChartFormPayload) => Promise<{ svg?: string; markdown?: string }>;
   fetchJson: (path: string) => Promise<{ charts: ChartDefinition[] }>;
   postJson: (path: string, body: ChartFormPayload | { id: string } | { sql: string }) => Promise<{
-    id?: string; generated?: boolean; columns?: string[]; rows?: unknown[][];
+    id?: string; generated?: boolean; columns?: string[]; rows?: unknown[][]; svg?: string; markdown?: string;
   }>;
   close?: (result: string) => void;
   status?: (message: string) => void;

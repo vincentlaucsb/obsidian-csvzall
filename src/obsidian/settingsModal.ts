@@ -9,7 +9,7 @@ interface SettingsModal { open(): void; close(): void; openTabById(id: string): 
  */
 function settingsModal(app: App): Partial<SettingsModal> | undefined {
   const setting = (app as unknown as { setting?: unknown }).setting;
-  return setting && typeof setting === "object" ? setting as Partial<SettingsModal> : undefined;
+  return setting && typeof setting === "object" ? setting : undefined;
 }
 
 export function openPluginSettings(app: App, pluginId: string): void {
