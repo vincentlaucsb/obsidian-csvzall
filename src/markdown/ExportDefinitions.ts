@@ -1,5 +1,6 @@
 import type { DataAdapter } from 'obsidian';
 import { validateSource, type TableRecipe } from './managedTables.js';
+import type { DeleteReason } from '../exports/revisions.js';
 
 export const EXPORT_CONFIG_PATH = '.csvzall/exports.json';
 
@@ -58,7 +59,7 @@ function relativePath(configPath: string, path: string): string {
   return [...root.map(() => '..'), ...parts].join('/');
 }
 
-function parseConfig(text: string, path: string): TableConfig {
+export function parseExportDefinitions(text: string, path: string): TableConfig {
   const value: unknown = JSON.parse(text);
   if (!value || typeof value !== 'object' || !('exports' in value) || !Array.isArray(value.exports)) throw new Error(`Invalid exports array in ${path}.`);
   const ids = new Set<string>(), legacyIds = new Set<string>();
@@ -86,11 +87,14 @@ function parseConfig(text: string, path: string): TableConfig {
   }
   return value as TableConfig;
 }
+const parseConfig = parseExportDefinitions;
 
 /** Definitions are scoped like charts: paths start at the folder containing .csvzall. */
 export class ExportDefinitions {
   private writes: Promise<unknown> = Promise.resolve();
-  constructor(private readonly adapter: DataAdapter, private readonly stopped: () => boolean) {}
+  constructor(private readonly adapter: DataAdapter, private readonly stopped: () => boolean,
+    private readonly changed?: (path: string, reason?: DeleteReason) => Promise<void>,
+    private readonly localOnly = false) {}
 
   async list(folders: string[]): Promise<SavedExport[]> {
     const result: SavedExport[] = [];
@@ -130,11 +134,11 @@ export class ExportDefinitions {
     this.currentEntry(current?.config ?? { exports: [] }, saved);
   }
 
-  removeExport(saved: SavedExport, cancelled: () => boolean = () => false): Promise<void> {
+  removeExport(saved: SavedExport, cancelled: () => boolean = () => false, reason: DeleteReason = 'explicit'): Promise<void> {
     return this.mutate(saved.configPath, config => {
       const entry = this.currentEntry(config, saved);
       config.exports = config.exports.filter(candidate => candidate !== entry);
-    }, cancelled);
+    }, cancelled, saved.configPath, reason);
   }
 
   update(saved: SavedExport, recipe: TableRecipe, runOnSave: boolean, cancelled: () => boolean): Promise<void> {
@@ -148,6 +152,7 @@ export class ExportDefinitions {
 
   private candidates(note: string): string[] {
     const parts = note.split('/').slice(0, -1), paths: string[] = [];
+    if (this.localOnly) return [parts.length ? `${parts.join('/')}/${EXPORT_CONFIG_PATH}` : EXPORT_CONFIG_PATH];
     while (parts.length) { paths.push(`${parts.join('/')}/${EXPORT_CONFIG_PATH}`); parts.pop(); }
     return [...paths, EXPORT_CONFIG_PATH];
   }
@@ -198,7 +203,7 @@ export class ExportDefinitions {
   }
 
   /** Stage and verify before replacing an existing configuration. */
-  private async commit(path: string, saved: string | null, config: TableConfig, cancelled: () => boolean = () => false, context = path): Promise<void> {
+  private async commit(path: string, saved: string | null, config: TableConfig, cancelled: () => boolean = () => false, context = path, reason: DeleteReason = 'explicit'): Promise<void> {
     const text = `${JSON.stringify(config, null, 2)}\n`;
     parseConfig(text, context);
     if (text === saved) return;
@@ -223,21 +228,24 @@ export class ExportDefinitions {
         });
       }
       if (await this.adapter.read(path) !== text) throw new Error('Could not verify exports.json.');
+      await this.changed?.(path, reason);
     } finally {
       if (await this.adapter.exists(temporary)) await this.adapter.remove(temporary);
     }
   }
 
-  private mutate(path: string, update: (config: TableConfig) => void, cancelled: () => boolean = () => false, previousPath = path): Promise<void> {
+  private mutate(path: string, update: (config: TableConfig) => void, cancelled: () => boolean = () => false, previousPath = path, reason: DeleteReason = 'explicit'): Promise<void> {
     return this.enqueue(async () => {
       if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
       const saved = await this.read(path, previousPath), config = saved?.config ?? { exports: [] };
       update(config);
-      await this.commit(path, saved?.text ?? null, config, cancelled);
+      await this.commit(path, saved?.text ?? null, config, cancelled, path, reason);
     });
   }
 
   private legacyPath(path: string): string { return path.replace(/exports\.json$/, 'tables.json'); }
+
+  migrateFolder(folder: string): Promise<void> { return this.migrate(folder && folder !== '/' ? `${folder}/${EXPORT_CONFIG_PATH}` : EXPORT_CONFIG_PATH); }
 
   /** Keep the original tables.json as a backup, after the merged exports file is verified. */
   private async migrate(path: string, context = path): Promise<void> {
@@ -277,7 +285,7 @@ export class ExportDefinitions {
   }
 
   async save(note: string, recipe: TableRecipe, cancelled?: () => boolean, runOnSave = true): Promise<TableRecipe> {
-    let configPath = EXPORT_CONFIG_PATH;
+    let configPath = this.localOnly ? this.candidates(note)[0]! : EXPORT_CONFIG_PATH;
     for (const candidate of this.candidates(note)) if (await this.adapter.exists(candidate) || await this.adapter.exists(this.legacyPath(candidate))) { configPath = candidate; break; }
     await this.migrate(configPath);
     let result = recipe;

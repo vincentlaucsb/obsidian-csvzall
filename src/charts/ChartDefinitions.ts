@@ -1,11 +1,12 @@
 import type { DataAdapter } from "obsidian";
 import type { ChartDefinition, ChartFormPayload } from "./chart-form.mjs";
 import { resolveChartPath } from "../chartAutomation.js";
+import { directConfig } from "../exports/localFolders.js";
 
 interface ChartConfig { charts: ChartDefinition[]; [key: string]: unknown }
 export interface SavedChart { configPath: string; definition: ChartDefinition; source: string }
 
-function parse(text: string, path: string): ChartConfig {
+export function parseChartDefinitions(text: string, path: string): ChartConfig {
   const value: unknown = JSON.parse(text);
   if (!value || typeof value !== "object" || !("charts" in value) || !Array.isArray(value.charts)) {
     throw new Error(`Invalid charts array in ${path}.`);
@@ -20,17 +21,21 @@ function parse(text: string, path: string): ChartConfig {
   }
   return value as ChartConfig;
 }
+const parse = parseChartDefinitions;
 
 /** Raw configuration writes preserve fields the settings UI does not understand. */
 export class ChartDefinitions {
   private writes: Promise<void> = Promise.resolve();
-  constructor(private readonly adapter: DataAdapter) {}
+  constructor(private readonly adapter: DataAdapter, private readonly changed?: (path: string) => Promise<void>, private readonly localOnly = false) {}
 
   async list(paths: string[]): Promise<SavedChart[]> {
     const entries: SavedChart[] = [];
     for (const configPath of paths) {
       const config = parse(await this.adapter.read(configPath), configPath);
-      for (const definition of config.charts) entries.push({ configPath, definition, source: resolveChartPath(configPath, definition.input) });
+      for (const definition of config.charts) {
+        const source = resolveChartPath(configPath, definition.input);
+        if (!this.localOnly || directConfig(source, "charts") === configPath) entries.push({ configPath, definition, source });
+      }
     }
     return entries;
   }
@@ -57,6 +62,7 @@ export class ChartDefinitions {
           return text;
         });
         if (!cancelled() && await this.adapter.read(path) !== text) throw new Error("Could not verify chart configuration.");
+        if (!cancelled()) await this.changed?.(path);
       } finally {
         if (await this.adapter.exists(temporary)) await this.adapter.remove(temporary);
       }

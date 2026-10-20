@@ -100,10 +100,10 @@ test("declarative settings persist controls and refresh install/log actions", as
     const definitions = tab.getSettingDefinitions();
     assert.equal(tab.containerEl.children.length, 0, "indexing must not render or perform actions");
     assert.equal(installs + saves, 0);
-    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Startup timeout", "Report a bug", "Exports", "Saved exports", "Log", "Chart and error log"]);
+    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
     tab.update();
     const row = (name: string): Row => tab.containerEl.children.find((r: Row) => r.name === name);
-    assert.equal(tab.containerEl.children.length, 9);
+    assert.equal(tab.containerEl.children.length, 10);
     assert.equal(row("Custom executable path").control!.value, "");
     await row("Custom executable path").control!.change('"C:/csvzall.exe"');
     assert.equal(settings.csvzallPath, "C:/csvzall.exe");
@@ -129,7 +129,7 @@ test("declarative settings persist controls and refresh install/log actions", as
     await row("Chart and error log").control!.click();
     assert.equal(row("Chart and error log").control!.disabled, true);
     assert.equal(row("Chart and error log").descEl.children[0]!.children[0]!.options.text, "No csvzall events yet.");
-    assert.equal(tab.containerEl.children.length, 9, "refresh must not duplicate rows");
+    assert.equal(tab.containerEl.children.length, 10, "refresh must not duplicate rows");
     assert.ok(tab.updates > 1);
 });
 
@@ -172,7 +172,7 @@ test('stale export listings cannot overwrite a refreshed or closed settings tab'
   tab.update(); const first = tab.containerEl.children;
   tab.update(); tab.hide();
   finish[0]!([]); finish[1]!([]); await Promise.resolve();
-  assert.equal(first[6].descEl.children[0].children[0].options.text, 'Loading exports...');
+  assert.equal(first.find((row: Row) => row.name === 'Saved exports').descEl.children[0].children[0].options.text, 'Loading exports...');
 });
 
 test('the shared export list routes both file actions and disables Configure for missing CSVs', async () => {

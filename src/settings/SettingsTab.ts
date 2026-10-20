@@ -9,6 +9,7 @@ import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledBinaries.generated.
 import { loadExports } from "./exportList.js";
 import { exportSummaryText } from "./exportSummary.js";
 import { closeSettings } from "../obsidian/settingsModal.js";
+import { syncDescription, syncStatus } from "../obsidian/syncStatus.js";
 
 const BUG_REPORT_URL = "https://github.com/vincentlaucsb/obsidian-csvzall/issues/new";
 
@@ -143,6 +144,10 @@ export class CsvzallSettingTab extends PluginSettingTab {
       },
 
       { name: "Exports", render: setting => { setting.setHeading(); } },
+      { name: "Export sync", desc: "Check export configuration and CSV/TSV source syncing.", render: setting => {
+        setting.setDesc(syncDescription(syncStatus(this.app)));
+        setting.addButton(button => button.setButtonText("Check again").onClick(() => this.refreshSettings()));
+      } },
       { name: "Saved exports", desc: "Chart and note export configurations, including paused exports.",
         render: setting => { this.renderExportSummary(setting); } },
       { name: "Log", render: (setting) => { setting.setHeading(); } },

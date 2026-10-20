@@ -143,15 +143,15 @@ test("file deletion removes nested chart and table configurations while retainin
 });
 
 
-test('deleting a generated chart immediately prunes only its definitions and reloads scheduling', async () => {
+test('deleting a generated chart preserves its configuration for later regeneration', async () => {
   const f = await fixture(); f.register();
   f.files.delete('sales.svg');
   await f.event('delete', new File('sales.svg'));
   const root = JSON.parse(f.files.get('.csvzall/charts.json')!);
-  assert.deepEqual(root.charts.map((chart: any) => chart.id), ['missing']);
+  assert.deepEqual(root.charts.map((chart: any) => chart.id), ['sales', 'missing']);
   assert.equal(root.owner, 'keep');
   assert.equal(JSON.parse(f.files.get('Project/.csvzall/charts.json')!).charts.length, 1);
-  assert.equal(f.reloads, 1);
+  assert.equal(f.reloads, 0);
   assert.ok(f.files.has('Data/sales.csv'));
 });
 

@@ -21,11 +21,29 @@ function assertArchitecture(bytes, target) {
   if (!valid) throw new Error(`Native executable architecture does not match ${target}.`);
 }
 
-async function smoke(binary, version, work) {
+export function obsidianStartupUrl(line) {
+  let startup;
+  try { startup = JSON.parse(line); } catch { return null; }
+  if (typeof startup?.url !== "string") return null;
+  let parsed;
+  try { parsed = new URL(startup.url); } catch { return null; }
+  if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || !parsed.searchParams.get("token")) return null;
+  if (startup.obsidianMode?.version !== 1 || startup.obsidianMode.chartAutomation !== "host") {
+    throw new Error("Native helper lacks Obsidian mode version 1; rebuild the pinned source before bundling it.");
+  }
+  return startup.url;
+}
+
+export async function smokeNativeHelper(binary, version, work) {
   if (!capture(binary, ["--version"]).includes(version)) throw new Error("Native helper version smoke test failed.");
   const csv = join(work, "smoke data.csv");
   writeFileSync(csv, "name,value\nexample,42\n");
-  const child = spawn(binary, ["view", csv, "--edit", "--no-open", "--startup-json"], { windowsHide: true });
+  mkdirSync(join(work, ".csvzall"), { recursive: true });
+  writeFileSync(join(work, ".csvzall/charts.json"), JSON.stringify({ charts: [{
+    id: "smoke-table", type: "markdown-table", input: "smoke data.csv", output: "charts/smoke.md",
+    runOnSave: true, options: { columns: ["name", "value"] },
+  }] }));
+  const child = spawn(binary, ["view", csv, "--edit", "--no-open", "--startup-json", "--obsidian"], { windowsHide: true });
   const closed = new Promise(resolve => child.once("close", resolve));
   let stdout = "", stderr = "";
   child.stderr.on("data", chunk => { stderr += chunk; });
@@ -38,16 +56,29 @@ async function smoke(binary, version, work) {
         stdout += chunk;
         for (const line of stdout.split(/\r?\n/)) {
           let ready;
-          try { ready = JSON.parse(line).url; } catch { continue; }
-          if (typeof ready !== "string") continue;
-          const parsed = new URL(ready);
-          if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || !parsed.searchParams.get("token")) continue;
+          try { ready = obsidianStartupUrl(line); }
+          catch (error) { clearTimeout(timer); reject(error); return; }
+          if (!ready) continue;
           clearTimeout(timer); resolve(ready); return;
         }
       });
     });
     const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!response.ok || !(await response.text()).toLowerCase().includes("csvzall")) throw new Error("Native viewer HTTP smoke test failed.");
+    const startup = new URL(url);
+    const post = async (path, body) => {
+      const result = await fetch(new URL(path, startup), { method: "POST", signal: AbortSignal.timeout(15000),
+        headers: { "Content-Type": "application/json", "X-Session-Token": startup.searchParams.get("token") }, body: JSON.stringify(body) });
+      if (!result.ok) throw new Error(`Native hosted viewer smoke failed: ${path}: ${await result.text()}`);
+      return result.json();
+    };
+    await post("/api/insert-row", { row: 1, values: ["second", "43"] });
+    const saved = await post("/api/save", {});
+    if (saved.chartsGenerated !== 0 || existsSync(join(work, "charts/smoke.md")) || !readFileSync(csv, "utf8").includes("second")) {
+      throw new Error("Native Obsidian mode must save CSV without automatic chart generation.");
+    }
+    await post("/api/chart-config/generate", { id: "smoke-table" });
+    if (!readFileSync(join(work, "charts/smoke.md"), "utf8").includes("second")) throw new Error("Native Obsidian mode must retain explicit chart generation.");
   } finally { child.kill(); await closed; }
 }
 
@@ -63,7 +94,7 @@ export async function verifyNativeHelper(directory, target, identity = buildIden
     const bytes = readFileSync(binary);
     if (sha256(bytes) !== receipt.executableSha256) throw new Error("Native executable checksum mismatch.");
     assertArchitecture(bytes, target);
-    await smoke(binary, identity.config.version, work);
+    await smokeNativeHelper(binary, identity.config.version, work);
   } finally {
     if (dirname(work) !== temporaryRoot) throw new Error("Unexpected native smoke directory.");
     rmSync(work, { recursive: true, force: true });

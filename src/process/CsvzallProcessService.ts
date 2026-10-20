@@ -1,12 +1,14 @@
 import { spawn } from "child_process";
 import { dirname, isAbsolute } from "path";
 import { StringDecoder } from "string_decoder";
+import { statSync } from "fs";
 import type { WorkspaceLeaf } from "obsidian";
 import { Notice } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { CsvzallPluginSettings } from "../settings/settings.js";
 import type { CsvzallServerHandle } from "../types.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
+import { SessionErrors } from "../logging/SessionErrors.js";
 import {
   extractViewerUrl,
   formatProcessFailure,
@@ -21,11 +23,15 @@ export class CsvzallProcessService {
   private unloading = false;
   private readonly pending = new Set<() => void>();
   private readonly leafPending = new Map<WorkspaceLeaf, () => void>();
+  private readonly errors = new SessionErrors();
+  private readonly modeSupport = new Set<string>();
+  private readonly leafGeneration = new WeakMap<WorkspaceLeaf, number>();
 
   constructor(
     private readonly getSettings: () => CsvzallPluginSettings,
     private readonly eventLog: EventLog,
     private readonly executablePath?: () => string,
+    private readonly beforeCommand?: () => Promise<void>,
   ) {}
 
   unload(): void {
@@ -35,8 +41,14 @@ export class CsvzallProcessService {
   }
 
   handleLeafClosed(leaf: WorkspaceLeaf): void {
+    this.leafGeneration.set(leaf, (this.leafGeneration.get(leaf) ?? 0) + 1);
     this.leafPending.get(leaf)?.();
     this.sessions.closeLeaf(leaf);
+  }
+
+  viewerContinuation(leaf: WorkspaceLeaf): () => boolean {
+    const generation = this.leafGeneration.get(leaf);
+    return () => !this.unloading && this.leafGeneration.get(leaf) === generation;
   }
 
   bindLeafToServer(leaf: WorkspaceLeaf, handle: CsvzallServerHandle): void {
@@ -49,10 +61,12 @@ export class CsvzallProcessService {
     }
   }
 
-  async runCommand(args: string[], cwd: string, label: string): Promise<void> {
-    await this.captureCommand(args, cwd).catch(async (error: unknown) => {
+  async runCommand(args: string[], cwd: string, label: string, automatic = false, validate?: () => void): Promise<void> {
+    await this.captureCommand(args, cwd, validate).catch(async (error: unknown) => {
       if (this.unloading) throw error;
       const message = error instanceof Error ? error.message : String(error);
+      const first = this.errors.first(JSON.stringify([cwd, args]), message);
+      if (automatic && !first) throw error;
       new Notice(`csvzall failed to regenerate ${label}: ${message}`);
       await this.eventLog.record("error", `Failed to regenerate ${label}`, message);
       console.error(`csvzall failed to regenerate ${label}`, error);
@@ -60,7 +74,9 @@ export class CsvzallProcessService {
     });
   }
 
-  async captureCommand(args: string[], cwd: string): Promise<string> {
+  async captureCommand(args: string[], cwd: string, validate?: () => void): Promise<string> {
+    if (this.beforeCommand) await this.beforeCommand();
+    validate?.();
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);
     const child = spawn(executable, args, {
@@ -130,10 +146,24 @@ export class CsvzallProcessService {
   }
 
   async startViewer(filePath: string, leaf?: WorkspaceLeaf): Promise<CsvzallServerHandle> {
-    if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     if (leaf) this.handleLeafClosed(leaf);
+    const generation = leaf ? this.leafGeneration.get(leaf) : undefined;
+    if (this.beforeCommand) await this.beforeCommand();
+    if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
+    if (leaf && this.leafGeneration.get(leaf) !== generation) throw new ViewerStartupCancelledError("Viewer startup cancelled");
     const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);
+    if (this.beforeCommand) {
+      const identity = isAbsolute(executable) ? `${executable}:${statSync(executable).mtimeMs}` : executable;
+      if (!this.modeSupport.has(identity)) {
+        const help = await this.captureCommand(["view", "--help"], isAbsolute(executable) ? dirname(executable) : ".");
+        if (!help.includes("--obsidian")) throw new Error("This helper does not support Obsidian mode. Update the custom executable or use a helper built with --obsidian support.");
+        this.modeSupport.add(identity);
+      }
+    }
+    if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
+    if (leaf && this.leafGeneration.get(leaf) !== generation) throw new ViewerStartupCancelledError("Viewer startup cancelled");
     const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
+    if (this.beforeCommand) args.push("--obsidian");
     const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
     const child = spawn(executable, args, {
       cwd,
@@ -185,6 +215,22 @@ export class CsvzallProcessService {
         stdout += chunk.toString("utf8");
         const url = extractViewerUrl(stdout);
         if (url) {
+          if (this.beforeCommand) {
+            const acknowledged = stdout.split(/\r?\n/).some(line => {
+              try {
+                const value: unknown = JSON.parse(line);
+                if (!value || typeof value !== "object" || !("obsidianMode" in value)) return false;
+                const mode = value.obsidianMode;
+                return !!mode && typeof mode === "object" && "version" in mode && mode.version === 1 &&
+                  "chartAutomation" in mode && mode.chartAutomation === "host";
+              } catch { return false; }
+            });
+            if (!acknowledged) {
+              if (!stdout.endsWith("\n")) return;
+              fail(new Error("This helper does not support Obsidian mode. Update the custom executable or use the bundled helper."));
+              return;
+            }
+          }
           finish(url);
         }
       });
@@ -205,7 +251,7 @@ export class CsvzallProcessService {
       child.on("exit", (code, signal) => {
         cleanup();
         const existingUrl = extractViewerUrl(stdout);
-        if (existingUrl) {
+        if (existingUrl && settled) {
           const handle = this.sessions.list().find((candidate: CsvzallServerHandle) => candidate.process === child);
           if (handle) {
             if (!handle.stopping && !this.unloading) {
