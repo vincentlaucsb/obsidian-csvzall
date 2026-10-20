@@ -1,6 +1,6 @@
 # Export configuration reflection for Obsidian Sync
 
-Status: implemented and tested, with release 0.8.0 in preparation on 2026-10-19.
+Status: implemented, tested, and prepared for release 0.8.0 on 2026-10-19.
 See the [release log](obsidian-sync-release.md). The design
 and acceptance criteria below remain the reference for the implementation.
 The [direct-folder migration decision](direct-folder-export-plan.md) supersedes

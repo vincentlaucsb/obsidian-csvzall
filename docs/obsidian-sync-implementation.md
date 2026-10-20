@@ -2,8 +2,8 @@
 
 The following records the development and Windows acceptance stages. The
 [release log](obsidian-sync-release.md) tracks the subsequently authorized 0.8.0
-release and replaces the development-only packaging boundary once preparation
-passes.
+release and its verified three-platform production helpers, superseding the
+earlier development-only packaging boundary below.
 
 Implemented locally on 2026-10-19 on `master` in obsidian-csvzall and csvzall.
 Both branches were pulled before implementation. The plugin repository's local
@@ -73,7 +73,7 @@ sandbox. The sandbox failures were rerun successfully with that access.
 
 ## Local testing and release boundary
 
-The self-contained Windows development package is
+The self-contained Windows development package used during acceptance was
 `.test-build/windows-sync-direct-folders.zip`. It embeds the existing 0.8.0 source
 baseline plus the Obsidian-mode patch, built with pinned dependencies and the
 static Obsidian build options. The native runtime-library guard passed. Source
@@ -92,11 +92,10 @@ helper-pipeline tests passed, including exact mode acknowledgment and rejection 
 development manifests by release validation. Fresh and cached native preparation
 now exercise `--obsidian`, CSV save automation ownership and explicit generation.
 
-Committed bundled helper archives and their provenance pins remain unchanged.
-They predate the flag; prepare new platform archives through the existing release
-workflow before distributing a release. Use the Windows development package for
-this test; root production builds retain the old snapshot. No commits, tags,
-pushes, or publication were performed.
+During that Windows-only stage, production archives and pins remained unchanged
+and no commits, tags, pushes, or publication were performed. The subsequently
+authorized 0.8.0 release replaces those archives through official three-platform
+preparation; use the official release rather than the historical test package.
 
 The user confirmed that the preceding Windows bundle reconstructed configs on
 the laptop immediately and stopped the errors. The new direct-folder migration

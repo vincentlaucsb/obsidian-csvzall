@@ -1,7 +1,7 @@
 # Automatic direct-folder export configuration
 
 Status: implemented on local `master`, reviewed, and tested in the local Notebook
-on 2026-10-19. Use the [Windows test bundle](obsidian-sync-testing.md).
+on 2026-10-19. Included in the [desktop 0.8.0 release](obsidian-sync-release.md).
 
 Decision: each folder owns only its direct CSVs and export notes. The plugin
 automatically migrates existing inherited definitions; there is no manual

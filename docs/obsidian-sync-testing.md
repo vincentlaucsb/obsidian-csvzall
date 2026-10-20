@@ -1,18 +1,19 @@
 # Testing export reflection with Obsidian Sync
 
-Release 0.8.0 is being prepared with three-platform helpers from the published
-csvzall 0.8.0 source. See the [release log](obsidian-sync-release.md) for current
-status. The Windows development procedure below records the earlier device test;
-it is not the production release artifact.
+Release 0.8.0 includes CI-prepared three-platform helpers from the published
+csvzall 0.8.0 source, with the Obsidian flag verified on every target. Use the
+[official release](https://github.com/vincentlaucsb/obsidian-csvzall/releases/tag/0.8.0)
+for installation, preserving `data.json`, then reload on every desktop. See the
+[release log](obsidian-sync-release.md) for checksums and validation. The Windows
+development procedure below records the earlier device test.
 
-The desktop plugin and sibling csvzall checkout have local changes on `master`.
 The plugin keeps CLI configurations under `.csvzall/` and reflects them into
 standard plugin `data.json`. Changes are observed on startup, after plugin
 mutations, on incoming settings changes, and by the ten-second polling fallback.
 
 ## Windows test bundle
 
-For the current desktop/laptop Sync test, use the self-contained Windows x64
+The earlier desktop/laptop Sync test used the self-contained Windows x64
 development package at `.test-build/windows-sync-direct-folders.zip`. Its contents
 are also in `.test-build/windows-sync-direct-folders/`.
 
@@ -55,15 +56,15 @@ node scripts/build-windows-sync-test.mjs .test-build/native-sync-development/bui
 Use a new output directory. The builder runs the type/lint gate, validates native
 Obsidian mode and save behavior, and exercises actual bundled installation and
 process startup. Its development identity labels source inputs as declarations,
-not release attestations. Production pins and archives stay unchanged; root
-production builds still contain the old helper snapshot and require full release
-preparation before distribution. Release validation rejects the test manifest.
+not release attestations. This builder does not modify production pins or
+archives. Release 0.8.0 replaces the earlier helper snapshot through official
+three-platform preparation. Release validation rejects development manifests.
 
 ## Alternative: select a development helper
 
-The updated native helper understands `view --obsidian`. The committed bundled
-helper snapshot predates this flag. This alternative uses a custom executable;
-publishing new bundled archives remains a release-preparation step.
+The 0.8.0 release's bundled helpers understand `view --obsidian`. A custom
+development executable is an optional alternative for source-level testing;
+changes to production bundled archives still require release preparation.
 The plugin checks flag support and the startup acknowledgment rather than
 silently falling back to an older helper's automatic chart generation.
 
