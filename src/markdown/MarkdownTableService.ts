@@ -7,6 +7,10 @@ import { tableQuery, type TableValue } from './table-form.mjs';
 import { ExportDefinitions, type ResolvedExport, type SavedExport } from './ExportDefinitions.js';
 import { TableModal } from './TableModal.js';
 import { isCsv } from '../csv/csvFiles.js';
+import type { ExportReflection } from '../exports/ExportReflection.js';
+import { SessionErrors } from '../logging/SessionErrors.js';
+import { syncStatus } from '../obsidian/syncStatus.js';
+import type { ExportReference, ReferenceScan } from '../exports/localFolders.js';
 
 export class MarkdownTableService {
   private stopped = false;
@@ -24,13 +28,28 @@ export class MarkdownTableService {
   private readonly sources = new Map<TFile, string[]>();
   private readonly signatures = new Map<TFile, string>();
   private readonly revisions = new Map<string, number>();
-  private readonly errors = new Map<string, string>();
+  private readonly errors = new SessionErrors();
   private readonly indexRevisions = new Map<TFile, number>();
   private readonly deletingSources = new Set<string>();
 
   constructor(private readonly app: App, private readonly filesystem: ObsidianFilesystem,
-    private readonly processService: CsvzallProcessService, private readonly eventLog: EventLog) {
-    this.definitions = new ExportDefinitions(app.vault.adapter, () => this.stopped);
+    private readonly processService: CsvzallProcessService, private readonly eventLog: EventLog,
+    private readonly reflection?: ExportReflection) {
+    this.definitions = new ExportDefinitions(app.vault.adapter, () => this.stopped,
+      (path, reason) => this.reflection?.edited(path, reason) ?? Promise.resolve(), this.reflection?.usesDirectFolders);
+  }
+
+  async migrationReferences(): Promise<ReferenceScan> {
+    const references: ExportReference[] = [];
+    let complete = true;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      try {
+      for (const table of findManagedTables(await this.textFor(file))) {
+        if (!table.recipe) references.push({ note: file.path, id: table.id, legacy: table.marker === 'table' });
+      }
+      } catch (error) { complete = false; await this.report(file, error); }
+    }
+    return { references, complete };
   }
 
   register(plugin: Plugin): void {
@@ -53,7 +72,13 @@ export class MarkdownTableService {
     }));
     plugin.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
       ++this.pendingWrites; ++this.pruneRevision;
-      void this.renameSource(oldPath, file.path).catch(error => this.report(null, error)).finally(() => { --this.pendingWrites; });
+      const rename = async () => {
+        // Rebase the ordinary files through the existing SQL workflow, then reflect
+        // the explicit vault move before any missing old scope can be restored.
+        await this.reflection?.renamed(oldPath, file.path);
+        await this.renameSource(oldPath, file.path);
+      };
+      void rename().catch(error => this.report(null, error)).finally(() => { --this.pendingWrites; });
     }));
     plugin.registerEvent(this.app.workspace.on('editor-change', (_editor, view) => {
       if (!(view instanceof MarkdownView) || !view.file) return;
@@ -79,6 +104,7 @@ export class MarkdownTableService {
     this.indexing = true;
     let failed = false;
     try {
+      await this.reflection?.reconcile();
       for (const file of this.app.vault.getMarkdownFiles()) {
         if (this.stopped) return;
         try { await this.index(file); } catch (error) { failed = true; await this.report(file, error); }
@@ -87,12 +113,16 @@ export class MarkdownTableService {
     if (!failed) await this.pruneDeadExports().catch(error => this.report(null, error));
   }
 
+  async refreshAfterSync(): Promise<void> {
+    try { await this.initialize(); } catch (error) { await this.report(null, error); }
+  }
+
   private async prepare(file: TFile): Promise<ManagedTable[]> {
     ++this.pendingWrites;
     try {
       for (const table of findManagedTables(await this.textFor(file))) {
         if (!table.recipe && table.marker !== 'table') continue;
-        const legacy = table.recipe ? undefined : await this.definitions.resolve(file.path, table.id, true);
+        const legacy = table.recipe ? undefined : await this.resolveDefinition(file.path, table.id, true);
         // Rebind in the note's current scope so a nearer, unrelated export ID
         // cannot shadow the migrated table once its marker becomes canonical.
         const recipe = await this.definitions.save(file.path, table.recipe ?? legacy!.recipe, undefined, legacy?.runOnSave ?? true);
@@ -118,7 +148,10 @@ export class MarkdownTableService {
     const revision = (this.indexRevisions.get(file) ?? 0) + 1;
     this.indexRevisions.set(file, revision);
     const tables = await this.prepare(file);
-    const results = await Promise.allSettled(tables.map(table => this.definitions.resolve(file.path, table.id)));
+    if (this.reflection) for (const table of tables) {
+      if (!table.recipe) await this.reflection.recoverSql(file.path, table.id);
+    }
+    const results = await Promise.allSettled(tables.map(table => this.resolveDefinition(file.path, table.id)));
     const resolved = [];
     for (const result of results) {
       if (result.status === 'fulfilled') resolved.push(result.value);
@@ -132,6 +165,16 @@ export class MarkdownTableService {
     this.signatures.set(file, signature);
     if (changed && resolved.some(table => table.runOnSave)) this.schedule(file);
     return changed;
+  }
+
+  private resolveDefinition(note: string, id: string, legacy = false): Promise<ResolvedExport> {
+    const result = this.definitions.resolve(note, id, legacy);
+    if (!this.reflection) return result;
+    return result.then(resolved => {
+      this.reflection?.assertSqlBinding(note, resolved.recipe.id, resolved.configPath);
+      this.reflection?.assertReady(resolved.configPath);
+      return resolved;
+    });
   }
 
   private sourceChanged(path: string): void {
@@ -159,12 +202,12 @@ export class MarkdownTableService {
     } finally { this.running = false; }
   }
 
-  private async report(file: TFile | null, error: unknown): Promise<void> {
+  private async report(file: TFile | null, error: unknown, automatic = true): Promise<void> {
     if (this.stopped) return;
     const message = error instanceof Error ? error.message : String(error);
     const key = file?.path ?? 'tables';
-    if (this.errors.get(key) === message) return;
-    this.errors.set(key, message);
+    const first = this.errors.first(key, message);
+    if (automatic && !first) return;
     new Notice(`Could not update CSV export${file ? ` in ${file.path}` : ''}: ${message}`);
     await this.eventLog.record('error', 'Could not update CSV export', `${key}: ${message}`);
   }
@@ -175,36 +218,41 @@ export class MarkdownTableService {
     return file;
   }
 
-  async render(value: Pick<TableValue, 'source' | 'columns' | 'sql' | 'format'>, limit?: number): Promise<string> {
+  async render(value: Pick<TableValue, 'source' | 'columns' | 'sql' | 'format'>, limit?: number, validate?: () => void): Promise<string> {
     if (this.stopped) throw new Error('Plugin unloaded.');
     const source = this.sourceFile(value.source);
     const root = this.filesystem.getVaultRoot();
     if (!root) throw new Error('Export generation requires a local desktop vault.');
     const markdown = await this.processService.captureCommand([
       'sql', 'query', '--csv', source.path, '--format', value.format === 'value' ? 'csv' : 'markdown', '--sql', tableQuery(value, value.format === 'value' ? 2 : limit),
-    ], root);
+    ], root, validate);
     return value.format === 'value' ? scalarMarkdown(markdown) : markdown.replace(/\r\n?/g, '\n');
   }
 
   async refresh(file: TFile, onlyId?: string, automatic = false): Promise<void> {
+    await this.reflection?.reconcile();
     const tables = await this.prepare(file);
     for (const table of tables) {
       if (onlyId && table.id !== onlyId) continue;
       try {
         const path = file.path;
         const snapshot = await this.definitions.snapshot(path);
-        const definition = await this.definitions.resolve(file.path, table.id);
+        const definition = await this.resolveDefinition(file.path, table.id);
         if (automatic && !definition.runOnSave) continue;
         const recipe = definition.recipe;
         if (this.deletingSources.has(recipe.source)) continue;
         const revision = this.revisions.get(recipe.source);
-        const markdown = await this.render(recipe);
+        const validate = () => {
+          this.reflection?.assertReady(definition.configPath);
+          this.reflection?.assertSqlBinding(file.path, recipe.id, definition.configPath);
+        };
+        const markdown = await this.render(recipe, undefined, validate);
         if (this.stopped) return;
         if (this.deletingSources.has(recipe.source)) continue;
         if (path !== file.path || snapshot !== await this.definitions.snapshot(file.path) || revision !== this.revisions.get(recipe.source)) { this.schedule(file); continue; }
+        validate();
         await this.replace(file, table, this.regionText(table, recipe, markdown));
-        this.errors.delete(file.path);
-      } catch (error) { await this.report(file, error); }
+      } catch (error) { await this.report(file, error, automatic); }
     }
   }
 
@@ -238,7 +286,7 @@ export class MarkdownTableService {
       for (const table of findManagedTables(await this.textFor(file))) {
         if (table.recipe) continue;
         try {
-          const previous = this.bindings.get(file)?.find(binding => binding.recipe.id === table.id) ?? await this.definitions.resolve(previousPath, table.id);
+          const previous = this.bindings.get(file)?.find(binding => binding.recipe.id === table.id) ?? await this.resolveDefinition(previousPath, table.id);
           const source = previous.recipe.source;
           const recipe = { ...previous.recipe, source: source === oldPath || source.startsWith(`${oldPath}/`) ? path + source.slice(oldPath.length) : source };
           // If its configuration moved too, rename() below adjusts its paths.
@@ -251,14 +299,14 @@ export class MarkdownTableService {
     for (const file of files) {
       try { await this.prepare(file); } catch (error) { await this.report(file, error); }
     }
-    await this.definitions.rename(files.map(file => file.path), oldPath, path);
+    if (!this.reflection) await this.definitions.rename(files.map(file => file.path), oldPath, path);
     for (const file of files) {
       try { await this.index(file); } catch (error) { await this.report(file, error); }
     }
   }
 
   async openSource(file: TFile, table: ManagedTable): Promise<void> {
-    const recipe = table.recipe ?? (await this.definitions.resolve(file.path, table.id, table.marker === 'table')).recipe;
+    const recipe = table.recipe ?? (await this.resolveDefinition(file.path, table.id, table.marker === 'table')).recipe;
     await this.app.workspace.openLinkText(recipe.source, '', true);
   }
 
@@ -277,7 +325,7 @@ export class MarkdownTableService {
     if (!source && (!view || !file)) return;
     if (!existing && view && this.currentTable(view.editor)) { new Notice('Place the cursor outside the existing CSV export to insert another export.'); return; }
     const sources = this.app.vault.getFiles().filter(candidate => isCsv(candidate)).map(candidate => candidate.path).sort();
-    const initial = existing ? existing.recipe ?? (await this.definitions.resolve(file!.path, existing.id, existing.marker === 'table')).recipe : undefined;
+    const initial = existing ? existing.recipe ?? (await this.resolveDefinition(file!.path, existing.id, existing.marker === 'table')).recipe : undefined;
     if (this.stopped) return;
     new TableModal(this.app, {
       sources,
@@ -350,6 +398,11 @@ export class MarkdownTableService {
         .filter(file => file instanceof TFolder).map(file => file.path === '/' ? '' : file.path);
       const saved = (await this.definitions.list(directories)).filter(entry => entry.output !== undefined);
       if (!saved.length || cancelled()) return;
+      if (this.reflection?.pending) return;
+      if (this.reflection) {
+        const sync = syncStatus(this.app);
+        if (sync.state !== 'inactive' && sync.idle !== true) return;
+      }
       const notes = this.app.vault.getMarkdownFiles();
       const markers: Array<{ file: TFile; tables: ManagedTable[] }> = [];
       // An unreadable note or incomplete edit is not evidence that its export died.
@@ -360,13 +413,19 @@ export class MarkdownTableService {
       for (const { file, tables } of markers) for (const table of tables) {
         if (table.recipe) continue;
         const resolved = await this.definitions.find(file.path, table.id, table.marker === 'table');
+        if (resolved) this.reflection?.assertSqlBinding(file.path, resolved.recipe.id, resolved.configPath);
         if (resolved) live.add(`${resolved.configPath}\0${resolved.recipe.id}`);
       }
       let changed = false;
       for (const entry of saved) {
         if (cancelled()) break;
         if (!live.has(`${entry.configPath}\0${entry.recipe.id}`)) {
-          try { await this.definitions.removeExport(entry, cancelled); if (!cancelled()) changed = true; }
+          // Missing notes on a receiving device are not evidence of intentional deletion.
+          if (this.reflection && entry.output && !(this.app.vault.getAbstractFileByPath(entry.output) instanceof TFile)) {
+            const sync = syncStatus(this.app);
+            if (sync.state !== 'inactive' && sync.idle !== true) continue;
+          }
+          try { await this.definitions.removeExport(entry, cancelled, 'stale-sql'); if (!cancelled()) changed = true; }
           catch (error) { if (!cancelled()) throw error; }
         }
       }

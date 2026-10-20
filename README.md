@@ -66,4 +66,5 @@ The plugin does not collect telemetry and works entirely offline. It uses direct
 - Run **Open exports**, or select **Configure** under **Exports** in the plugin settings.
 - Use **Configure** beside a CSV/TSV file to manage its chart, table, and value exports, including paused exports.
 - **Delete** removes export configurations and stops their automatic updates. Your source files and generated content are kept.
-- Unused configurations are removed automatically when linked exports are removed from notes or generated chart files are deleted.
+- Unused SQL export configurations are removed automatically when their last note reference is removed. Chart configurations remain available until you delete them.
+- With Obsidian Sync, enable **Installed community plugins** to sync export configurations and **Sync all other types** for CSV/TSV sources. The plugin restores its local `.csvzall` configurations on each device.

@@ -27,4 +27,9 @@ export function registerVaultWatchers(plugin: Plugin, charts: ChartService, csv:
       });
     }),
   );
+  plugin.registerEvent(plugin.app.vault.on("create", file => {
+    if (file instanceof TFile && csv.isCsv(file)) {
+      void charts.reloadChartConfig().then(() => { if (active) charts.scheduleChartsForCsv(file.path); });
+    }
+  }));
 }

@@ -17,7 +17,8 @@ class FakeFile {
 class FakeView {}
 class FakeFolder { constructor(public path: string) {} }
 
-async function harness() {
+async function harness(reflection?: any) {
+  let syncing = true;
   let formOptions: any, noteLink: any;
   const opened: Array<{ kind: unknown; file: unknown; state: unknown }> = [];
   const result = await build({ entryPoints: ['src/markdown/MarkdownTableService.ts'], bundle: true,
@@ -64,7 +65,9 @@ async function harness() {
     remove: async (path: string) => { configs.delete(path); },
     mkdir: async () => {},
   };
-  const app = { workspace: { on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); }, getLeavesOfType: () => leaves,
+  const app = { internalPlugins: { getPluginById: () => ({ enabled: true, instance: {
+    getStatus: () => syncing ? 'syncing' : 'synced', filter: { allowTypes: new Set(), allowSpecialFiles: new Set() } } }) },
+    workspace: { on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); }, getLeavesOfType: () => leaves,
     getLeaf: (kind: unknown) => ({ openFile: async (file: unknown, state: unknown) => { opened.push({ kind, file, state }); } }), onLayoutReady: (callback: () => void) => { ready = callback; } }, vault: {
     adapter,
     read: async (file: FakeFile) => file === note ? text : extraNotes.get(file)!,
@@ -80,9 +83,9 @@ async function harness() {
   } };
   const service = new module.exports.MarkdownTableService(app, { getVaultRoot: () => 'vault' }, {
     captureCommand: async (args: string[]) => { queries.push(args); return await query(); },
-  }, { record: async (_level: string, _message: string, detail: string) => { errors.push(detail); } });
+  }, { record: async (_level: string, _message: string, detail: string) => { errors.push(detail); } }, reflection);
   const settle = async () => { for (let i = 0; i < 30; ++i) await Promise.resolve(); };
-  return { service, note, queries, errors, configs, adapter,
+  return { service, note, queries, errors, configs, adapter, syncReady() { syncing = false; },
     addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; } }; },
     failWrites(value = true) { failWrite = value; },
     async reindex() { await service.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
@@ -119,15 +122,70 @@ test('CSV refresh writes a real Markdown region, preserving prose and skipping u
   f.service.unload();
 });
 
+test('direct-folder SQL execution never falls back to an ancestor and new saves stay beside the note', async () => {
+  const reflection = { usesDirectFolders: true, reconcile: async () => {}, edited: async () => {}, assertReady() {}, assertSqlBinding() {}, recoverSql: async () => false };
+  const f = await harness(reflection);
+  const before = f.text;
+  await f.service.refresh(f.note);
+  assert.equal(f.queries.length, 0); assert.equal(f.text, before);
+  await f.service.definitions.save(f.note.path, recipe);
+  const saved = JSON.parse(f.configs.get('Reports/.csvzall/exports.json')!).exports[0];
+  assert.equal(saved.input, '../Data/tasks.csv'); assert.equal(saved.output, 'tasks.md');
+  await f.service.refresh(f.note); assert.equal(f.queries.length, 1);
+  f.service.unload();
+});
+
+test('migration scanning reports incomplete notes without hiding valid note references', async () => {
+  const f = await harness(); f.addNote('Other/incomplete.md', '<!-- csvzall:export unfinished -->');
+  const scan = await f.service.migrationReferences();
+  assert.equal(scan.complete, false); assert.equal(scan.references.length, 1);
+  assert.equal(scan.references[0].note, f.note.path); assert.equal(f.errors.length, 1);
+  f.service.unload();
+});
+
 test('query failure retains the previous table and deduplicates error notices', async () => {
   const f = await harness();
   f.setQuery(async () => { throw new Error('no such column'); });
   const original = f.text;
-  await f.service.refresh(f.note);
-  await f.service.refresh(f.note);
+  await f.service.refresh(f.note, undefined, true);
+  await f.service.refresh(f.note, undefined, true);
   assert.equal(f.text, original);
   assert.equal(f.writes, 0);
   assert.equal(f.errors.length, 1);
+  f.service.unload();
+});
+
+test('SQL cleanup waits while older readable note content is still syncing', async () => {
+  const f = await harness({ pending: false, reconcile: async () => {}, edited: async () => {} });
+  f.text = 'An older note version without its export marker';
+  await f.service.pruneDeadExports();
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
+  f.syncReady(); await f.service.pruneDeadExports();
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
+  f.service.unload();
+});
+
+test('alternating background SQL errors remain suppressed across successful refreshes', async () => {
+  const f = await harness();
+  for (const message of ['missing A', 'missing B', 'missing A', 'missing B']) {
+    f.setQuery(async () => { throw new Error(message); }); await f.service.refresh(f.note, undefined, true);
+  }
+  assert.equal(f.errors.length, 2);
+  f.setQuery(async () => '| title |\n| --- |\n| Success |'); await f.service.refresh(f.note, undefined, true);
+  f.setQuery(async () => { throw new Error('missing A'); }); await f.service.refresh(f.note, undefined, true);
+  assert.equal(f.errors.length, 2);
+  await f.service.refresh(f.note); assert.equal(f.errors.length, 3, 'manual retry remains visible');
+  f.service.unload();
+});
+
+test('SQL never replaces content if its scope becomes blocked during generation', async () => {
+  let blocked = false;
+  const f = await harness({ reconcile: async () => {}, edited: async () => {}, assertSqlBinding() {},
+    assertReady() { if (blocked) throw new Error('Scope became unavailable'); } });
+  const original = f.text;
+  f.setQuery(async () => { blocked = true; return '| title |\n| --- |\n| Stale |'; });
+  await f.service.refresh(f.note, undefined, true);
+  assert.equal(f.text, original); assert.equal(f.writes, 0);
   f.service.unload();
 });
 

@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { dirname, join, resolve } from "node:path";
 import { buildIdentity, collectHelpers, installSnapshot, recipeFiles, releasePlan, repositoryRoot, sha256, verifyReceipt } from "../scripts/native-helper-contract.mjs";
 import { bundledTargets } from "../scripts/prepare-native-binaries.mjs";
-import { checkout } from "../scripts/build-native-helper.mjs";
+import { checkout, obsidianStartupUrl } from "../scripts/build-native-helper.mjs";
 
 const parent = join(repositoryRoot, ".test-build");
 mkdirSync(parent, { recursive: true });
@@ -33,6 +33,25 @@ function results(root, identity) {
   }
   return input;
 }
+
+test("native helper smoke requires acknowledged host automation rather than a standalone URL", () => {
+  const url = "http://127.0.0.1:12345/?token=smoke";
+  assert.equal(obsidianStartupUrl(JSON.stringify({ url, obsidianMode: { version: 1, chartAutomation: "host" } })), url);
+  for (const obsidianMode of [undefined, { version: 0, chartAutomation: "host" },
+    { version: 2, chartAutomation: "host" }, { version: 1, chartAutomation: "native" }]) {
+    assert.throws(() => obsidianStartupUrl(JSON.stringify({ url, obsidianMode })), /lacks Obsidian mode/);
+  }
+  assert.equal(obsidianStartupUrl("partial startup"), null);
+  assert.equal(obsidianStartupUrl(JSON.stringify({ url: "http://example.com/?token=smoke" })), null);
+  assert.equal(obsidianStartupUrl(JSON.stringify({ url: "http://127.0.0.1:12345/" })), null);
+});
+
+test("release validation refuses Windows development bundles before reading release metadata", t => {
+  const root = fixture(t);
+  json(join(root, "manifest.json"), { version: "0.7.1", csvzallDevelopmentBuild: "Windows Sync test" });
+  assert.throws(() => execFileSync(process.execPath, [join(repositoryRoot, "scripts/validate-release.mjs"), "0.7.1"],
+    { cwd: root, encoding: "utf8", stdio: "pipe", windowsHide: true }), /Development test bundles cannot be published/);
+});
 
 test("pinned source reuse refuses tracked, staged, untracked, and ignored modifications", t => {
   for (const kind of ["tracked", "staged", "untracked", "ignored"]) {

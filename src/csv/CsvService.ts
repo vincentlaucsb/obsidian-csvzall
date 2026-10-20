@@ -6,6 +6,7 @@ import type { CsvzallPluginSettings } from "../settings/settings.js";
 import { normalizeVaultPath } from "../chartAutomation.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
 import { isCsv } from "./csvFiles.js";
+import type { ExportReflection } from "../exports/ExportReflection.js";
 
 function isMissingExecutableError(message: string): boolean {
   return /\bENOENT\b/i.test(message) || /not found/i.test(message);
@@ -18,6 +19,7 @@ export class CsvService {
     private readonly eventLog: EventLog,
     private readonly filesystem: ObsidianFilesystem,
     private readonly processService: CsvzallProcessService,
+    private readonly reflection?: ExportReflection,
   ) {}
 
   isCsv(file: TFile): boolean {
@@ -52,7 +54,12 @@ export class CsvService {
     const isCurrent = () => leaf.view === view && view instanceof CsvzallTableView &&
       view.file === file && file.path === path;
     if (!isCurrent()) return;
+    const mayContinue = this.reflection ? this.processService.viewerContinuation(leaf) : () => true;
     try {
+      if (this.reflection) {
+        await this.reflection.prepareViewer(file.path);
+        if (!isCurrent() || !mayContinue()) return;
+      }
       const server = await this.processService.startViewer(fullPath, leaf);
       if (isCurrent() && !server.stopping && leaf.view instanceof CsvzallTableView) {
         leaf.view.showViewer(file.basename, server.url);
@@ -104,6 +111,7 @@ export class CsvService {
     }
 
     try {
+      if (this.reflection) await this.reflection.prepareViewer(file.path);
       const server = await this.processService.startViewer(fullPath);
       window.open(server.url, "_blank", "noopener");
     } catch (error) {

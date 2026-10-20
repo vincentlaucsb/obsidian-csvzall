@@ -8,6 +8,7 @@ import type { MarkdownTableService } from "../markdown/MarkdownTableService.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
 import type { CsvzallProcessService } from "../process/CsvzallProcessService.js";
 import { ChartOptionsModal, ChooseExportModal, DeleteExportsModal } from "./ExportModals.js";
+import type { ExportReflection } from "../exports/ExportReflection.js";
 
 export type ExportEntry = { kind: "chart"; chart: SavedChart } | { kind: "table"; table: SavedExport };
 export interface FileExports { source: string; entries: ExportEntry[]; missing: boolean }
@@ -19,8 +20,8 @@ export class ExportSettingsService {
   private pruning: Promise<void> = Promise.resolve();
   constructor(private readonly app: App, private readonly charts: ChartService,
     private readonly tables: MarkdownTableService, private readonly filesystem: ObsidianFilesystem,
-    private readonly process: CsvzallProcessService) {
-    this.definitions = new ChartDefinitions(app.vault.adapter);
+    private readonly process: CsvzallProcessService, private readonly reflection?: ExportReflection) {
+    this.definitions = new ChartDefinitions(app.vault.adapter, path => this.reflection?.edited(path) ?? Promise.resolve(), this.reflection?.usesDirectFolders);
   }
 
   onChanged(listener: () => void): () => void {
@@ -31,36 +32,10 @@ export class ExportSettingsService {
 
   register(plugin: Plugin): void {
     plugin.register(() => { this.stopped = true; });
-    plugin.registerEvent(this.app.vault.on("delete", file => {
-      const path = normalizeVaultPath(file.path);
-      this.pruning = this.pruning.catch(() => {}).then(() => this.pruneDeletedCharts(path));
-      void this.pruning.catch((error: unknown) => {
-        if (!this.stopped) new Notice(`Could not prune chart exports: ${error instanceof Error ? error.message : String(error)}`);
-      });
-    }));
-  }
-
-  private async pruneDeletedCharts(path: string): Promise<void> {
-    if (this.stopped) return;
-    const folders = this.app.vault.getAllLoadedFiles().filter(file => file instanceof TFolder).map(file => normalizeVaultPath(file.path));
-    const entries = await this.definitions.list(await findChartConfigPaths(this.app.vault.adapter, folders));
-    let changed = false;
-    for (const chart of entries) {
-      if (this.stopped) return;
-      if (!chart.definition.output) continue;
-      const output = resolveChartPath(chart.configPath, chart.definition.output);
-      if (output !== path && !output.startsWith(`${path}/`)) continue;
-      if (await this.app.vault.adapter.exists(output)) continue;
-      await this.definitions.removeChart(chart, () => this.stopped || this.app.vault.getAbstractFileByPath(output) !== null);
-      changed = true;
-    }
-    if (changed) {
-      await this.charts.reloadChartConfig();
-      for (const listener of this.listeners) listener();
-    }
   }
 
   async list(): Promise<FileExports[]> {
+    await this.reflection?.reconcile();
     const folders = this.app.vault.getAllLoadedFiles().filter(file => file instanceof TFolder).map(file => normalizeVaultPath(file.path));
     const charts = await this.definitions.list(await findChartConfigPaths(this.app.vault.adapter, folders));
     const tables = await this.tables.listExports(folders);
