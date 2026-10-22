@@ -26,9 +26,9 @@ checks passed. Its 0.9.0 source markers agree at merged commit
 `e101b3cd8c6b911a109eb8d7cfeb3fd55bf54c7b`, tagged and published as
 [csvzall 0.9.0](https://github.com/vincentlaucsb/csvzall/releases/tag/0.9.0).
 The [binary packaging run](https://github.com/vincentlaucsb/csvzall/actions/runs/39733947325)
-has published Linux, Windows, and WASM assets; the standalone macOS package is
-still compiling. Obsidian helper preparation can compile the same published,
-tagged source in parallel. Both pipelines must pass before plugin publication.
+passed and published Linux, Windows, macOS, and WASM assets. Obsidian helper
+preparation compiled the same published, tagged source in parallel. Both
+pipelines passed before plugin publication.
 
 ## Production helper snapshot
 
@@ -61,8 +61,26 @@ JavaScript bytes retained SHA-256
 `2f7328eeb41a1ccbc8d8893cb286e86d03057f66ffa11028a7121f05776e1800`;
 desktop/mobile tests passed again after the refresh.
 
-## Remaining publication gates
+## Publication
 
-Finish standalone macOS packaging and confirm final main-branch CI. Then tag
-the prepared plugin commit as 0.9.0, run publication, and verify the published
-three standard Obsidian assets and their user-facing release notes.
+Final plugin commit `b13f2a0e063ad0800a9379a244f26d83b1ee89d2` passed
+[Unit Tests](https://github.com/vincentlaucsb/obsidian-csvzall/actions/runs/39736166193)
+and [Codecov](https://github.com/vincentlaucsb/obsidian-csvzall/actions/runs/39736166203)
+before it was tagged as bare `0.9.0`.
+[Publication run 39738031955](https://github.com/vincentlaucsb/obsidian-csvzall/actions/runs/39738031955)
+passed metadata and frozen-snapshot verification, desktop/mobile tests, bundled
+helper inspection, the clean source-archive build, and release attestations.
+
+[Plugin 0.9.0](https://github.com/vincentlaucsb/obsidian-csvzall/releases/tag/0.9.0)
+is published as the latest release with the three standard Obsidian assets and
+a user-facing summary of SQL block exports, insertion into notes, update
+controls, and faster, quieter startup. Downloaded assets exactly match the
+verified source hashes above. The production Windows helper independently
+served the new note-insertion module, export syntax controls, and quiet startup
+assets over its authenticated local server.
+
+Vince's Notebook now links its three plugin artifacts to this checkout's
+verified production outputs. Settings hashes matched before and after the
+change. Reload the plugin to activate the release build. No separate Lite
+release was published. The hosted scorecard has not been reverified against the
+new tag; local validation does not establish hosted warning clearance.
