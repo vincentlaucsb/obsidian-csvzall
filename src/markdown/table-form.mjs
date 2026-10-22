@@ -52,7 +52,7 @@ export function mountTableForm(root, options) {
   style.textContent = `
     .csvzall-table-form { display:flex; flex-direction:column; gap:12px; min-width:0; }
     .csvzall-table-form > label { display:flex; flex-direction:column; gap:6px; }
-    .csvzall-table-form label:has(> input[type=checkbox]), .csvzall-table-columns label { display:flex; flex-direction:row; align-items:center; gap:8px; }
+    .csvzall-table-form .csvzall-auto-update, .csvzall-table-columns label { display:flex; flex-direction:row; align-items:center; gap:8px; }
     .csvzall-table-form input[type=text], .csvzall-table-form input[type=search], .csvzall-table-form textarea, .csvzall-table-form select { width:100%; box-sizing:border-box; }
     .csvzall-table-columns { display:flex; flex-wrap:wrap; gap:8px 16px; max-height:160px; overflow:auto; }
     .csvzall-query-picker { display:flex; flex-direction:column; gap:8px; min-width:0; }
@@ -63,7 +63,7 @@ export function mountTableForm(root, options) {
     .csvzall-table-form [role=alert] { color:var(--text-error, inherit); }
     .csvzall-table-preview { overflow:auto; max-height:240px; white-space:pre; padding:10px; }
     .csvzall-table-actions { display:flex; gap:8px; justify-content:flex-end; }
-    .csvzall-table-form [hidden] { display:none !important; }
+    .csvzall-table-form [hidden] { display:none; }
   `;
   const source = field('CSV source');
   source.type = 'text';
@@ -84,6 +84,11 @@ export function mountTableForm(root, options) {
     const option = el('option', format, title); option.value = value;
   }
   format.parentElement.hidden = !options.showFormat;
+  const syntax = field('Note syntax', 'select');
+  for (const [value, title] of [['comment', 'Comment markers'], ['code', 'SQL code block']]) {
+    const option = el('option', syntax, title); option.value = value;
+  }
+  syntax.parentElement.hidden = !options.showSyntax;
   const mode = field('Include', 'select');
   for (const [value, title] of [['all', 'Entire CSV'], ['columns', 'Selected columns'], ['sql', 'SQLite query']]) {
     const option = el('option', mode, title); option.value = value;
@@ -107,6 +112,7 @@ export function mountTableForm(root, options) {
   let columnsExpanded = false;
   const help = el('p', root, 'Query the CSV as table data. Preview shows up to 20 rows.');
   const autoLabel = el('label');
+  autoLabel.className = 'csvzall-auto-update';
   const auto = el('input', autoLabel); auto.type = 'checkbox';
   el('span', autoLabel, 'Keep updated when CSV changes');
   autoLabel.hidden = options.showAutoUpdate === false;
@@ -157,8 +163,10 @@ export function mountTableForm(root, options) {
     columnGroup.hidden = mode.value !== 'columns';
     query.parentElement.hidden = mode.value !== 'sql';
     queryPicker.hidden = mode.value !== 'sql';
-    ownership.hidden = options.showAutoUpdate === false || !auto.checked;
-    ownership.textContent = 'Changes made directly to automatically updated content may be replaced.';
+    ownership.hidden = options.showAutoUpdate === false;
+    ownership.textContent = auto.checked ? 'Changes made directly to automatically updated content may be replaced.' : 'Automatic updates are paused. You can still refresh the export manually.';
+    syntax.disabled = format.value === 'value';
+    if (format.value === 'value') syntax.value = 'comment';
     help.textContent = format.value === 'value' ? 'Return exactly one row and one column. Line breaks become spaces; text is escaped for Markdown.' : 'Query the CSV as table data. Preview shows up to 20 rows.';
     options.onChange?.();
   }
@@ -169,6 +177,7 @@ export function mountTableForm(root, options) {
     format.value = options.showFormat && value.format === 'value' ? 'value' : 'table';
     mode.value = value.sql ? 'sql' : value.columns?.length ? 'columns' : 'all';
     auto.checked = value.autoUpdate !== false;
+    syntax.value = options.showSyntax && value.syntax === 'code' ? 'code' : 'comment';
     pendingSelection = value.columns || [];
     renderColumns(pendingSelection);
     changed();
@@ -177,7 +186,7 @@ export function mountTableForm(root, options) {
     const selected = checks().filter(check => check.checked).map(check => check.value);
     if (mode.value === 'columns' && !selected.length) throw new Error('Select at least one column.');
     if (mode.value === 'sql' && !query.value.trim()) throw new Error('Enter a SQLite query.');
-    return { format: format.value, source: source.value.trim(), destination: destination.value.trim(),
+    return { format: format.value, syntax: format.value === 'value' ? 'comment' : syntax.value, source: source.value.trim(), destination: destination.value.trim(),
       columns: mode.value === 'columns' ? selected : [],
       sql: mode.value === 'sql' ? query.value.trim() : '', autoUpdate: auto.checked };
   }

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 import { findManagedTables, managedTableText } from '../src/markdown/managedTables.js';
+import { fencedTableText, fencedRecipe } from '../src/markdown/fencedTables.js';
 
 const require = createRequire(import.meta.url);
 const recipe = { version: 1 as const, id: 'tasks', source: 'Data/tasks.csv', columns: [], sql: '' };
@@ -19,8 +20,9 @@ class FakeFolder { constructor(public path: string) {} }
 
 async function harness(reflection?: any) {
   let syncing = true;
-  let formOptions: any, noteLink: any;
+  let formOptions: any, noteLink: any, destinationOptions: any;
   const opened: Array<{ kind: unknown; file: unknown; state: unknown }> = [];
+  const intervals = new Set<ReturnType<typeof setInterval>>();
   const result = await build({ entryPoints: ['src/markdown/MarkdownTableService.ts'], bundle: true,
     platform: 'node', format: 'cjs', write: false, external: ['obsidian'],
     plugins: [{ name: 'mock-modal', setup(builder) {
@@ -29,9 +31,12 @@ async function harness(reflection?: any) {
   });
   const module = { exports: {} as any };
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports, console,
-    crypto: webcrypto, window: { setTimeout, clearTimeout, setInterval, clearInterval }, require(name: string) {
+    crypto: webcrypto, AbortController, window: { setTimeout, clearTimeout,
+      setInterval(callback: () => void, delay: number) { const timer = setInterval(callback, delay); intervals.add(timer); return timer; },
+      clearInterval(timer: ReturnType<typeof setInterval>) { intervals.delete(timer); clearInterval(timer); },
+    }, require(name: string) {
       if (name === 'obsidian') return { TFile: FakeFile, TFolder: FakeFolder, MarkdownView: FakeView, Notice: class {} };
-      if (name === 'mock-modal') return { TableModal: class { constructor(_app: unknown, options: unknown, note: unknown) { formOptions = options; noteLink = note; } open() {} } };
+      if (name === 'mock-modal') return { TableModal: class { constructor(_app: unknown, options: unknown, note: unknown, destination: unknown) { formOptions = options; noteLink = note; destinationOptions = destination; } open() {} } };
       return require(name);
     },
   });
@@ -40,6 +45,7 @@ async function harness(reflection?: any) {
   const csv = new FakeFile(recipe.source);
   let text = `My prose\n\n${oldTable}\n\nAfterwards\n`;
   let writes = 0;
+  let reads = 0;
   let leaves: unknown[] = [];
   let ready = () => {};
   const events = new Map<string, (...args: any[]) => void>();
@@ -67,10 +73,10 @@ async function harness(reflection?: any) {
   };
   const app = { internalPlugins: { getPluginById: () => ({ enabled: true, instance: {
     getStatus: () => syncing ? 'syncing' : 'synced', filter: { allowTypes: new Set(), allowSpecialFiles: new Set() } } }) },
-    workspace: { on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); }, getLeavesOfType: () => leaves,
+    workspace: { on: (event: string, callback: (...args: any[]) => void) => { events.set(event, callback); }, getLeavesOfType: () => leaves, getActiveFile: () => note,
     getLeaf: (kind: unknown) => ({ openFile: async (file: unknown, state: unknown) => { opened.push({ kind, file, state }); } }), onLayoutReady: (callback: () => void) => { ready = callback; } }, vault: {
     adapter,
-    read: async (file: FakeFile) => file === note ? text : extraNotes.get(file)!,
+    read: async (file: FakeFile) => { ++reads; return file === note ? text : extraNotes.get(file)!; },
     getAllLoadedFiles: () => [new FakeFolder('/'), new FakeFolder('Reports'), ...Array.from(extraNotes.keys(), file => new FakeFolder(file.path.split('/').slice(0, -1).join('/')))],
     getMarkdownFiles: () => [note, ...extraNotes.keys()],
     getFiles: () => [note, csv],
@@ -84,17 +90,19 @@ async function harness(reflection?: any) {
   const service = new module.exports.MarkdownTableService(app, { getVaultRoot: () => 'vault' }, {
     captureCommand: async (args: string[]) => { queries.push(args); return await query(); },
   }, { record: async (_level: string, _message: string, detail: string) => { errors.push(detail); } }, reflection);
-  const settle = async () => { for (let i = 0; i < 30; ++i) await Promise.resolve(); };
+  const settle = () => new Promise<void>(resolve => setImmediate(resolve));
   return { service, note, queries, errors, configs, adapter, syncReady() { syncing = false; },
     addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; } }; },
     failWrites(value = true) { failWrite = value; },
-    async reindex() { await service.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
+    async reindex() { await service.refreshes.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
     get formOptions() { return formOptions; }, get noteLink() { return noteLink; }, opened,
-    get writes() { return writes; }, setQuery(fn: () => Promise<string>) { query = fn; },
+    get destinationOptions() { return destinationOptions; },
+    get writes() { return writes; }, get reads() { return reads; }, setQuery(fn: () => Promise<string>) { query = fn; },
     async start() { service.register({ register() {}, registerEvent() {} }); ready(); await settle(); },
+    async layoutReady() { ready(); await settle(); }, get activePolls() { return intervals.size; },
     async event(name: string, ...args: unknown[]) { events.get(name)?.(...args); await settle(); },
     csv,
-    async drain() { await service.drain(); },
+    async drain() { await service.refreshes.drain(); },
     installEditor(initial: string) {
       let buffer = initial;
       let cursor = buffer.length;
@@ -122,6 +130,289 @@ test('CSV refresh writes a real Markdown region, preserving prose and skipping u
   f.service.unload();
 });
 
+test('fenced exports persist real Markdown, preserve schema-mismatched tables and stop at prose', async () => {
+  const f = await harness();
+  f.text = fencedTableText(f.note.path, recipe, '| old |\n| --- |\n| Keep |') + '\n\nAfterwards';
+  await f.service.refresh(f.note);
+  assert.match(f.text, /\| New \|/);
+  assert.match(f.text, /\| Keep \|/);
+  assert.equal(f.text.includes('<!--'), false);
+  const stable = f.text;
+  await f.service.refresh(f.note);
+  assert.equal(f.text, stable);
+  f.text = fencedTableText(f.note.path, recipe, '') + '\n\nProse\n\n| old |\n| --- |\n| Keep |';
+  await f.service.refresh(f.note);
+  assert.match(f.text, /\| New \|\n\nProse/);
+  assert.match(f.text, /\| Keep \|/);
+  f.service.unload();
+});
+
+test('a handwritten SQL fence discovers its note-relative CSV and registers a named query', async () => {
+  const f = await harness();
+  f.text = '```sql csvzall\nSELECT title FROM "../Data/tasks.csv"\n```\n\nAfterwards';
+  await f.service.refresh(f.note);
+  const table = findManagedTables(f.text)[0]!;
+  assert.equal(table.fence!.sql, 'SELECT title FROM "../Data/tasks.csv"');
+  assert.equal(f.text.includes('-- csvzall:'), false);
+  assert.match(f.text, /\| New \|/);
+  assert.ok(f.queries.some(args => args.includes('--table') && args.includes('Data/tasks.csv')));
+  f.service.unload();
+});
+
+test('SQL in the note is authoritative and identical blocks share one definition and one query result', async () => {
+  const f = await harness();
+  const block = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  f.text = `${block}\n\nBetween\n\n${block}\n\nAfterwards`;
+  await f.service.refresh(f.note);
+  assert.equal(f.queries.length, 1);
+  assert.equal((f.text.match(/\| New \|/g) ?? []).length, 2);
+  assert.equal(f.text.includes('-- csvzall:'), false);
+  const definitions = () => JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.filter((entry: any) => entry.id.startsWith('sql-'));
+  assert.equal(definitions().length, 1);
+  const stable = f.configs.get('.csvzall/exports.json');
+  await f.service.refresh(f.note);
+  assert.equal(f.configs.get('.csvzall/exports.json'), stable);
+  f.text = f.text.replace('SELECT *', 'SELECT title');
+  await f.service.refresh(f.note);
+  assert.equal(definitions().length, 2);
+  assert.equal((f.text.match(/SELECT title/g) ?? []).length, 1);
+  assert.match(f.text, /Between/); assert.match(f.text, /Afterwards/);
+  f.service.unload();
+});
+
+test('a shared pause preference applies to identical blocks and manual refresh updates both', async () => {
+  const f = await harness();
+  const block = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  f.text = `${block}\n\n${block}`;
+  await f.service.maintenance.prepare(f.note);
+  const canonical = fencedRecipe(f.note.path, findManagedTables(f.text)[0]!.fence!.sql);
+  const saved = await f.service.definitions.resolve(f.note.path, canonical.id);
+  await f.service.definitions.update(saved, canonical, false, () => false);
+  await f.service.refresh(f.note, undefined, true);
+  assert.equal(f.queries.length, 0);
+  await f.service.refresh(f.note);
+  assert.equal(f.queries.length, 1);
+  assert.equal((f.text.match(/\| New \|/g) ?? []).length, 2);
+  f.service.unload();
+});
+
+test('explicitly deleted query definitions cannot be recreated by a delayed clean block', async () => {
+  const reflection = { reconcile: async () => {}, assertReady() {}, assertSqlBinding() { throw new Error('Explicitly deleted'); }, recoverSql: async () => false };
+  const f = await harness(reflection);
+  f.text = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  const before = f.text, config = f.configs.get('.csvzall/exports.json');
+  await assert.rejects(f.service.refresh(f.note), /Explicitly deleted/);
+  assert.equal(f.text, before); assert.equal(f.configs.get('.csvzall/exports.json'), config);
+  f.service.unload();
+});
+
+test('moving an edited clean block preserves its SQL and rebases its CSV path', async () => {
+  const f = await harness();
+  f.text = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  await f.reindex();
+  f.text = f.text.replace('SELECT *', 'SELECT title');
+  const old = f.note.path;
+  f.note.path = 'Archive/Deep/tasks.md';
+  await f.service.maintenance.renameSource(old, f.note.path);
+  assert.match(f.text, /SELECT title FROM "..\/..\/Data\/tasks.csv"/);
+  assert.match(f.text, /\| Old \|/);
+  assert.equal(f.text.includes('-- csvzall:'), false);
+  assert.equal(f.errors.length, 0);
+  f.service.unload();
+});
+
+test('deleting a shared query detaches every identical occurrence without dropping its tables', async () => {
+  const f = await harness();
+  const block = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  f.text = `${block}\n\n${block}`;
+  await f.service.maintenance.prepare(f.note);
+  const canonical = fencedRecipe(f.note.path, findManagedTables(f.text)[0]!.fence!.sql);
+  const saved = await f.service.definitions.resolve(f.note.path, canonical.id);
+  await f.service.removeExport(saved);
+  assert.equal(findManagedTables(f.text).length, 0);
+  assert.equal((f.text.match(/\| Old \|/g) ?? []).length, 2);
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.some((entry: any) => entry.id === canonical.id), false);
+  f.service.unload();
+});
+
+test('an open edit dialog rejects a changed duplicate sequence instead of modifying another occurrence', async () => {
+  const f = await harness();
+  const block = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  f.text = [block, block, block].join('\n\n');
+  await f.service.maintenance.prepare(f.note);
+  const buffer = f.installEditor(f.text);
+  await f.service.editing.openModal(buffer.view, undefined, findManagedTables(buffer.text)[1]!);
+  assert.ok(f.formOptions);
+  buffer.editor.replaceRange('', { ch: 0 }, { ch: block.length + 2 });
+  const original = buffer.text;
+  await assert.rejects(f.formOptions.submit({ source: recipe.source, columns: [], sql: 'SELECT title FROM data', syntax: 'comment', autoUpdate: true }, new AbortController().signal), /note changed/);
+  assert.equal(buffer.text, original);
+  f.service.unload();
+});
+
+test('settings locate a surviving shared query after its original output note loses the block', async () => {
+  const f = await harness();
+  const block = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  f.text = block;
+  const other = f.addNote('Reports/copy.md', block);
+  await f.service.maintenance.prepare(f.note);
+  const id = fencedRecipe(f.note.path, findManagedTables(block)[0]!.fence!.sql).id;
+  const saved = await f.service.definitions.resolve(f.note.path, id);
+  f.text = 'Original note prose';
+  await f.service.editing.openConfiguredExport(saved, () => {});
+  assert.equal(f.noteLink.path, other.file.path);
+  await f.formOptions.submit({ source: recipe.source, columns: [], sql: 'SELECT title FROM data', format: 'table', syntax: 'code', autoUpdate: false }, new AbortController().signal);
+  assert.match(other.text, /SELECT title/);
+  await f.service.refresh(other.file);
+  assert.match(other.text, /\| New \|/);
+  assert.equal(f.text, 'Original note prose');
+  f.service.unload();
+});
+
+test('CSV rename preserves unknown fields when the shared query key changes', async () => {
+  const f = await harness();
+  f.text = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  await f.reindex();
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+  const entry = config.exports.find((entry: any) => entry.id.startsWith('sql-'));
+  entry.custom = { retained: true }; entry.options.futureSetting = 42; entry.runOnSave = false;
+  f.configs.set('.csvzall/exports.json', JSON.stringify(config));
+  await f.reindex();
+  const old = f.csv.path; f.csv.path = 'Data/renamed.csv';
+  await f.service.maintenance.renameSource(old, f.csv.path);
+  await f.service.pruneDeadExports();
+  const currentId = fencedRecipe(f.note.path, findManagedTables(f.text)[0]!.fence!.sql).id;
+  const current = JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.find((entry: any) => entry.id === currentId);
+  assert.deepEqual(current.custom, { retained: true }); assert.equal(current.options.futureSetting, 42);
+  assert.equal(current.runOnSave, false);
+  f.service.unload();
+});
+
+test('old development metadata is removed while retaining paused preferences and ordinary SQL comments', async () => {
+  const f = await harness();
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!); config.exports[0].runOnSave = false;
+  f.configs.set('.csvzall/exports.json', JSON.stringify(config));
+  const metadata = JSON.stringify({ version: 1, id: recipe.id, source: '../Data/tasks.csv', base: '0'.repeat(64) });
+  f.text = '```sql csvzall\n-- csvzall:export ' + metadata + '\n-- My query\nSELECT * FROM data\n```\n\n| title |\n| --- |\n| Old |';
+  await f.service.refresh(f.note, undefined, true);
+  assert.equal(f.text.includes('-- csvzall:'), false); assert.match(f.text, /-- My query/);
+  assert.match(f.text, /FROM "..\/Data\/tasks.csv"/); assert.match(f.text, /\| Old \|/);
+  const currentId = fencedRecipe(f.note.path, findManagedTables(f.text)[0]!.fence!.sql).id;
+  assert.equal((await f.service.definitions.resolve(f.note.path, currentId)).runOnSave, false);
+  assert.equal(f.queries.length, 0);
+  f.service.unload();
+});
+
+test('code-to-comment conversion preserves unknown fields in the new definition', async () => {
+  const f = await harness();
+  f.text = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+  await f.service.maintenance.prepare(f.note);
+  const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
+  const current = config.exports.find((entry: any) => entry.id.startsWith('sql-'));
+  current.future = 123; current.options.extension = { keep: true };
+  f.configs.set('.csvzall/exports.json', JSON.stringify(config));
+  const buffer = f.installEditor(f.text);
+  await f.service.editing.openModal(buffer.view, undefined, findManagedTables(buffer.text)[0]!);
+  await f.formOptions.submit({ source: recipe.source, columns: [], sql: 'SELECT * FROM data', format: 'table', syntax: 'comment', autoUpdate: false }, new AbortController().signal);
+  const id = findManagedTables(buffer.text)[0]!.id;
+  const converted = JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.find((entry: any) => entry.id === id);
+  assert.equal(converted.future, 123); assert.deepEqual(converted.options.extension, { keep: true });
+  assert.equal(converted.csvzallDefaultPreferences, undefined);
+  f.service.unload();
+});
+
+test('inherited legacy pause policy cannot bypass a clean query tombstone', async () => {
+  const reflection = { reconcile: async () => {}, assertReady() {}, assertSqlBinding(_note: string, id: string) { if (id.startsWith('sql-')) throw new Error('Explicitly deleted'); }, recoverSql: async () => false };
+  const f = await harness(reflection);
+  const metadata = JSON.stringify({ version: 1, id: recipe.id, source: '../Data/tasks.csv', base: '0'.repeat(64) });
+  f.text = '```sql csvzall\n-- csvzall:export ' + metadata + '\nSELECT * FROM data\n```';
+  const before = f.text, saved = f.configs.get('.csvzall/exports.json');
+  await assert.rejects(f.service.maintenance.prepare(f.note), /Explicitly deleted/);
+  assert.equal(f.text, before); assert.equal(f.configs.get('.csvzall/exports.json'), saved);
+  f.service.unload();
+});
+
+test('syntax conversion retains pause state and manual refresh with clean query identity', async () => {
+  const f = await harness();
+  const buffer = f.installEditor(f.text);
+  const existing = findManagedTables(buffer.text)[0]!;
+  f.service.open(buffer.view, undefined, existing);
+  for (let i = 0; i < 40 && !f.formOptions; ++i) await Promise.resolve();
+  await f.formOptions.submit({ source: recipe.source, columns: [], sql: '', format: 'table', syntax: 'code', autoUpdate: false }, new AbortController().signal);
+  assert.equal(buffer.text.includes('-- csvzall:'), false);
+  assert.equal(findManagedTables(buffer.text)[0]!.marker, 'fence');
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.find((entry: any) => entry.id.startsWith('sql-')).runOnSave, false);
+  f.setQuery(async () => '| title |\n| --- |\n| Manual |');
+  await f.service.refresh(f.note, undefined, true);
+  assert.equal(buffer.text.includes('Manual'), false);
+  await f.service.refresh(f.note);
+  assert.equal(buffer.text.includes('Manual'), true);
+  await f.service.detach(f.note, findManagedTables(buffer.text)[0]!);
+  assert.equal(findManagedTables(buffer.text).length, 0);
+  assert.equal(buffer.text.includes('Manual'), true);
+  f.service.unload();
+});
+
+test('viewer insertion appends to a selected existing note and preserves the SQL LIMIT', async () => {
+  const f = await harness();
+  Object.defineProperty(f.csv, 'stat', { value: { mtime: 1, size: 20 } });
+  const pending = f.service.insertQueryIntoNote(f.csv, 'SELECT title FROM data LIMIT 3', () => false);
+  const original = f.text;
+  await f.formOptions.submit({ source: f.csv.path, destination: f.note.path, columns: [], sql: 'SELECT title FROM data LIMIT 3', syntax: 'code', autoUpdate: false }, new AbortController().signal);
+  f.destinationOptions.closed();
+  assert.equal(await pending, true);
+  assert.ok(f.text.startsWith(original));
+  assert.equal(findManagedTables(f.text).length, 2);
+  assert.match(f.text, /LIMIT 3/);
+  assert.ok(f.queries[0]!.some(arg => arg.includes('LIMIT 3')));
+  f.service.unload();
+});
+
+test('viewer insertion preserves note content when cancelled or stale at any write boundary', async () => {
+  for (const syntax of ['comment', 'code']) for (const stage of ['render', 'definition', 'note']) for (const change of ['cancel', 'CSV', 'destination']) {
+    const f = await harness();
+    const stat = { mtime: 1, size: 20 }, cancellation = new AbortController();
+    Object.defineProperty(f.csv, 'stat', { value: stat });
+    const interrupt = () => {
+      if (change === 'cancel') cancellation.abort();
+      else if (change === 'CSV') ++stat.mtime;
+      else f.note.path = 'Reports/renamed.md';
+    };
+    if (stage === 'render') f.setQuery(async () => { interrupt(); return '| title |\n| --- |\n| New |'; });
+    if (stage === 'definition') {
+      const save = f.service.definitions.save.bind(f.service.definitions);
+      f.service.definitions.save = async (...args: unknown[]) => { const recipe = await save(...args); interrupt(); return recipe; };
+    }
+    if (stage === 'note') {
+      const processNote = f.service.app.vault.process.bind(f.service.app.vault);
+      f.service.app.vault.process = async (...args: unknown[]) => { interrupt(); return processNote(...args); };
+    }
+    const pending = f.service.insertQueryIntoNote(f.csv, 'SELECT title FROM data', () => false);
+    const before = f.text, destination = f.note.path;
+    await assert.rejects(f.formOptions.submit({ source: f.csv.path, destination, columns: [], sql: 'SELECT title FROM data', syntax, autoUpdate: false }, cancellation.signal),
+      change === 'cancel' ? /insertion cancelled/ : /CSV or destination changed/, `${syntax}/${stage}/${change}`);
+    assert.equal(f.text, before); assert.equal(f.opened.length, 0); assert.equal(f.service.maintenance.pendingWrites, 0);
+    f.destinationOptions.closed(); assert.equal(await pending, false);
+    f.service.unload();
+  }
+});
+
+test('viewer insertion stays committed if follow-up work fails and retry does not append twice', async () => {
+  const f = await harness();
+  Object.defineProperty(f.csv, 'stat', { value: { mtime: 1, size: 20 } });
+  f.service.editing.preferences = { syntax: () => 'comment', saveSyntax: async () => { throw new Error('Preferences unavailable'); } };
+  const pending = f.service.insertQueryIntoNote(f.csv, 'SELECT title FROM data', () => false);
+  const value = { source: f.csv.path, destination: f.note.path, columns: [], sql: 'SELECT title FROM data', syntax: 'comment', autoUpdate: false };
+  const signal = new AbortController().signal;
+  await assert.rejects(f.formOptions.submit(value, signal), /Preferences unavailable/);
+  const committed = f.text;
+  assert.equal(findManagedTables(committed).length, 2);
+  await f.formOptions.submit(value, signal);
+  assert.equal(f.text, committed); assert.equal(f.service.maintenance.pendingWrites, 0);
+  f.destinationOptions.closed(); assert.equal(await pending, true);
+  f.service.unload();
+});
+
 test('direct-folder SQL execution never falls back to an ancestor and new saves stay beside the note', async () => {
   const reflection = { usesDirectFolders: true, reconcile: async () => {}, edited: async () => {}, assertReady() {}, assertSqlBinding() {}, recoverSql: async () => false };
   const f = await harness(reflection);
@@ -140,6 +431,56 @@ test('migration scanning reports incomplete notes without hiding valid note refe
   const scan = await f.service.migrationReferences();
   assert.equal(scan.complete, false); assert.equal(scan.references.length, 1);
   assert.equal(scan.references[0].note, f.note.path); assert.equal(f.errors.length, 1);
+  f.service.unload();
+});
+
+test('unchanged closed notes are read once across repeated reference scans and indexing', async () => {
+  const f = await harness();
+  const stat = { mtime: 1, size: f.text.length };
+  Object.defineProperty(f.note, 'stat', { value: stat });
+  const first = await f.service.migrationReferences();
+  const reads = f.reads;
+  assert.equal(reads, 1);
+  assert.equal((await f.service.migrationReferences()).references.length, first.references.length);
+  await f.reindex();
+  assert.equal(f.reads, reads);
+  stat.mtime++;
+  await f.service.migrationReferences();
+  assert.equal(f.reads, reads + 1);
+  f.service.unload();
+});
+
+test('same-size note events invalidate reference caches and malformed edits remain incomplete', async () => {
+  const f = await harness();
+  Object.defineProperty(f.note, 'stat', { value: { mtime: 1, size: f.text.length } });
+  f.service.register({ register() {}, registerEvent() {} });
+  await f.service.migrationReferences();
+  const reads = f.reads;
+  f.text = f.text.split('tasks').join('other');
+  await f.event('modify', f.note);
+  const changed = await f.service.migrationReferences();
+  assert.equal(changed.references[0].id, 'other');
+  assert.ok(f.reads > reads);
+  f.text = '<!-- csvzall:export broken -->';
+  await f.event('modify', f.note);
+  assert.equal((await f.service.migrationReferences()).complete, false);
+  f.text = oldTable;
+  await f.event('modify', f.note);
+  assert.equal((await f.service.migrationReferences()).references[0].id, 'tasks');
+  f.service.unload();
+});
+
+test('reference caches never hide unsaved open-editor markers', async () => {
+  const f = await harness();
+  Object.defineProperty(f.note, 'stat', { value: { mtime: 1, size: f.text.length } });
+  await f.service.migrationReferences();
+  const reads = f.reads;
+  const editing = f.installEditor(f.text.split('tasks').join('draft'));
+  const scan = await f.service.migrationReferences();
+  assert.equal(scan.references[0].id, 'draft');
+  assert.equal(f.reads, reads);
+  editing.editor.replaceRange('<!-- csvzall:export incomplete -->', { ch: 0 });
+  assert.equal((await f.service.migrationReferences()).complete, false);
   f.service.unload();
 });
 
@@ -244,6 +585,63 @@ test('startup and CSV saves regenerate tables, while generated note saves do not
   await f.event('modify', f.csv); await f.event('modify', f.csv); await f.drain();
   assert.equal(f.queries.length, 2);
   f.service.unload();
+});
+
+test('unload before layout readiness prevents late polling and export work', async () => {
+  const f = await harness();
+  try {
+    f.service.register({ register() {}, registerEvent() {} });
+    f.service.unload();
+    await f.layoutReady(); await f.service.refreshAfterSync(); await f.service.refresh(f.note);
+    assert.equal(f.activePolls, 0); assert.equal(f.reads, 0); assert.equal(f.queries.length, 0); assert.equal(f.writes, 0);
+  } finally { f.service.unload(); }
+});
+
+test('stopping the refresh worker during generation is terminal after its pending work finishes', async () => {
+  const f = await harness();
+  try {
+    await f.start(); await f.drain();
+    const before = f.text;
+    let finish!: (value: string) => void, started!: () => void;
+    const generating = new Promise<void>(resolve => { started = resolve; });
+    f.setQuery(() => { started(); return new Promise<string>(resolve => { finish = resolve; }); });
+    f.service.refreshes.sourceChanged(f.csv.path);
+    const drain = f.drain(); await generating;
+    f.service.refreshes.stop(); finish('| title |\n| --- |\n| Late |'); await drain;
+    await f.event('modify', f.csv); await f.drain(); await f.reindex();
+    assert.equal(f.text, before); assert.equal(f.queries.length, 2); assert.equal(f.activePolls, 0);
+  } finally { f.service.unload(); }
+});
+
+test('a background index scan and an explicit refresh can progress independently', async () => {
+  let finish!: () => void, started!: () => void, calls = 0;
+  const scanning = new Promise<void>(resolve => { started = resolve; });
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const reflection = { reconcile: async () => { if (++calls === 1) { started(); await gate; } }, assertReady() {}, assertSqlBinding() {}, recoverSql: async () => false };
+  const f = await harness(reflection);
+  try {
+    const scan = f.reindex(); await scanning;
+    await f.service.refresh(f.note);
+    assert.equal(f.queries.length, 1); assert.match(f.text, /\| New \|/);
+    finish(); await scan;
+  } finally { f.service.unload(); }
+});
+
+test('maintenance cleanup waits for all overlapping writes and releases a failed write', async () => {
+  const f = await harness();
+  try {
+    f.text = 'No remaining exports';
+    let finishFirst!: () => void, finishSecond!: () => void;
+    const first = f.service.maintenance.withWrite(() => new Promise<void>(resolve => { finishFirst = resolve; }));
+    const second = f.service.maintenance.withWrite(async () => {
+      await new Promise<void>(resolve => { finishSecond = resolve; }); throw new Error('Write failed');
+    });
+    await f.service.pruneDeadExports(); assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
+    finishFirst(); await first;
+    await f.service.pruneDeadExports(); assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
+    finishSecond(); await assert.rejects(second, /Write failed/);
+    await f.service.pruneDeadExports(); assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
+  } finally { f.service.unload(); }
 });
 
 test('open note refresh uses the editing buffer and preserves unsaved prose', async () => {
@@ -498,15 +896,16 @@ test('changing inline scalar format to table inserts paragraph boundaries', asyn
 });
 
 
-test('converting an inline value to a static table retains Markdown paragraph boundaries', async () => {
+test('converting an inline value to a paused table retains Markdown paragraph boundaries and manual refresh', async () => {
   const f = await harness(); valueConfig(f);
   f.text = f.text.replace('**', '').replace('**', '');
   const buffer = f.installEditor(f.text), existing = findManagedTables(buffer.text)[0]!;
   f.service.open(buffer.view, undefined, existing);
   for (let i = 0; i < 40 && !f.formOptions; ++i) await Promise.resolve();
   await f.formOptions.submit({ source: f.csv.path, columns: [], sql: 'SELECT title FROM data', autoUpdate: false, format: 'table' }, new AbortController().signal);
-  assert.equal(buffer.text, 'There are \n\n| title |\n| --- |\n| New |\n\n open tasks.');
-  assert.equal(findManagedTables(buffer.text).length, 0);
+  assert.equal(buffer.text, `There are \n\n${managedTableText({ ...recipe, format: 'table' }, '| title |\n| --- |\n| New |')}\n\n open tasks.`);
+  assert.equal(findManagedTables(buffer.text).length, 1);
+  assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports[0].runOnSave, false);
   f.service.unload();
 });
 
@@ -659,6 +1058,7 @@ test('settings configure updates an existing export identity and preserves the p
   const saved = (await f.service.listExports([]))[0];
   let savedCalls = 0;
   f.service.configureExport(saved, () => { savedCalls++; });
+  for (let i = 0; i < 40 && !f.formOptions; ++i) await Promise.resolve();
   assert.equal(f.formOptions.value.autoUpdate, false);
   await f.formOptions.submit({ ...f.formOptions.value, sql: 'SELECT title FROM data', columns: [] }, new AbortController().signal);
   const updated = JSON.parse(f.configs.get('.csvzall/exports.json')!).exports;
@@ -672,6 +1072,7 @@ test('settings configure links a SQL export to its note and opens it at the mark
   const f = await harness();
   const saved = (await f.service.listExports([]))[0];
   f.service.configureExport(saved, () => {});
+  for (let i = 0; i < 40 && !f.formOptions; ++i) await Promise.resolve();
   assert.equal(f.noteLink.path, 'Reports/tasks.md');
   assert.equal(f.noteLink.exists, true);
   await f.noteLink.open();
@@ -687,6 +1088,7 @@ test('legacy exports without an output note are shown as unlinked without scanni
   f.configs.set('.csvzall/exports.json', JSON.stringify({ exports: [{ id: recipe.id, input: recipe.source, options: { columns: [], sql: '' } }] }));
   const saved = (await f.service.listExports([]))[0];
   f.service.configureExport(saved, () => {});
+  for (let i = 0; i < 40 && !f.formOptions; ++i) await Promise.resolve();
   assert.equal(f.noteLink.path, undefined);
   assert.equal(f.noteLink.exists, false);
   await assert.rejects(f.noteLink.open(), /not linked to a note/);

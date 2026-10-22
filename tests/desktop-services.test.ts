@@ -121,6 +121,25 @@ test("scope validation runs after command preflight and before any process spawn
   assert.equal(spawns, 0);
 });
 
+test("viewer launch and its real capability probe do not repeat export preflight", async () => {
+  const children = [childProcess(), childProcess()];
+  let starts = 0, preflights = 0;
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => children[starts++]!);
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {}, undefined,
+    async () => { preflights++; throw new Error("Unrelated export discovery must not block a viewer"); });
+  const pending = service.startViewer("data.csv");
+  while (starts < 1) await Promise.resolve();
+  children[0]!.stdout.emit("data", Buffer.from("--obsidian"));
+  children[0]!.emit("close", 0, null);
+  while (starts < 2) await Promise.resolve();
+  children[1]!.stdout.emit("data", Buffer.from('{"url":"http://127.0.0.1:1234/?token=test","obsidianMode":{"version":1,"chartAutomation":"host"}}\n'));
+  assert.equal((await pending).url, "http://127.0.0.1:1234/?token=test");
+  assert.equal(preflights, 0);
+  await assert.rejects(service.captureCommand(["sql", "query"], "."), /Unrelated export discovery/);
+  assert.equal(preflights, 1);
+  service.unload();
+});
+
 test("captured commands wait for stdout EOF and preserve split UTF-8 characters", async () => {
   const child = childProcess();
   const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);

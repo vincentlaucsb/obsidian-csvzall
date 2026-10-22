@@ -75,7 +75,8 @@ export class CsvzallProcessService {
   }
 
   async captureCommand(args: string[], cwd: string, validate?: () => void): Promise<string> {
-    if (this.beforeCommand) await this.beforeCommand();
+    const capabilityProbe = args.length === 2 && args[0] === "view" && args[1] === "--help";
+    if (this.beforeCommand && !capabilityProbe) await this.beforeCommand();
     validate?.();
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);
@@ -148,7 +149,8 @@ export class CsvzallProcessService {
   async startViewer(filePath: string, leaf?: WorkspaceLeaf): Promise<CsvzallServerHandle> {
     if (leaf) this.handleLeafClosed(leaf);
     const generation = leaf ? this.leafGeneration.get(leaf) : undefined;
-    if (this.beforeCommand) await this.beforeCommand();
+    // CsvService prepares the CSV's chart scope before calling this method.
+    // Launching a viewer must not repeat global SQL discovery.
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     if (leaf && this.leafGeneration.get(leaf) !== generation) throw new ViewerStartupCancelledError("Viewer startup cancelled");
     const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);

@@ -4,6 +4,7 @@ import { join } from "path";
 // Downloads belong to the Node process, not the lifetime of a popout window.
 import * as nodeTimers from "timers";
 import { extractCsvzallFilesFromArchive, isZipAssetName, isTarGzAssetName, sha256Hex } from "./installer/archive.js";
+import { portableBasename } from "./utils/filenames.js";
 
 export {
   extractCsvzallFilesFromArchive,
@@ -124,7 +125,7 @@ export function checksumFromReleaseAssetDigest(asset: ReleaseAsset | null | unde
 
 export function parseSha256ChecksumText(text: string, assetName: string): string | null {
   const normalizedAssetName = assetName.toLowerCase();
-  const basename = normalizedAssetName.split(/[\\/]/).pop();
+  const basename = portableBasename(normalizedAssetName);
   const hashes: string[] = [];
 
   for (const line of text.split(/\r?\n/)) {
@@ -137,7 +138,7 @@ export function parseSha256ChecksumText(text: string, assetName: string): string
     if (opensslStyle?.[1] && opensslStyle[2]) {
       const filename = opensslStyle[1].trim().toLowerCase();
       const hash = opensslStyle[2].toLowerCase();
-      if (filename === normalizedAssetName || filename.split(/[\\/]/).pop() === basename) {
+      if (filename === normalizedAssetName || portableBasename(filename) === basename) {
         return hash;
       }
       hashes.push(hash);
@@ -148,7 +149,7 @@ export function parseSha256ChecksumText(text: string, assetName: string): string
     if (standardStyle?.[1] && standardStyle[2]) {
       const hash = standardStyle[1].toLowerCase();
       const filename = standardStyle[2].trim().toLowerCase();
-      if (filename === normalizedAssetName || filename.split(/[\\/]/).pop() === basename) {
+      if (filename === normalizedAssetName || portableBasename(filename) === basename) {
         return hash;
       }
       hashes.push(hash);

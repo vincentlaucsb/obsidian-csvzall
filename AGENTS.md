@@ -21,6 +21,7 @@
 - `src/logging/`: Event log mutation helpers.
 - `src/exports/`: Desktop export reflection, revision ordering, and local configuration reconstruction.
 - `src/obsidian/`: Obsidian adapter and filesystem helpers.
+- `src/utils/`: General-purpose, pure, browser-safe helpers organized by concern. Import modules directly; keep feature policy in its owning module and Node/Electron APIs out of shared utilities.
 - `src/commands/`: Command and context-menu registration.
 - `src/watchers/`: Vault event registration.
 - `src/chartAutomation.ts` and `src/viewerHelpers.ts`: Pure helper modules covered directly by tests.
@@ -80,10 +81,8 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 
 ## Runtime Import Rule
 
-- Do not use dynamic or async imports such as `await import(...)` in Obsidian runtime code under `src/` or `mobile-src/`.
-- For desktop runtime Node.js dependencies such as `child_process`, `path`, `fs`, or Electron APIs, use static top-level imports so esbuild emits Obsidian-compatible CommonJS `require(...)` calls in `main.js`.
-- Keep mobile runtime code free of Node.js built-ins and Electron APIs entirely.
-- Dynamic imports are acceptable in build scripts and tests where Node.js is the actual runtime.
+- Runtime import restrictions are enforced by [eslint.config.mjs](eslint.config.mjs). Static desktop imports let esbuild emit Obsidian-compatible CommonJS `require(...)` calls. Scripts and tests run in Node and may use dynamic imports.
+- Mobile must remain free of Node.js and Electron dependencies, including transitive imports from shared modules. Source lint and the generated mobile bundle scan enforce complementary parts of this requirement.
 - When changing runtime imports, add or update bundle-level assertions so `main.js` cannot ship with browser-style dynamic imports for Node.js modules.
 
 ## Mobile WASM Viewer Notes
@@ -107,14 +106,14 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 - The repository-local agent skill [obsidian-warning-remediation](.agents/skills/obsidian-warning-remediation/SKILL.md) is the reusable entry point for this workflow. Invoke it as `$obsidian-warning-remediation`; keep detailed procedure in `docs/obsidian-warning-remediation.md`.
 - Run [the warning remediation workflow](docs/obsidian-warning-remediation.md) for Obsidian scorecard, submission, or validation feedback. Use supplied feedback when available; otherwise retrieve `https://community.obsidian.md/plugins/csvzall#scorecard`. Download current official guidance on each run with `npm run review:obsidian` (or `-- --warnings <file>`), then record findings, dispositions, verification, and unavailable checks in `docs/`.
 - Direct Filesystem Access and Shell Execution are required desktop capabilities for native helper installation and execution. Preserve them, keep `isDesktopOnly: true`, and disclose outside-vault helper access in README. Do not hide APIs or weaken checks to remove capability warnings. Keep process arguments separate from executable paths, avoid shell interpolation, verify managed downloads, and keep mobile free of these dependencies.
-- Narrow `TFile`/`TFolder` with `instanceof`, including collection values; do not cast to these types. Keep scalar CSV C0/DEL sanitization free of control-character regexes while preserving run collapsing, Unicode, and literal Markdown escaping.
-- Desktop settings use `getSettingDefinitions()` and `update()` with minimum Obsidian 1.13.0. Do not add a leftover `display()` override; keep indexing cheap and side effects in render/action callbacks. Evaluate mobile against its own manifest minimum.
+- Preserve scalar CSV control-run collapsing, Unicode, and literal Markdown escaping. Lint enforces the type-narrowing and control-regex restrictions.
+- Desktop settings use declarative definitions with minimum Obsidian 1.13.0; keep indexing cheap and side effects in render/action callbacks. Evaluate mobile against its own manifest minimum.
 - Production builds must succeed from a clean source archive without `.git` or Git installed. Keep the LF gate and imported `-text` byte preservation active in this mode. Run `npm run check:source-archive` before release and keep its CI check enabled.
 - Check dependency advisory ranges and dependency paths, update the lockfile with fixes, and review the Moment override when Obsidian's dependency constraints change. Do not assume an external runtime API removes the need to fix a flagged lockfile dependency.
 - Preserve Obsidian defaults and the user's theme in hosted UI: use the standard Modal title, supported semantic button APIs (`setDestructive()` for deletion) and classes such as `mod-cta`. Limit custom CSS to feature layout; shared viewers inherit host styling. Do not restyle native heading typography, control colors, fonts, line heights, padding, or vertical alignment. In authored host CSS, use explicit layout classes instead of `:has()`, and make display rules respect `[hidden]` without `!important`. Preserve canonical imported modules; change shared source upstream and use its sync workflow.
 - Follow the official Obsidian developer policies, plugin submission requirements, and plugin guidelines before cutting a release.
-- Settings tabs: keep general settings at the top without a heading. Do not use top-level headings like `General`, `Settings`, or the plugin name. If a settings section heading is needed, use `new Setting(containerEl).setName(...).setHeading()` and avoid the word `settings` in the heading.
-- UI text should use sentence case. Do not repeat the plugin name in command names; Obsidian already shows the plugin name next to commands.
+- Settings tabs: keep general controls at the top without a heading. Heading APIs/names and redundant plugin names in command names are enforced by ESLint.
+- UI text should use sentence case.
 - Keep each distribution's minimum at the lowest version required by its APIs, enforced by `obsidianmd/no-unsupported-api`. Adopting a newer API requires updating the desktop `manifest.json` and current `versions.json` entry together, or `mobile-src/manifest.json` for mobile, to at least its introduction version. Runtime guards do not replace metadata updates. Desktop capability and `isDesktopOnly` requirements above still apply.
 
 ## Version Locations
@@ -139,6 +138,7 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 - `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
 - `src/views/CsvzallTableView.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
 - `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.
+- `src/views/CsvzallTableView.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
 
 After every Obsidian validation failure fix, bump the plugin patch version before
 creating or retrying a release tag. The release tag, `manifest.json`,
@@ -151,14 +151,12 @@ When adding any new version-bearing file, metadata field, generated manifest, or
 
 ## Type-safety checks
 
-`npm run lint` must type-check and lint both `src/` and `mobile-src/` with zero
-warnings. Keep it required by desktop and mobile builds so release workflows
-cannot bypass it. Do not disable the unsafe-value rules to silence unresolved
-Node or standard-library types; fix dependency/type resolution instead.
-Generated WASM data uses a checked-in declaration contract for clean-checkout
-type checking. Behavioral lint regressions live in `tests/lint-config.test.ts`.
-Preserve callback receivers and avoid unnecessary type assertions or deprecated
-APIs; enforce these requirements with the corresponding TypeScript ESLint rules.
-Every ESLint directive comment, including a closing `eslint-enable`, must include
-a `--` description explaining why it is necessary. Enforce this for both runtime
-distributions with `eslint-comments/require-description`.
+Read [eslint.config.mjs](eslint.config.mjs) for mechanical coding requirements,
+including unused values, type safety, API compatibility, imports, settings UI,
+command naming, and directive descriptions. Run `npm run lint`; it type-checks
+both distributions and lints authored TypeScript and MJS with zero warnings.
+Keep this gate required by desktop/mobile builds. Fix dependency/type resolution
+rather than weakening unsafe-value rules. Generated WASM data retains a checked-in
+declaration contract for clean-checkout type checking. Behavioral enforcement
+regressions live in `tests/lint-config.test.ts`; bundle checks remain necessary
+for generated output and transitive mobile dependencies.

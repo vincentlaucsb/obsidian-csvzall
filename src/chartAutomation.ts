@@ -1,6 +1,8 @@
 import type { ConfiguredChart } from "./types.js";
+import { normalizeVaultPath, parentVaultPath } from "./utils/paths.js";
+import { configPathForFolder } from "./exports/paths.js";
 
-export const DEFAULT_CHART_CONFIG_PATH = ".csvzall/charts.json";
+export const DEFAULT_CHART_CONFIG_PATH = configPathForFolder("", "charts");
 
 type RawChartEntry = {
   id?: unknown;
@@ -16,14 +18,6 @@ type RawChartConfig = {
 
 type TimerHandle = unknown;
 
-export function normalizeVaultPath(path: string): string {
-  return path
-    .replace(/\\/g, "/")
-    .replace(/^\.\//, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+/g, "/");
-}
-
 export function isChartConfigPath(path: string): boolean {
   return normalizeVaultPath(path).endsWith("/.csvzall/charts.json") ||
     normalizeVaultPath(path) === DEFAULT_CHART_CONFIG_PATH;
@@ -38,8 +32,7 @@ export function chartConfigRoot(configPath = DEFAULT_CHART_CONFIG_PATH): string 
   if (normalized.endsWith(suffix)) {
     return normalized.slice(0, -suffix.length);
   }
-  const lastSlash = normalized.lastIndexOf("/");
-  return lastSlash >= 0 ? normalized.slice(0, lastSlash) : "";
+  return parentVaultPath(normalized);
 }
 
 export function resolveChartPath(configPath: string, path: string): string {

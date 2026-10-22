@@ -1,4 +1,6 @@
 import { Parser } from 'commonmark';
+import { findFencedTables, type ExportFence } from './fencedTables.js';
+import { isCanonicalVaultPath } from '../utils/paths.js';
 
 export type ExportFormat = 'table' | 'value';
 export interface TableRecipe {
@@ -12,7 +14,8 @@ export interface TableRecipe {
 
 export interface ManagedTable {
   id: string;
-  marker: 'table' | 'export';
+  marker: 'table' | 'export' | 'fence';
+  fence?: ExportFence;
   recipe?: TableRecipe;
   from: number;
   to: number;
@@ -22,7 +25,7 @@ export interface ManagedTable {
 
 export function validateSource(source: string): string {
   const path = source.replace(/\\/g, '/');
-  if (!path || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..') || !/\.(?:csv|tsv)$/i.test(path)) {
+  if (!isCanonicalVaultPath(path) || !/\.(?:csv|tsv)$/i.test(path)) {
     throw new Error('Choose a CSV or TSV file inside the vault.');
   }
   return path;
@@ -114,11 +117,17 @@ export function findManagedTables(text: string): ManagedTable[] {
     }
   }
   if (pending) throw new Error('Unclosed CSV export marker.');
-  return tables;
+  for (const table of findFencedTables(text)) {
+    if (ids.has(table.id)) throw new Error('Duplicate CSV export id.');
+    if (tables.some(other => table.from < other.to && table.to > other.from)) throw new Error('Nested CSV export regions.');
+    ids.add(table.id); tables.push(table);
+  }
+  return tables.sort((left, right) => left.from - right.from);
 }
 
-export function replaceManagedTable(text: string, expected: ManagedTable, replacement: string): string {
+export function replaceManagedTable(text: string, expected: ManagedTable, replacement: string, guardSnapshot = false): string {
   const current = findManagedTables(text).find(table => table.id === expected.id);
+  if (guardSnapshot && expected.fence && text !== expected.fence.snapshot) throw new Error('The note changed. Reopen the export action and try again.');
   if (!current || current.text !== expected.text) throw new Error('The export changed while refreshing. Refresh it again.');
   return text.slice(0, current.from) + replacement + text.slice(current.to);
 }

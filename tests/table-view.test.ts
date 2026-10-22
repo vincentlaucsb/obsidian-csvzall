@@ -24,11 +24,12 @@ function fixture(isMobileApp = false) {
   const messages: any[] = [];
   const exports: any = {};
   const module = {exports};
-  runInNewContext(compiled, {module, exports, ArrayBuffer, Uint8Array,
-    window: { setTimeout, clearTimeout, removeEventListener() {} },
+  let messageListener: ((event: unknown) => void) | undefined;
+  runInNewContext(compiled, {module, exports, ArrayBuffer, Uint8Array, AbortController,
+    window: { setTimeout, clearTimeout, removeEventListener() {}, addEventListener(_type: string, listener: (event: unknown) => void) { messageListener = listener; } },
     require: () => ({
     FileView: class {leaf: any; constructor(leaf: any) {this.leaf = leaf;}},
-    Modal: class {}, Platform: {isMobileApp}, Notice: class {constructor(message: string) {notices.push(message);}},
+    Modal: class {}, Platform: {isMobileApp, isDesktopApp: !isMobileApp}, Notice: class {constructor(message: string) {notices.push(message);}},
   })});
   const owner = {handleLeafClosed() {}, async openCsvInLeaf() {}, async installCsvzallFromView() {return false;}};
   const view = new module.exports.CsvzallTableView({}, owner);
@@ -38,7 +39,7 @@ function fixture(isMobileApp = false) {
   view.containerEl = {createDiv: () => new Element(), prepend() {}};
   let renders = 0;
   view.render = () => {renders++; view.renderGeneration++;};
-  return {view, file, frame, messages, notices, owner, install: () => installClick(), renders: () => renders};
+  return {view, file, frame, messages, notices, owner, message: (event: unknown) => messageListener?.(event), install: () => installClick(), renders: () => renders};
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -46,6 +47,47 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => {resolve = yes; reject = no;});
   return {promise, resolve, reject};
 }
+
+test('desktop note exports validate the sender, save dirty edits first and reject duplicate insertions', async () => {
+  const f = fixture(); f.view.wasmFile = null; f.view.desktopSourcePath = f.file.path;
+  let inserts = 0;
+  Object.assign(f.owner, { insertQueryIntoNote: async (file: unknown, sql: string) => { assert.equal(file, f.file); assert.equal(sql, 'SELECT 1'); inserts++; return true; } });
+  f.view.listenForDirtyState(f.frame);
+  const data = { source: 'csvzall-viewer', type: 'insert-query', version: 1, requestId: 1, sql: 'SELECT 1', save: true };
+  f.message({ source: {}, data }); assert.equal(inserts, 0);
+  f.view.dirty = true;
+  f.message({ source: f.frame.contentWindow, data });
+  assert.equal(inserts, 0);
+  const save = f.messages[0]; assert.equal(save.type, 'save-request');
+  f.view.handleSaveResponse({ source: 'csvzall-viewer', type: 'save-response', version: 1, requestId: save.requestId, success: true, dirty: false });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(inserts, 1);
+  f.message({ source: f.frame.contentWindow, data });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(inserts, 1);
+  assert.equal(f.messages[1].success, true);
+});
+
+test('failed saves prevent insertion and closing the frame aborts an open destination modal', async () => {
+  const f = fixture(); f.view.wasmFile = null; f.view.desktopSourcePath = f.file.path;
+  let inserts = 0, lifecycle: AbortSignal | undefined;
+  const modal = deferred<boolean>();
+  Object.assign(f.owner, { insertQueryIntoNote: (_file: unknown, _sql: string, _cancelled: unknown, signal: AbortSignal) => { inserts++; lifecycle = signal; return modal.promise; } });
+  f.view.dirty = true;
+  const data = { source: 'csvzall-viewer', type: 'insert-query', version: 1, requestId: 1, sql: 'SELECT 1', save: true };
+  f.view.handleExportMessage(data, f.frame);
+  f.view.handleSaveResponse({ source: 'csvzall-viewer', type: 'save-response', version: 1, requestId: f.messages[0].requestId, success: false, dirty: true, error: 'Disk full' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(inserts, 0);
+  f.view.dirty = false;
+  f.view.handleExportMessage({ ...data, requestId: 2 }, f.frame);
+  assert.equal(inserts, 1);
+  f.view.removeMessageListener();
+  assert.equal(lifecycle!.aborted, true);
+  const messages = f.messages.length;
+  modal.resolve(true); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.messages.length, messages);
+});
 
 test("failed WASM save keeps the editor and unsaved edits available", async () => {
   const f = fixture();

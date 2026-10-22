@@ -26,6 +26,8 @@ const sourceSnapshotFiles = [
   "mobile-src/EmbeddedViewerDocument.ts",
   "mobile-src/manifest.json",
   "src/csv/csvFiles.ts",
+  "src/utils/paths.ts",
+  "src/obsidian/pluginPaths.ts",
   "src/views/CsvzallTableView.ts",
   "src/views/UnsavedChangesModal.ts",
   "src/views/viewTypes.ts",

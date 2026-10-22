@@ -133,6 +133,10 @@ export default class CsvzallPlugin extends Plugin {
     openPluginSettings(this.app, this.manifest.id);
   }
 
+  insertQueryIntoNote(file: TFile, sql: string, cancelled: () => boolean, lifecycle?: AbortSignal): Promise<boolean> {
+    return this.markdownTables.insertQueryIntoNote(file, sql, cancelled, lifecycle);
+  }
+
   private createServices(): void {
     this.reflection = new ExportReflection({ adapter: this.app.vault.adapter, store: this.dataStore,
       localDirectory: `${this.app.vault.configDir}/plugins/${this.manifest.id}/export-sync-local`,
@@ -177,7 +181,10 @@ export default class CsvzallPlugin extends Plugin {
       this.eventLog,
       this.filesystem,
     );
-    this.markdownTables = new MarkdownTableService(this.app, this.filesystem, this.processService, this.eventLog, this.reflection);
+    this.markdownTables = new MarkdownTableService(this.app, this.filesystem, this.processService, this.eventLog, this.reflection, {
+      syntax: () => this.settings.exportSyntax,
+      saveSyntax: async syntax => { if (this.settings.exportSyntax !== syntax) { this.settings.exportSyntax = syntax; await this.saveSettings(); } },
+    });
     this.exportSettings = new ExportSettingsService(this.app, this.chartService, this.markdownTables, this.filesystem, this.processService, this.reflection);
   }
 }

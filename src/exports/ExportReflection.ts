@@ -4,7 +4,9 @@ import {
   canonical, compare, configPath, documentText, identity, object, parseDocument, readRevisions,
   revisionKey, winners, SYNC_SCHEMA, type DeleteReason, type JsonObject, type Revision,
 } from "./revisions.js";
-import { absoluteReference, directConfig, historicalValue, localizeRecords, type ExportReference, type ReferenceScan } from "./localFolders.js";
+import { historicalValue, localizeRecords, type ExportReference, type ReferenceScan } from "./localFolders.js";
+import { absoluteReference, ancestorConfigPaths, configPathForFolder, configRoot, directConfig, relativeReference } from "./paths.js";
+import { parentVaultPath } from "../utils/paths.js";
 import { ExportDefinitions } from "../markdown/ExportDefinitions.js";
 
 interface Baseline { text: string; mtime: number; scope?: string }
@@ -27,6 +29,7 @@ export class ExportReflection {
   private readonly edits = new Map<string, DeleteReason>();
   private readonly blocked = new Set<string>();
   private running: Promise<void> | null = null;
+  private scopedRun = false;
   private stopped = false;
   private initialized = false;
   private localizationPending = false;
@@ -65,8 +68,27 @@ export class ExportReflection {
 
   reconcile(): Promise<void> {
     if (this.stopped || !this.initialized) return Promise.resolve();
-    if (!this.running) this.running = this.run().finally(() => { this.running = null; });
+    // A global poll arriving during viewer preparation still needs to inspect SQL
+    // and other folders after the scoped work completes.
+    if (this.running) return this.scopedRun ? this.running.then(() => this.reconcile()) : this.running;
+    return this.startRun();
+  }
+
+  private startRun(paths?: Set<string>): Promise<void> {
+    this.scopedRun = paths !== undefined;
+    this.running = this.run(paths).finally(() => { this.running = null; this.scopedRun = false; });
     return this.running;
+  }
+
+  private async reconcileCharts(source: string): Promise<void> {
+    while (this.running) await this.running;
+    if (this.stopped || !this.initialized) return;
+    // Pending moves must finish in their original scopes before a viewer opens.
+    if (this.state.renames.length) await this.reconcile();
+    while (this.running) await this.running;
+    if (this.stopped) return;
+    const paths = new Set(ancestorConfigPaths(source, "charts"));
+    await this.startRun(paths);
   }
 
   private async journal(): Promise<void> {
@@ -89,43 +111,63 @@ export class ExportReflection {
 
   private revision(path: string, id: string, value: JsonObject | null, time: number, pluginEdit: boolean, reason?: DeleteReason): Revision {
     const revisions = [...readRevisions(this.state.records).values()];
+    const scoped = revisions.filter(record => record.path === path && record.id === id);
+    const previous = scoped.sort((a, b) => compare(b, a))[0];
+    const bootstrap = value?.csvzallDefaultPreferences === true && value.runOnSave !== false ||
+      value === null && reason === 'stale-sql' && previous?.value?.csvzallDefaultPreferences === true;
+    if (bootstrap) return { version: 1, path, id, value, clockMs: 0,
+      counter: Math.max(-1, ...scoped.filter(record => record.clockMs === 0).map(record => record.counter)) + 1,
+      origin: this.state.origin, ...(value === null ? { reason: reason ?? 'entry-removed' } : {}) };
     const newest = revisions.sort((a, b) => compare(b, a))[0];
     const clockMs = pluginEdit ? Math.max(time, newest?.clockMs ?? 0) : time;
     return { version: 1, path, id, value, clockMs, counter: pluginEdit && newest?.clockMs === clockMs ? newest.counter + 1 : 0,
       origin: this.state.origin, ...(value === null ? { reason: reason ?? "entry-removed" } : {}) };
   }
 
-  private async run(): Promise<void> {
+  private async run(chartPaths?: Set<string>): Promise<void> {
     const { adapter, store } = this.options;
-    this.blocked.clear();
+    if (!chartPaths) this.blocked.clear();
     const pending = [];
     for (const move of this.state.renames) if (!await this.applyRename(move.from, move.to)) pending.push(move);
     this.state.renames = pending;
     const incoming = await store.read();
     for (const [key, revision] of readRevisions(incoming)) this.state.records[key] = revision;
-    const currentWinners = winners(readRevisions(this.state.records).values());
+    const history = [...readRevisions(this.state.records).values()];
+    const currentWinners = winners(history);
     let references: ExportReference[] = [], sqlComplete = true;
-    if (this.usesDirectFolders) {
+    if (this.usesDirectFolders && !chartPaths) {
       try {
         const scan = await this.options.references?.() ?? [];
         references = Array.isArray(scan) ? scan : scan.references;
         sqlComplete = Array.isArray(scan) || scan.complete;
       } catch (error) { sqlComplete = false; this.options.report(error); }
     }
-    this.localizationPending = !sqlComplete;
-    const paths = new Set([...Object.keys(this.state.files), ...[...currentWinners.values()].map(record => record.path)]);
+    if (!chartPaths) this.localizationPending = !sqlComplete;
+    const paths = chartPaths ?? new Set([...Object.keys(this.state.files), ...[...currentWinners.values()].map(record => record.path)]);
     for (const reference of references) paths.add(directConfig(reference.note, "exports"));
-    for (const folder of new Set(["", ...this.options.folders()])) {
-      const prefix = folder && folder !== "/" ? `${folder}/` : "";
-      paths.add(`${prefix}.csvzall/charts.json`); paths.add(`${prefix}.csvzall/exports.json`);
+    for (const folder of chartPaths ? [] : new Set(["", ...this.options.folders()])) {
+      const configFolder = folder === "/" ? "" : folder;
+      paths.add(configPathForFolder(configFolder, "charts")); paths.add(configPathForFolder(configFolder, "exports"));
       if (this.usesDirectFolders) {
         try { await new ExportDefinitions(adapter, () => this.stopped).migrateFolder(folder); }
-        catch (error) { this.blocked.add(`${prefix}.csvzall/exports.json`); this.options.report(error); }
+        catch (error) { this.blocked.add(configPathForFolder(configFolder, "exports")); this.options.report(error); }
       }
     }
     const snapshots = new Map<string, string | null>();
     for (const path of paths) {
       if (this.stopped) return;
+      if (chartPaths) {
+        this.blocked.delete(path);
+        // Read destination bytes before localization so offline edits and ID
+        // collisions are resolved against real files, including delayed Sync.
+        for (const record of currentWinners.values()) {
+          if (record.path !== path) continue;
+          const value = historicalValue(record, history)?.value;
+          if (typeof value?.input === "string") paths.add(directConfig(absoluteReference(path, value.input), "charts"));
+          if (record.relocatedFrom) paths.add(record.relocatedFrom.path);
+          for (const target of record.relocatedTo ?? []) paths.add(target.path);
+        }
+      }
       try {
         const text = await adapter.exists(path) ? await adapter.read(path) : null;
         snapshots.set(path, text);
@@ -148,6 +190,10 @@ export class ExportReflection {
         const timestamp = Math.max(0, Math.floor(reason ? (this.options.now?.() ?? Date.now()) : stat?.mtime ?? 0));
         for (const id of new Set([...entries.keys(), ...baseline?.keys() ?? []])) {
           const value = entries.get(id) ?? null;
+          // External JSON/CLI edits preserve unknown fields. A changed entry is
+          // an actual choice even if its old provisional flag was kept.
+          if (value?.csvzallDefaultPreferences === true && (value.runOnSave === false ||
+            baseline?.get(id)?.csvzallDefaultPreferences === true && canonical(baseline.get(id)) !== canonical(value))) delete value.csvzallDefaultPreferences;
           if (baseline && canonical(baseline.get(id) ?? null) === canonical(value)) continue;
           const existing = currentWinners.get(identity({ path, id }));
           if (existing && canonical(existing.value) === canonical(value)) continue;
@@ -161,10 +207,15 @@ export class ExportReflection {
       } catch (error) { this.blocked.add(path); this.options.report(error); }
     }
     if (this.stopped) return;
-    if (this.usesDirectFolders) {
+    const localize = (): number => {
       const records = readRevisions(this.state.records);
-      localizeRecords(records, references, sqlComplete);
-      for (const [key, record] of records) this.state.records[key] = record;
+      const selected = chartPaths ? new Map([...records].filter(([, record]) => chartPaths.has(record.path))) : records;
+      localizeRecords(selected, references, chartPaths ? false : sqlComplete);
+      for (const [key, record] of selected) { this.state.records[key] = record; records.set(key, record); }
+      return records.size;
+    };
+    if (this.usesDirectFolders) {
+      localize();
     }
     // Pending edits must survive a crash or a Sync overwrite before materialization.
     await this.journal();
@@ -173,15 +224,13 @@ export class ExportReflection {
         const persisted = await store.patch({ csvzallExportSync: { version: this.usesDirectFolders ? SYNC_SCHEMA : 1 }, ...this.state.records });
         for (const [key, revision] of readRevisions(persisted)) this.state.records[key] = revision;
         if (!this.usesDirectFolders) break;
-        const records = readRevisions(this.state.records), count = records.size;
-        localizeRecords(records, references, sqlComplete);
-        for (const [key, revision] of records) this.state.records[key] = revision;
-        if (count === records.size) break;
+        const count = Object.keys(this.state.records).length;
+        if (count === localize()) break;
         await this.journal();
         if (attempt === 2) throw new Error("Export configurations are still arriving. Localization will retry.");
       }
     }
-    const reduced = winners(readRevisions(this.state.records).values());
+    const reduced = winners([...readRevisions(this.state.records).values()].filter(record => !chartPaths || chartPaths.has(record.path)));
     const staged = new Map(reduced);
     const retired = [...reduced.values()].filter(record => record.reason === "relocated" && !record.value);
     // Preserve inherited bytes until all direct destinations are verified. This
@@ -225,9 +274,9 @@ export class ExportReflection {
       // Keep original bytes for semantically identical documents.
       const same = snapshot !== null && !this.state.files[path]?.scope && canonical([...parseDocument(snapshot, path)]) === canonical([...parseDocument(text, path)]);
       if (!same) {
-        const parent = path.split("/").slice(0, -2).join("/");
+        const parent = configRoot(path);
         if (parent && !await adapter.exists(parent)) { this.blocked.add(path); return false; }
-        const folder = path.slice(0, path.lastIndexOf("/"));
+        const folder = parentVaultPath(path);
         if (!await adapter.exists(folder)) await adapter.mkdir(folder);
         const temporary = `${folder}/.reflect-${crypto.randomUUID()}.json`;
         try {
@@ -273,7 +322,7 @@ export class ExportReflection {
     for (const folder of this.options.folders()) {
       const previous = folder === newPath || folder.startsWith(`${newPath}/`) ? oldPath + folder.slice(newPath.length) : folder;
       if (previous && previous !== "/" && !previous.startsWith(".")) {
-        paths.add(`${previous}/.csvzall/charts.json`); paths.add(`${previous}/.csvzall/exports.json`);
+        paths.add(configPathForFolder(previous, "charts")); paths.add(configPathForFolder(previous, "exports"));
       }
     }
     for (const path of paths) {
@@ -314,15 +363,14 @@ export class ExportReflection {
       for (const field of ["input", "output"]) {
         const reference = value[field];
         if (typeof reference !== "string") continue;
-        const parts = record.path.split("/").slice(0, -2);
+        const base = configRoot(record.path);
+        const parts = base ? base.split("/") : [];
         for (const part of reference.replace(/\\/g, "/").split("/")) {
           if (part === "..") parts.pop(); else if (part && part !== ".") parts.push(part);
         }
         const absolute = parts.join("/");
         const renamed = absolute === oldPath || absolute.startsWith(`${oldPath}/`) ? newPath + absolute.slice(oldPath.length) : absolute;
-        const root = path.split("/").slice(0, -2), target = renamed.split("/");
-        while (root.length && target.length && root[0] === target[0]) { root.shift(); target.shift(); }
-        value[field] = [...root.map(() => ".."), ...target].join("/");
+        value[field] = relativeReference(path, renamed);
       }
       if (!record.value) {
         const destinations = record.relocatedTo?.map(target => ({ ...target, path: target.path.startsWith(`${oldPath}/`) ? newPath + target.path.slice(oldPath.length) : target.path }));
@@ -351,17 +399,13 @@ export class ExportReflection {
   assertSqlBinding(note: string, id: string, resolvedPath: string): void {
     if (this.usesDirectFolders && resolvedPath !== directConfig(note, "exports")) throw new Error("SQL exports must use their note folder's configuration.");
     const all = winners(readRevisions(this.state.records).values());
-    const parts = note.split("/").slice(0, -1);
-    while (true) {
-      const path = `${parts.length ? parts.join("/") + "/" : ""}.csvzall/exports.json`;
+    for (const path of this.usesDirectFolders ? [directConfig(note, "exports")] : ancestorConfigPaths(note, "exports")) {
       const record = all.get(identity({ path, id: `entry:${id}` }));
       if (record) {
         if (!record.value || path !== resolvedPath) throw new Error(`SQL export ${id} is unavailable in its scope. The previous content has been kept.`);
         this.assertReady(path);
         return;
       }
-      if (this.usesDirectFolders || !parts.length) return;
-      parts.pop();
     }
   }
 
@@ -369,9 +413,7 @@ export class ExportReflection {
   async recoverSql(note: string, id: string): Promise<boolean> {
     await this.reconcile();
     const all = [...readRevisions(this.state.records).values()];
-    const parts = note.split("/").slice(0, -1);
-    while (true) {
-      const path = `${parts.length ? parts.join("/") + "/" : ""}.csvzall/exports.json`;
+    for (const path of this.usesDirectFolders ? [directConfig(note, "exports")] : ancestorConfigPaths(note, "exports")) {
       const key = identity({ path, id: `entry:${id}` });
       const winner = winners(all).get(key);
       if (winner?.value) return false;
@@ -385,19 +427,18 @@ export class ExportReflection {
         await this.reconcile();
         return true;
       }
-      if (this.usesDirectFolders || !parts.length) return false;
-      parts.pop();
     }
+    return false;
   }
 
   /** Prevent native chart actions from selecting a parent config. */
   async prepareViewer(source: string): Promise<void> {
     if (!this.usesDirectFolders) return;
-    await this.reconcile();
+    await this.reconcileCharts(source);
     const path = directConfig(source, "charts"), { adapter } = this.options;
     this.assertReady(path);
     if (await adapter.exists(path)) { parseDocument(await adapter.read(path), path); return; }
-    const folder = path.slice(0, path.lastIndexOf("/"));
+    const folder = parentVaultPath(path);
     if (!await adapter.exists(folder)) await adapter.mkdir(folder);
     const temporary = `${folder}/.direct-${crypto.randomUUID()}.json`, text = '{"charts":[]}\n';
     try {
@@ -407,6 +448,7 @@ export class ExportReflection {
       if (!await adapter.exists(path)) await adapter.rename(temporary, path);
       parseDocument(await adapter.read(path), path);
     } finally { if (await adapter.exists(temporary)) await adapter.remove(temporary); }
-    await this.edited(path);
+    this.edits.set(path, "explicit");
+    await this.reconcileCharts(source);
   }
 }

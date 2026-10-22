@@ -28,9 +28,9 @@ import {
   ChartRunScheduler,
   isChartConfigPath,
   matchingRunOnSaveCharts,
-  normalizeVaultPath,
   parseChartConfigText,
 } from "../src/chartAutomation.js";
+import { normalizeVaultPath } from "../src/utils/paths.js";
 
 type TestContextWithAfter = {
   after(callback: () => unknown): void;

@@ -1,7 +1,7 @@
 {
   "id": "csvzall",
   "name": "csvzall",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "minAppVersion": "1.13.0",
   "description": "A fast CSV viewer, editor, and charting tool.",
   "author": "Vincent La",

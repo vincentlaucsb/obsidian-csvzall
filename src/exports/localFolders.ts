@@ -1,29 +1,12 @@
 import { canonical, compare, digest, identity, revisionKey, winners, type ExportIdentity, type JsonObject, type Revision } from "./revisions.js";
+import { absoluteReference, ancestorConfigPaths, configRoot, directConfig, relativeReference } from "./paths.js";
 
 export interface ExportReference { note: string; id: string; legacy: boolean }
 export interface ReferenceScan { references: ExportReference[]; complete: boolean }
 const lexical = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
-export function directConfig(file: string, kind: "charts" | "exports"): string {
-  const parent = file.split("/").slice(0, -1).join("/");
-  return `${parent ? parent + "/" : ""}.csvzall/${kind}.json`;
-}
-export function absoluteReference(config: string, reference: string): string {
-  const parts = config.split("/").slice(0, -2);
-  if (!reference || reference.includes(":") || /^[\\/]/.test(reference)) throw new Error(`Invalid export path in ${config}.`);
-  for (const part of reference.replace(/\\/g, "/").split("/")) {
-    if (part === "..") { if (!parts.length) throw new Error("Export path leaves the vault."); parts.pop(); }
-    else if (part && part !== ".") parts.push(part);
-  }
-  return parts.join("/");
-}
-function relative(config: string, absolute: string): string {
-  const root = config.split("/").slice(0, -2), parts = absolute.split("/");
-  while (root.length && parts.length && root[0] === parts[0]) { root.shift(); parts.shift(); }
-  return [...root.map(() => ".."), ...parts].join("/");
-}
 export function rebase(value: JsonObject, from: string, to: string): JsonObject {
   const result = { ...value };
-  for (const field of ["input", "output"]) if (typeof value[field] === "string") result[field] = relative(to, absoluteReference(from, value[field]));
+  for (const field of ["input", "output"]) if (typeof value[field] === "string") result[field] = relativeReference(to, absoluteReference(from, value[field]));
   return result;
 }
 export function historicalValue(record: Revision, history: Revision[]): Revision | undefined {
@@ -46,10 +29,8 @@ function descends(record: Revision, source: Revision, history: Revision[]): bool
 
 /** Ancestor resolution exists only to import old bindings, never at execution. */
 export function inheritedReference(reference: ExportReference, reduced: Map<string, Revision>, history: Revision[]): Revision | undefined {
-  const parts = reference.note.split("/").slice(0, -1);
   let fallback: Revision | undefined;
-  while (true) {
-    const path = `${parts.length ? parts.join("/") + "/" : ""}.csvzall/exports.json`;
+  for (const path of ancestorConfigPaths(reference.note, "exports")) {
     const exact = reduced.get(identity({ path, id: `entry:${reference.id}` }));
     const candidates = [...reduced.values()].filter(item => item.path === path && item.id.startsWith("entry:") && (item.value || item.reason === "relocated"));
     const mapped = reference.legacy ? candidates.map(item => historicalValue(item, history)).find(item => item?.value?.legacyTableId === reference.id) : undefined;
@@ -66,9 +47,8 @@ export function inheritedReference(reference: ExportReference, reduced: Map<stri
       if (!reference.legacy || mapped) return match;
       fallback ??= match;
     }
-    if (!parts.length) return fallback;
-    parts.pop();
   }
+  return fallback;
 }
 
 /** Append deterministic relocation records without changing semantic edit time. */
@@ -101,11 +81,11 @@ export function localizeRecords(records: Map<string, Revision>, references: Expo
     const targets = new Set(owners.get(identity(source))?.keys());
     if (typeof original.value.output === "string") targets.add(directConfig(absoluteReference(source.path, original.value.output), "exports"));
     if (!targets.size) targets.add(directConfig(absoluteReference(source.path, String(original.value.input)), "exports"));
-    const scope = source.path.split("/").slice(0, -2).join("/");
+    const scope = configRoot(source.path);
     for (const path of targets) {
       const key = identity({ path, id: alias });
       if (legacyPreferred.has(key)) continue;
-      const target = path.split("/").slice(0, -2).join("/");
+      const target = configRoot(path);
       const depth = !scope ? 0 : target === scope || target.startsWith(`${scope}/`) ? scope.split("/").length : -1;
       const previous = aliasClaims.get(key), sourceKey = identity(source);
       if (!previous || depth > previous.depth || (depth === previous.depth && lexical(sourceKey, previous.source) < 0)) aliasClaims.set(key, { source: sourceKey, depth });
@@ -138,7 +118,7 @@ export function localizeRecords(records: Map<string, Revision>, references: Expo
     for (const [path, note] of targets) {
       if (path === source.path) {
         if (!source.value && owners.get(identity(source))?.has(path)) {
-          const value = { ...original.value, output: relative(path, note) };
+          const value = { ...original.value, output: relativeReference(path, note) };
           const restored: Revision = { ...original, value, counter: Math.max(original.counter, source.counter) + 1 };
           delete restored.reason; delete restored.relocatedTo; delete restored.relocationValue;
           add(restored);
@@ -168,7 +148,7 @@ export function localizeRecords(records: Map<string, Revision>, references: Expo
         const owner = legacyPreferred.get(identity({ path, id: value.legacyTableId }));
         if (owner && owner !== identity(source)) delete value.legacyTableId;
       }
-      if (kind === "exports" && note && (typeof value.output !== "string" || directConfig(absoluteReference(path, value.output), kind) !== path)) value.output = relative(path, note);
+      if (kind === "exports" && note && (typeof value.output !== "string" || directConfig(absoluteReference(path, value.output), kind) !== path)) value.output = relativeReference(path, note);
       const moved: Revision = { ...original, path, id, value, relocatedFrom: { path: origin.path, id: origin.id } };
       if (returning && collision?.clockMs === moved.clockMs) moved.counter = Math.max(moved.counter, collision.counter + 1);
       delete moved.relocatedTo; delete moved.reason;

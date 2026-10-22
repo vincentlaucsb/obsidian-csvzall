@@ -93,6 +93,92 @@ test("viewer preparation creates a direct config and refuses malformed direct JS
   assert.equal(a.files.get("Project/.csvzall/charts.json"), "{");
 });
 
+test("viewer preparation reads only related chart scopes and never scans notes or folders", async () => {
+  const a = await device(null, 1000, {}, true);
+  a.directories.add("Project"); a.directories.add("Unrelated");
+  a.files.set("Unrelated/.csvzall/exports.json", "{");
+  a.files.set("Unrelated/.csvzall/charts.json", "{");
+  const reads: string[] = [];
+  const read = a.adapter.read;
+  a.adapter.read = async path => { reads.push(path); return read(path); };
+  const scans = { ...a.scans };
+  await a.reflection.prepareViewer("Project/data.csv");
+  await a.reflection.prepareViewer("Project/data.csv");
+  assert.deepEqual(a.scans, scans);
+  assert.equal(reads.some(path => path.startsWith("Unrelated/") || path.endsWith("exports.json")), false);
+  assert.equal(a.errors.length, 0);
+  assert.deepEqual(JSON.parse(a.files.get("Project/.csvzall/charts.json")!), { charts: [] });
+});
+
+test("viewer preparation imports ancestor charts and preserves unseen destination edits without note discovery", async () => {
+  const a = await device(null, 1000, {}, true);
+  a.directories.add("Project");
+  a.files.set(path, JSON.stringify({ charts: [{ id: "same", type: "bar", input: "Project/data.csv" }] }));
+  a.files.set("Project/.csvzall/charts.json", JSON.stringify({ charts: [{ id: "same", type: "line", input: "local.csv" }] }));
+  const scans = { ...a.scans };
+  await a.reflection.prepareViewer("Project/data.csv");
+  const entries = JSON.parse(a.files.get("Project/.csvzall/charts.json")!).charts;
+  assert.equal(entries.length, 2);
+  assert.equal(entries.find((entry: { id: string }) => entry.id === "same").input, "local.csv");
+  assert.equal(entries.find((entry: { input: string }) => entry.input === "data.csv").type, "bar");
+  assert.equal(JSON.parse(a.files.get(path)!).charts.length, 0);
+  assert.deepEqual(a.scans, scans);
+  const stable = canonical(a.data);
+  await a.reflection.prepareViewer("Project/data.csv");
+  assert.equal(canonical(a.data), stable);
+});
+
+test("viewer preparation restores incoming chart revisions and deletions without materializing SQL", async () => {
+  const a = await device(config(), 1000, {}, true);
+  const b = await device(null, 5000, {}, true);
+  a.files.set(".csvzall/exports.json", JSON.stringify({ exports: [{ id: "table", input: "data.csv", output: "note.md" }] }));
+  await a.reflection.reconcile();
+  b.data = a.data;
+  const scans = { ...b.scans };
+  await b.reflection.prepareViewer("data.csv");
+  assert.deepEqual(JSON.parse(b.files.get(path)!), JSON.parse(config()));
+  assert.equal(b.files.has(".csvzall/exports.json"), false);
+  a.edit('{"charts":[]}', 6000); await a.reflection.edited(path);
+  b.data = a.data;
+  await b.reflection.prepareViewer("data.csv");
+  assert.equal(JSON.parse(b.files.get(path)!).charts.length, 0);
+  assert.deepEqual(b.scans, scans);
+  await b.reflection.reconcile();
+  assert.equal(b.files.has(".csvzall/exports.json"), true);
+});
+
+test("a global reconciliation queued during viewer preparation still discovers SQL", async () => {
+  const a = await device(null, 1000, {}, true);
+  let finish!: () => void;
+  const read = a.store.read.bind(a.store);
+  a.store.read = async () => {
+    a.store.read = read;
+    await new Promise<void>(resolve => { finish = resolve; });
+    return read();
+  };
+  const scans = { ...a.scans };
+  const viewer = a.reflection.prepareViewer("data.csv");
+  const global = a.reflection.reconcile();
+  finish();
+  await Promise.all([viewer, global]);
+  assert.ok(a.scans.notes > scans.notes);
+  assert.ok(a.scans.folders > scans.folders);
+});
+
+test("scoped viewer preparation preserves unrelated error and incomplete-note safeguards", async () => {
+  const a = await device(null, 1000, {}, true);
+  a.directories.add("Project"); a.directories.add("Bad");
+  a.files.set("Bad/.csvzall/exports.json", "{");
+  a.scan.complete = false;
+  await a.reflection.reconcile();
+  assert.throws(() => a.reflection.assertReady("Bad/.csvzall/exports.json"));
+  const scans = { ...a.scans };
+  await a.reflection.prepareViewer("Project/data.csv");
+  assert.throws(() => a.reflection.assertReady("Bad/.csvzall/exports.json"));
+  assert.equal(a.reflection.pending, true);
+  assert.deepEqual(a.scans, scans);
+});
+
 test("cross-folder CSV moves relocate chart ownership without duplicating original lineage", async () => {
   const a = await device(JSON.stringify({ charts: [{ id: "one", type: "bar", input: "A/data.csv", output: "A/graph.svg" }] }), 1000, {}, true);
   a.directories.add("A"); a.directories.add("B"); await a.reflection.reconcile();
@@ -241,6 +327,7 @@ async function device(initial: string | null = config(), clock = 1000, data: Jso
   const directories = new Set(["", ".obsidian", ".obsidian/plugins", ".obsidian/plugins/csvzall"]);
   let disk = structuredClone(data), writes = 0, now = clock;
   const scan = { complete: true, fail: false };
+  const scans = { notes: 0, folders: 0 };
   if (initial !== null) { files.set(path, initial); times.set(path, clock); directories.add(".csvzall"); }
   const adapter = {
     exists: async (path: string) => files.has(path) || directories.has(path),
@@ -256,10 +343,10 @@ async function device(initial: string | null = config(), clock = 1000, data: Jso
   await store.initialize();
   const errors: unknown[] = [];
   const reflection = new ExportReflection({ adapter, store, localDirectory: ".obsidian/plugins/csvzall/export-sync-local",
-    folders: () => [...directories].filter(path => !path.startsWith(".")), report: error => errors.push(error), changed: () => {}, now: () => now,
-    directFolders, references: async () => { if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } });
+    folders: () => { scans.folders++; return [...directories].filter(path => !path.startsWith(".")); }, report: error => errors.push(error), changed: () => {}, now: () => now,
+    directFolders, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } });
   await reflection.initialize();
-  return { files, times, adapter, store, reflection, errors, directories, references, scan,
+  return { files, times, adapter, store, reflection, errors, directories, references, scan, scans,
     get data() { return structuredClone(disk); }, set data(value: JsonObject) { disk = structuredClone(value); },
     edit(text: string, time: number) { files.set(path, text); times.set(path, time); now = time; },
     get writes() { return writes; } };
@@ -288,6 +375,58 @@ test("repeated reflection and reconstruction do not create newer revisions", asy
   await first.reflection.reconcile();
   assert.equal(canonical(first.data), canonical(original));
   assert.deepEqual(JSON.parse(first.files.get(path)!), JSON.parse(config()));
+});
+
+test("discovered query defaults never override delayed durable pause preferences, including after journal loss", async () => {
+  const sqlPath = '.csvzall/exports.json';
+  const entry = { id: 'shared-query', input: 'data.csv', output: 'note.md', options: { sql: 'SELECT * FROM "data.csv"' } };
+  const a = await device(null, 1000);
+  a.files.set(sqlPath, JSON.stringify({ exports: [{ ...entry, runOnSave: false }] }));
+  await a.reflection.edited(sqlPath);
+  const b = await device(null, 10000);
+  const defaults = JSON.stringify({ exports: [{ ...entry, runOnSave: true, csvzallDefaultPreferences: true }] });
+  b.files.set(sqlPath, defaults); await b.reflection.edited(sqlPath);
+  const discovered = [...winners(readRevisions(b.data).values()).values()].find(record => record.id === 'entry:shared-query')!;
+  assert.equal(discovered.clockMs, 0); assert.equal(discovered.counter, 0);
+  b.data = { ...b.data, ...a.data }; await b.reflection.reconcile();
+  assert.equal(JSON.parse(b.files.get(sqlPath)!).exports[0].runOnSave, false);
+  const c = await device(null, 20000, a.data);
+  c.files.set(sqlPath, defaults); await c.reflection.reconcile();
+  assert.equal(JSON.parse(c.files.get(sqlPath)!).exports[0].runOnSave, false);
+});
+
+test("default preference priority survives note renames and stale-query recovery", async () => {
+  const sqlPath = '.csvzall/exports.json';
+  const entry = { id: 'shared-query', input: 'data.csv', output: 'note.md', runOnSave: true, csvzallDefaultPreferences: true };
+  const a = await device(null, 1000);
+  a.files.set(sqlPath, JSON.stringify({ exports: [{ ...entry, csvzallDefaultPreferences: undefined, runOnSave: false }] }));
+  await a.reflection.edited(sqlPath);
+  for (const action of ['rename', 'recover']) {
+    const b = await device(null, 10000);
+    b.files.set(sqlPath, JSON.stringify({ exports: [entry] })); await b.reflection.edited(sqlPath);
+    if (action === 'rename') await b.reflection.renamed('note.md', 'moved.md');
+    else {
+      b.files.set(sqlPath, '{"exports":[]}'); await b.reflection.edited(sqlPath, 'stale-sql');
+      assert.equal(await b.reflection.recoverSql('note.md', entry.id), true);
+    }
+    const winner = [...winners(readRevisions(b.data).values()).values()].find(record => record.id === 'entry:shared-query')!;
+    assert.equal(winner.clockMs, 0, action);
+    b.data = { ...b.data, ...a.data }; await b.reflection.reconcile();
+    assert.equal(JSON.parse(b.files.get(sqlPath)!).exports[0].runOnSave, false, action);
+  }
+});
+
+test("an external pause edit becomes durable even when the provisional field is preserved", async () => {
+  const a = await device(null, 1000), sqlPath = '.csvzall/exports.json';
+  a.files.set(sqlPath, JSON.stringify({ exports: [{ id: 'query', input: 'data.csv', runOnSave: true, csvzallDefaultPreferences: true }] }));
+  await a.reflection.edited(sqlPath);
+  const edited = JSON.parse(a.files.get(sqlPath)!); edited.exports[0].runOnSave = false;
+  a.files.set(sqlPath, JSON.stringify(edited)); a.times.set(sqlPath, 2000);
+  await a.reflection.reconcile();
+  const winner = [...winners(readRevisions(a.data).values()).values()].find(record => record.id === 'entry:query')!;
+  assert.equal(winner.clockMs, 2000); assert.equal(winner.value!.runOnSave, false);
+  assert.equal(winner.value!.csvzallDefaultPreferences, undefined);
+  assert.equal(JSON.parse(a.files.get(sqlPath)!).exports[0].runOnSave, false);
 });
 
 test("offline concurrent edits converge per export by actual edit time in either arrival order", async () => {

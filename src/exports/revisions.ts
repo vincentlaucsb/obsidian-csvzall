@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
 import { parseChartDefinitions } from "../charts/ChartDefinitions.js";
 import { parseExportDefinitions } from "../markdown/ExportDefinitions.js";
+import { configRoot } from "./paths.js";
+import { isCanonicalVaultPath, resolveVaultRelativePath } from "../utils/paths.js";
 
 export const REVISION_PREFIX = "csvzallExportRevision:";
 export const SYNC_SCHEMA = 2;
@@ -36,7 +38,7 @@ export function digest(value: unknown): string {
 }
 
 export function configPath(path: string): boolean {
-  return !path.includes("\\") && !path.includes(":") && !path.split("/").some(part => !part || part === "." || part === "..") &&
+  return isCanonicalVaultPath(path) &&
     /^(?:.*\/)?\.csvzall\/(?:charts|exports)\.json$/.test(path);
 }
 
@@ -105,11 +107,7 @@ export function parseDocument(text: string, path: string): Map<string, JsonObjec
       const reference = entry[name];
       if (reference === undefined) continue;
       if (typeof reference !== "string" || reference.includes(":") || /^[\\/]/.test(reference)) throw new Error(`Invalid ${name} path in ${path}.`);
-      const parts = path.split("/").slice(0, -2);
-      for (const part of reference.replace(/\\/g, "/").split("/")) {
-        if (part === "..") { if (!parts.length) throw new Error(`Export path leaves the vault: ${path}.`); parts.pop(); }
-        else if (part && part !== ".") parts.push(part);
-      }
+      if (resolveVaultRelativePath(configRoot(path), reference) === null) throw new Error(`Export path leaves the vault: ${path}.`);
     }
     entries.set(`entry:${entry.id}`, entry);
     order.push(entry.id);

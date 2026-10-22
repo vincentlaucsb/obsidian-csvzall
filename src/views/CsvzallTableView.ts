@@ -10,6 +10,7 @@ export interface CsvzallTableViewOwner {
   openCsvInLeaf(file: TFile, leaf: WorkspaceLeaf): Promise<void>;
   installCsvzallFromView(file: TFile, leaf: WorkspaceLeaf): Promise<boolean>;
   openCsvzallSettings(): void;
+  insertQueryIntoNote?(file: TFile, sql: string, cancelled: () => boolean, lifecycle?: AbortSignal): Promise<boolean>;
 }
 
 type WasmViewerMessage =
@@ -98,6 +99,9 @@ export class CsvzallTableView extends FileView {
   private nextSaveRequestId = 0;
   private pendingSave: { requestId: number; resolve: () => void; reject: (error: Error) => void; timer: number } | null = null;
   private allowingProtectedLeafAction = false;
+  private exportRequest: number | null = null;
+  private exportLifecycle: AbortController | null = null;
+  private readonly completedExports = new Set<number>();
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -538,6 +542,7 @@ export class CsvzallTableView extends FileView {
         return;
       }
       if (this.handleSaveResponse(event.data)) return;
+      if (this.handleExportMessage(event.data, frame)) return;
       if (openViewerDocumentation(event, this.frame?.contentWindow ?? null)) return;
       if (this.handleWasmViewerMessage(event)) {
         return;
@@ -551,7 +556,50 @@ export class CsvzallTableView extends FileView {
     window.addEventListener("message", this.messageHandler);
   }
 
+  private handleExportMessage(data: unknown, frame: HTMLIFrameElement): boolean {
+    if (!data || typeof data !== 'object') return false;
+    const message = data as { source?: unknown; type?: unknown; version?: unknown; requestId?: unknown; sql?: unknown; save?: unknown };
+    if (message.source !== 'csvzall-viewer' || message.version !== 1) return false;
+    const enabled = !!this.owner.insertQueryIntoNote && !this.wasmFile && Platform.isDesktopApp;
+    if (message.type === 'note-export-ready') {
+      frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'note-export-capabilities', version: 1, enabled }, '*');
+      return true;
+    }
+    if (message.type !== 'insert-query' || typeof message.requestId !== 'number' || !Number.isSafeInteger(message.requestId) || message.requestId < 1 ||
+      typeof message.sql !== 'string' || !message.sql.trim() || message.sql.length > 1024 * 1024 || typeof message.save !== 'boolean') return false;
+    const requestId = message.requestId, sql = message.sql, save = message.save;
+    if (this.exportRequest !== null || this.completedExports.has(requestId)) return true;
+    const generation = this.renderGeneration, file = this.file;
+    const cancelled = () => this.frame !== frame || this.renderGeneration !== generation || this.file !== file || this.file?.path !== this.desktopSourcePath;
+    this.exportRequest = requestId;
+    const lifecycle = new AbortController(); this.exportLifecycle = lifecycle;
+    const run = async () => {
+      if (!enabled || !file || !this.owner.insertQueryIntoNote) throw new Error('Note exports are unavailable in this viewer.');
+      if (this.dirty) {
+        if (!save) throw new Error('Save the CSV before inserting its query into a note.');
+        await this.saveBeforeLeaving();
+      }
+      if (cancelled()) return false;
+      return this.owner.insertQueryIntoNote(file, sql, cancelled, lifecycle.signal);
+    };
+    void run().then(success => {
+      if (!cancelled()) frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'insert-query-response', version: 1, requestId, success }, '*');
+    }, (error: unknown) => {
+      if (!cancelled()) frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'insert-query-response', version: 1, requestId,
+        success: false, error: error instanceof Error ? error.message : String(error) }, '*');
+    }).finally(() => {
+      if (!cancelled()) {
+        if (this.exportRequest === requestId) this.exportRequest = null;
+        if (this.exportLifecycle === lifecycle) this.exportLifecycle = null;
+        this.completedExports.add(requestId);
+      }
+    });
+    return true;
+  }
+
   private removeMessageListener(): void {
+    this.exportLifecycle?.abort(); this.exportLifecycle = null;
+    this.exportRequest = null; this.completedExports.clear();
     this.finishPendingSave(new Error("The CSV viewer closed before saving completed."));
     this.themeCleanup?.();
     this.themeCleanup = null;

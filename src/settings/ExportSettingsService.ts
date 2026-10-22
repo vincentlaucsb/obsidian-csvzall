@@ -1,7 +1,7 @@
-import { Notice, TFile, TFolder, type App, type Plugin } from "obsidian";
+import { TFile, TFolder, type App, type Plugin } from "obsidian";
 import { ChartDefinitions, type SavedChart } from "../charts/ChartDefinitions.js";
 import { findChartConfigPaths } from "../charts/chartConfigFiles.js";
-import { normalizeVaultPath, resolveChartPath } from "../chartAutomation.js";
+import { normalizeVaultPath } from "../utils/paths.js";
 import type { ChartService } from "../charts/ChartService.js";
 import type { SavedExport } from "../markdown/ExportDefinitions.js";
 import type { MarkdownTableService } from "../markdown/MarkdownTableService.js";

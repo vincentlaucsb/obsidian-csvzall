@@ -1,5 +1,6 @@
 export interface TableValue {
   format?: 'table' | 'value';
+  syntax?: 'comment' | 'code';
   source: string;
   destination: string;
   columns: string[];
@@ -12,6 +13,7 @@ export interface TableFormOptions {
   columns?: string[];
   showSource?: boolean;
   showFormat?: boolean;
+  showSyntax?: boolean;
   showDestination?: boolean;
   showAutoUpdate?: boolean;
   submitLabel?: string;

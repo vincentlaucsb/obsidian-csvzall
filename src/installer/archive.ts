@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { gunzipSync, inflateRawSync } from "zlib";
+import { portableBasename } from "../utils/filenames.js";
 
 type ZipEntry = {
   name: string;
@@ -36,10 +37,6 @@ function findEndOfCentralDirectory(bytes: Buffer): number {
     }
   }
   throw new Error("ZIP archive is missing its central directory.");
-}
-
-function archiveEntryBasename(name: string): string {
-  return name.replace(/\\/g, "/").split("/").pop() ?? "";
 }
 
 function archiveEntryDirname(name: string): string {
@@ -120,7 +117,7 @@ export function extractCsvzallExecutableFromZip(archiveBytes: Buffer, executable
 export function extractCsvzallFilesFromZip(archiveBytes: Buffer, executableName: string): Map<string, Buffer> {
   const entries = readZipEntries(archiveBytes);
   const normalizedExecutableName = executableName.toLowerCase();
-  const entry = entries.find((candidate) => archiveEntryBasename(candidate.name).toLowerCase() === normalizedExecutableName);
+  const entry = entries.find((candidate) => portableBasename(candidate.name).toLowerCase() === normalizedExecutableName);
   if (!entry) {
     const names = entries.map((candidate) => candidate.name).join(", ");
     throw new Error(`ZIP archive did not contain ${executableName}.` + (names ? ` Entries: ${names}` : ""));
@@ -129,7 +126,7 @@ export function extractCsvzallFilesFromZip(archiveBytes: Buffer, executableName:
   const executableDir = archiveEntryDirname(entry.name);
   const files = new Map<string, Buffer>();
   for (const candidate of entries) {
-    const basename = archiveEntryBasename(candidate.name);
+    const basename = portableBasename(candidate.name);
     if (!basename || archiveEntryDirname(candidate.name) !== executableDir) {
       continue;
     }
@@ -199,7 +196,7 @@ export function extractCsvzallFilesFromTarGz(archiveBytes: Buffer, executableNam
   const tarBytes = gunzipSync(archiveBytes);
   const entries = readTarEntries(tarBytes).filter((entry) => entry.typeFlag === 0 || entry.typeFlag === 48);
   const normalizedExecutableName = executableName.toLowerCase();
-  const entry = entries.find((candidate) => archiveEntryBasename(candidate.name).toLowerCase() === normalizedExecutableName);
+  const entry = entries.find((candidate) => portableBasename(candidate.name).toLowerCase() === normalizedExecutableName);
   if (!entry) {
     const names = entries.map((candidate) => candidate.name).join(", ");
     throw new Error(`tar.gz archive did not contain ${executableName}.` + (names ? ` Entries: ${names}` : ""));
@@ -208,7 +205,7 @@ export function extractCsvzallFilesFromTarGz(archiveBytes: Buffer, executableNam
   const executableDir = archiveEntryDirname(entry.name);
   const files = new Map<string, Buffer>();
   for (const candidate of entries) {
-    const basename = archiveEntryBasename(candidate.name);
+    const basename = portableBasename(candidate.name);
     if (!basename || archiveEntryDirname(candidate.name) !== executableDir) {
       continue;
     }

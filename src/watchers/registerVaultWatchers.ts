@@ -1,7 +1,7 @@
 import { TFile, type Plugin } from "obsidian";
 import type { ChartService } from "../charts/ChartService.js";
 import type { CsvService } from "../csv/CsvService.js";
-import { normalizeVaultPath } from "../chartAutomation.js";
+import { normalizeVaultPath } from "../utils/paths.js";
 
 export function registerVaultWatchers(plugin: Plugin, charts: ChartService, csv: CsvService): void {
   let active = true;

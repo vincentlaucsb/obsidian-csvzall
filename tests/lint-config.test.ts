@@ -71,6 +71,46 @@ test("desktop settings reject leftover display overrides after declarative migra
     message.ruleId === "obsidianmd/settings-tab/no-deprecated-display" && message.severity === 2));
 });
 
+test("runtime lint rejects unused imports and dynamic imports in authored TS and MJS", async () => {
+  const eslint = new ESLint({ overrideConfig: { languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } } } });
+  for (const filePath of ["src/main.ts", "mobile-src/main.ts", "src/markdown/table-form.mjs"]) {
+    const result = await eslint.lintText('import { Notice } from "obsidian"; void import("obsidian");', { filePath });
+    const messages = result.flatMap(item => item.messages);
+    assert.equal(messages.some(item => item.fatal), false);
+    assert.ok(messages.some(item => item.ruleId?.endsWith("no-unused-vars")), filePath);
+    assert.ok(messages.some(item => item.ruleId === "no-restricted-syntax"), filePath);
+  }
+});
+
+test("mobile runtime and shared utilities reject built-ins, Electron and guarded require calls", async () => {
+  const eslint = new ESLint();
+  for (const filePath of ["mobile-src/main.ts", "src/utils/paths.ts"]) {
+    for (const code of ['import "node:fs/promises";', 'import "fs";', 'import "electron";', 'if (true) require("path");', 'import fs = require("fs");']) {
+      const results = await eslint.lintText(code, { filePath });
+      assert.ok(results.flatMap(item => item.messages).some(item => item.severity === 2 &&
+        (item.ruleId === "no-restricted-imports" || item.ruleId === "no-restricted-syntax")), `${filePath}: ${code}`);
+    }
+  }
+});
+
+test("settings heading and command naming instructions have effective rules", async () => {
+  const eslint = new ESLint();
+  const result = await eslint.lintText(`import { PluginSettingTab, Setting } from "obsidian";
+    class Tab extends PluginSettingTab {
+      getSettingDefinitions() {
+        this.containerEl.createEl("h2", {text: "General"});
+        new Setting(this.containerEl).setName("General settings").setHeading();
+        return [];
+      }
+    }
+    declare const plugin: import("obsidian").Plugin;
+    plugin.addCommand({ id: "example", name: "csvzall example", callback() {} });`, { filePath: "src/settings/SettingsTab.ts" });
+  const messages = result.flatMap(item => item.messages);
+  for (const rule of ["settings-tab/no-manual-html-headings", "settings-tab/no-problematic-settings-headings", "commands/no-plugin-name-in-command-name"]) {
+    assert.ok(messages.some(item => item.ruleId === `obsidianmd/${rule}`), rule);
+  }
+});
+
 test("desktop and mobile lint require descriptions on opening and closing directive comments", async () => {
   const eslint = new ESLint({ overrideConfig: {
     languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },

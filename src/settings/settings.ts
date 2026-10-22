@@ -14,6 +14,7 @@ export interface CsvzallPluginSettings {
   installedCsvzallAssetName: string;
   csvzallLastUpdateCheckAt: string;
   openInObsidian: boolean;
+  exportSyntax: 'comment' | 'code';
   startupTimeoutMs: number;
   eventLog: CsvzallEventLogEntry[];
 }
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   installedCsvzallAssetName: "",
   csvzallLastUpdateCheckAt: "",
   openInObsidian: true,
+  exportSyntax: 'comment',
   startupTimeoutMs: 10000,
   eventLog: [],
 };
@@ -45,6 +47,7 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
       candidate.csvzallPath : DEFAULT_SETTINGS.csvzallPath,
     openInObsidian: typeof candidate.openInObsidian === "boolean" ?
       candidate.openInObsidian : DEFAULT_SETTINGS.openInObsidian,
+    exportSyntax: candidate.exportSyntax === 'code' ? 'code' : 'comment',
     startupTimeoutMs: typeof candidate.startupTimeoutMs === "number" &&
       Number.isFinite(candidate.startupTimeoutMs) && candidate.startupTimeoutMs > 0 &&
       candidate.startupTimeoutMs <= 2147483647 ? candidate.startupTimeoutMs : DEFAULT_SETTINGS.startupTimeoutMs,

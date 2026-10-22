@@ -1,4 +1,5 @@
 import { FileSystemAdapter, TFile, type App, type PluginManifest } from "obsidian";
+import { pluginVaultDirectory } from "./pluginPaths.js";
 
 export class ObsidianFilesystem {
   constructor(
@@ -31,18 +32,12 @@ export class ObsidianFilesystem {
       return adapter.getFullPath(this.manifest.dir);
     }
 
-    return [
-      adapter.getBasePath(),
-      this.app.vault.configDir,
-      "plugins",
-      this.manifest.id,
-    ].join("/");
+    return `${adapter.getBasePath()}/${pluginVaultDirectory(this.app.vault.configDir, { id: this.manifest.id })}`;
   }
 
   getPluginResourcePath(relativePath: string): string | null {
-    const pluginPath = this.manifest.dir ?
-      `${this.manifest.dir}/${relativePath}` :
-      `${this.app.vault.configDir}/plugins/${this.manifest.id}/${relativePath}`;
+    const directory = pluginVaultDirectory(this.app.vault.configDir, { id: this.manifest.id, dir: this.manifest.dir || undefined });
+    const pluginPath = `${directory}/${relativePath}`;
     return this.app.vault.adapter.getResourcePath(pluginPath.replace(/\\/g, "/"));
   }
 }

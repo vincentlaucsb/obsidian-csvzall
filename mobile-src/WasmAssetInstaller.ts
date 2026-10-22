@@ -1,6 +1,8 @@
 import type { App, PluginManifest } from "obsidian";
 import { embeddedWasmViewerAssets } from "./wasmViewerAssets.generated.js";
 import { createEmbeddedViewerDocument } from "./EmbeddedViewerDocument.js";
+import { normalizeVaultPath } from "../src/utils/paths.js";
+import { pluginVaultDirectory } from "../src/obsidian/pluginPaths.js";
 
 const EMBEDDED_VIEWER_MARKER = "csvzall-mobile-embedded-wasm-viewer-v1";
 let viewerDocument: ReturnType<typeof createEmbeddedViewerDocument> | null = null;
@@ -16,12 +18,8 @@ type DataAdapterLike = App["vault"]["adapter"] & {
   writeBinary(normalizedPath: string, data: ArrayBuffer): Promise<void>;
 };
 
-function normalizeVaultPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/+/, "");
-}
-
 function pluginDirectory(app: App, manifest: PluginManifestWithDirectory): string {
-  return normalizeVaultPath(manifest.dir ?? `${app.vault.configDir}/plugins/${manifest.id}`);
+  return normalizeVaultPath(pluginVaultDirectory(app.vault.configDir, manifest), { stripLeadingDot: false });
 }
 
 async function ensureParentDirectory(adapter: DataAdapterLike, normalizedPath: string): Promise<void> {
@@ -58,7 +56,7 @@ export async function ensureEmbeddedWasmViewerAssets(
   const basePath = pluginDirectory(app, manifest);
 
   for (const asset of embeddedWasmViewerAssets) {
-    const targetPath = normalizeVaultPath(`${basePath}/${asset.path}`);
+    const targetPath = normalizeVaultPath(`${basePath}/${asset.path}`, { stripLeadingDot: false });
     await ensureParentDirectory(adapter, targetPath);
     if (asset.encoding === "text") {
       await adapter.write(targetPath, asset.content);

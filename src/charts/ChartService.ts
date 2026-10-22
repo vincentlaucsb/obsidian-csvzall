@@ -8,7 +8,6 @@ import {
   chartRunKey,
   isChartConfigPath,
   matchingRunOnSaveCharts,
-  normalizeVaultPath,
   outputChartsForCsv,
   parseChartConfigText,
 } from "../chartAutomation.js";
@@ -16,7 +15,8 @@ import {
 import { findChartConfigPaths } from "./chartConfigFiles.js";
 import { SessionErrors } from "../logging/SessionErrors.js";
 import type { ExportReflection } from "../exports/ExportReflection.js";
-import { directConfig } from "../exports/localFolders.js";
+import { directConfig } from "../exports/paths.js";
+import { normalizeVaultPath } from "../utils/paths.js";
 
 export class ChartService {
   readonly scheduler: ChartRunScheduler;

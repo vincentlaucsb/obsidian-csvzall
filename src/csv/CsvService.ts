@@ -3,9 +3,8 @@ import type { EventLog } from "../logging/EventLog.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
 import { CsvzallProcessService, ViewerStartupCancelledError } from "../process/CsvzallProcessService.js";
 import type { CsvzallPluginSettings } from "../settings/settings.js";
-import { normalizeVaultPath } from "../chartAutomation.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
-import { isCsv } from "./csvFiles.js";
+import { isCsv, nextCsvPath } from "./csvFiles.js";
 import type { ExportReflection } from "../exports/ExportReflection.js";
 
 function isMissingExecutableError(message: string): boolean {
@@ -85,7 +84,7 @@ export class CsvService {
 
   async createCsvInFolder(folder: TFolder): Promise<void> {
     try {
-      const path = await this.nextCsvPathInFolder(folder);
+      const path = nextCsvPath(folder.path, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, "column\n");
       await this.openCsv(file);
     } catch (error) {
@@ -120,18 +119,6 @@ export class CsvService {
       await this.eventLog.record("error", `Failed to open CSV ${file.path}`, message);
       console.error("csvzall failed to open CSV", error);
     }
-  }
-
-  private async nextCsvPathInFolder(folder: TFolder): Promise<string> {
-    const folderPath = normalizeVaultPath(folder.path);
-    for (let index = 0; index < 10000; index += 1) {
-      const name = index === 0 ? "Untitled.csv" : `Untitled ${index}.csv`;
-      const path = folderPath ? `${folderPath}/${name}` : name;
-      if (!this.app.vault.getAbstractFileByPath(path)) {
-        return path;
-      }
-    }
-    throw new Error("Could not find an available Untitled CSV filename.");
   }
 
   private async openCsvInWasmViewer(file: TFile, leaf: WorkspaceLeaf): Promise<void> {

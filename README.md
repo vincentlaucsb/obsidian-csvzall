@@ -24,6 +24,7 @@ For mobile devices, install
   - Bar, line, and heatmap charts.
   - Markdown tables from the entire file, selected columns, or SQLite query results, inserted into notes or saved as standalone notes.
   - Inline values from single-cell SQLite query results, inserted directly into a sentence.
+- Write SQL exports in `csvzall` or `sql csvzall` code blocks, or keep using comment markers. Results are saved as ordinary Markdown. [SQL export guide](docs/markdown-tables.md).
 - Reformat non-standard CSV files to standard RFC 4180 dialect *with user approval*
   - By default, we respect the existing format of the CSV/TSV file when saving edits
 
@@ -65,6 +66,7 @@ The plugin does not collect telemetry and works entirely offline. It uses direct
 
 - Run **Open exports**, or select **Configure** under **Exports** in the plugin settings.
 - Use **Configure** beside a CSV/TSV file to manage its chart, table, and value exports, including paused exports.
+- In the CSV viewer, run a SQLite query and choose **Insert into note** to select a note anywhere in the vault. **Keep updated** can be unchecked to pause automatic updates while retaining manual refresh.
 - **Delete** removes export configurations and stops their automatic updates. Your source files and generated content are kept.
 - Unused SQL export configurations are removed automatically when their last note reference is removed. Chart configurations remain available until you delete them.
 - With Obsidian Sync, enable **Installed community plugins** to sync export configurations and **Sync all other types** for CSV/TSV sources. The plugin restores its local `.csvzall` configurations on each device.

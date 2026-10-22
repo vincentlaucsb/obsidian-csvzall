@@ -1,7 +1,8 @@
 import type { DataAdapter } from "obsidian";
 import type { ChartDefinition, ChartFormPayload } from "./chart-form.mjs";
 import { resolveChartPath } from "../chartAutomation.js";
-import { directConfig } from "../exports/localFolders.js";
+import { directConfig } from "../exports/paths.js";
+import { parentVaultPath } from "../utils/paths.js";
 
 interface ChartConfig { charts: ChartDefinition[]; [key: string]: unknown }
 export interface SavedChart { configPath: string; definition: ChartDefinition; source: string }
@@ -47,7 +48,7 @@ export class ChartDefinitions {
       update(config);
       const text = `${JSON.stringify(config, null, 2)}\n`;
       if (text === saved) return;
-      const temporary = `${path.slice(0, path.lastIndexOf("/"))}/.charts-${crypto.randomUUID()}.json`;
+      const temporary = `${parentVaultPath(path)}/.charts-${crypto.randomUUID()}.json`;
       try {
         await this.adapter.write(temporary, text);
         if (await this.adapter.read(temporary) !== text) throw new Error("Could not verify chart configuration.");
@@ -93,7 +94,7 @@ export class ChartDefinitions {
 
   async preview(chart: SavedChart, payload: ChartFormPayload, render: (temporary: string) => Promise<void>): Promise<{ svg?: string; markdown?: string }> {
     const name = `.preview-${crypto.randomUUID()}.${payload.type === "markdown-table" ? "md" : "svg"}`;
-    const output = `${chart.configPath.slice(0, chart.configPath.lastIndexOf("/"))}/${name}`;
+    const output = `${parentVaultPath(chart.configPath)}/${name}`;
     let text = "";
     try {
       await this.change(chart, { ...payload, output: `.csvzall/${name}` }, async temporary => {

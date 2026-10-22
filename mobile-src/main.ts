@@ -1,5 +1,6 @@
 import { Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
-import { CSV_EXTENSIONS, isCsv } from "../src/csv/csvFiles.js";
+import { CSV_EXTENSIONS, isCsv, nextCsvPath } from "../src/csv/csvFiles.js";
+import { parentVaultPath } from "../src/utils/paths.js";
 import { CsvzallTableView } from "../src/views/CsvzallTableView.js";
 import {
   embeddedWasmViewerUrl,
@@ -9,15 +10,6 @@ import {
 
 const VIEW_TYPE_CSVZALL_MOBILE = "csvzall-mobile-view";
 const DEFAULT_CSV_TEXT = "column\n";
-
-function normalizeVaultPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//u, "").replace(/^\/+/u, "").replace(/\/+/gu, "/");
-}
-
-function parentPathForFile(file: TFile): string {
-  const index = file.path.lastIndexOf("/");
-  return index >= 0 ? file.path.slice(0, index) : "";
-}
 
 export default class CsvzallMobilePlugin extends Plugin {
   private assetError = "";
@@ -82,7 +74,7 @@ export default class CsvzallMobilePlugin extends Plugin {
 
   private async createCsvInFolder(folder: TFolder): Promise<void> {
     try {
-      const path = await this.nextCsvPathInFolder(folder.path);
+      const path = nextCsvPath(folder.path, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
       await this.openCsv(file);
     } catch (error) {
@@ -94,9 +86,9 @@ export default class CsvzallMobilePlugin extends Plugin {
 
   private async createCsvInActiveFolder(): Promise<void> {
     const activeFile = this.app.workspace.getActiveFile();
-    const folderPath = activeFile ? parentPathForFile(activeFile) : "";
+    const folderPath = activeFile ? parentVaultPath(activeFile.path) : "";
     try {
-      const path = await this.nextCsvPathInFolder(folderPath);
+      const path = nextCsvPath(folderPath, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
       await this.openCsv(file);
     } catch (error) {
@@ -104,18 +96,6 @@ export default class CsvzallMobilePlugin extends Plugin {
       new Notice(`csvzall Lite failed to create CSV: ${message}`);
       console.error("csvzall Lite failed to create CSV", error);
     }
-  }
-
-  private async nextCsvPathInFolder(folderPath: string): Promise<string> {
-    const normalizedFolderPath = normalizeVaultPath(folderPath);
-    for (let index = 0; index < 10000; index += 1) {
-      const name = index === 0 ? "Untitled.csv" : `Untitled ${index}.csv`;
-      const path = normalizedFolderPath ? `${normalizedFolderPath}/${name}` : name;
-      if (!this.app.vault.getAbstractFileByPath(path)) {
-        return path;
-      }
-    }
-    throw new Error("Could not find an available Untitled CSV filename.");
   }
 
   private registerCsvCommands(): void {

@@ -1,8 +1,10 @@
 import type { DataAdapter } from 'obsidian';
 import { validateSource, type TableRecipe } from './managedTables.js';
 import type { DeleteReason } from '../exports/revisions.js';
+import { ancestorConfigPaths, configPathForFolder, configRoot, directConfig, relativeReference } from '../exports/paths.js';
+import { parentVaultPath, resolveVaultRelativePath } from '../utils/paths.js';
 
-export const EXPORT_CONFIG_PATH = '.csvzall/exports.json';
+export const EXPORT_CONFIG_PATH = configPathForFolder('', 'exports');
 
 interface TableDefinition {
   format?: 'table' | 'value';
@@ -19,6 +21,7 @@ export interface ResolvedExport {
   configPath: string;
   recipe: TableRecipe;
   runOnSave: boolean;
+  output?: string;
 }
 export interface SavedExport extends ResolvedExport { output?: string }
 
@@ -36,27 +39,11 @@ function sameLegacy(left: TableDefinition, right: TableDefinition): boolean {
   return canonical(normalized(left)) === canonical(normalized(right));
 }
 
-function rootFor(path: string): string[] {
-  return path.split('/').slice(0, -2);
-}
-
 function resolvePath(configPath: string, input: string): string {
   if (!input || input.includes(':') || /^[\\/]/.test(input)) throw new Error('Table paths must be relative to the configuration folder.');
-  const parts = rootFor(configPath);
-  for (const part of input.replace(/\\/g, '/').split('/')) {
-    if (!part || part === '.') continue;
-    if (part === '..') {
-      if (!parts.length) throw new Error('Table path leaves the vault.');
-      parts.pop();
-    } else parts.push(part);
-  }
-  return parts.join('/');
-}
-
-function relativePath(configPath: string, path: string): string {
-  const root = rootFor(configPath), parts = path.split('/');
-  while (root.length && parts.length && root[0] === parts[0]) { root.shift(); parts.shift(); }
-  return [...root.map(() => '..'), ...parts].join('/');
+  const resolved = resolveVaultRelativePath(configRoot(configPath), input);
+  if (resolved === null) throw new Error('Table path leaves the vault.');
+  return resolved;
 }
 
 export function parseExportDefinitions(text: string, path: string): TableConfig {
@@ -99,7 +86,7 @@ export class ExportDefinitions {
   async list(folders: string[]): Promise<SavedExport[]> {
     const result: SavedExport[] = [];
     for (const folder of new Set(['', ...folders])) {
-      const path = folder ? `${folder}/${EXPORT_CONFIG_PATH}` : EXPORT_CONFIG_PATH;
+      const path = configPathForFolder(folder, 'exports');
       await this.migrate(path);
       const saved = await this.read(path);
       for (const entry of saved?.config.exports ?? []) result.push({ configPath: path,
@@ -144,6 +131,11 @@ export class ExportDefinitions {
   update(saved: SavedExport, recipe: TableRecipe, runOnSave: boolean, cancelled: () => boolean): Promise<void> {
     return this.mutate(saved.configPath, config => {
       const entry = this.currentEntry(config, saved);
+      if (entry.csvzallDefaultPreferences !== true && saved.recipe.source === recipe.source && saved.recipe.sql === recipe.sql &&
+        JSON.stringify(saved.recipe.columns) === JSON.stringify(recipe.columns) &&
+        (saved.recipe.format ?? 'table') === (recipe.format ?? 'table') && saved.runOnSave === runOnSave) return;
+      delete entry.csvzallDefaultPreferences;
+      entry.input = relativeReference(saved.configPath, recipe.source);
       entry.options = { ...entry.options, columns: recipe.columns, sql: recipe.sql };
       entry.format = recipe.format ?? 'table';
       entry.runOnSave = runOnSave;
@@ -151,10 +143,7 @@ export class ExportDefinitions {
   }
 
   private candidates(note: string): string[] {
-    const parts = note.split('/').slice(0, -1), paths: string[] = [];
-    if (this.localOnly) return [parts.length ? `${parts.join('/')}/${EXPORT_CONFIG_PATH}` : EXPORT_CONFIG_PATH];
-    while (parts.length) { paths.push(`${parts.join('/')}/${EXPORT_CONFIG_PATH}`); parts.pop(); }
-    return [...paths, EXPORT_CONFIG_PATH];
+    return this.localOnly ? [directConfig(note, 'exports')] : ancestorConfigPaths(note, 'exports');
   }
 
   private async read(path: string, context = path): Promise<{ text: string; config: TableConfig } | null> {
@@ -171,7 +160,7 @@ export class ExportDefinitions {
       const mapped = legacy ? saved?.config.exports.find(table => table.legacyTableId === id) : undefined;
       const entry = mapped ?? saved?.config.exports.find(table => table.id === id);
       if (entry) {
-        const resolved: ResolvedExport = { configPath, runOnSave: entry.runOnSave !== false,
+        const resolved: ResolvedExport = { configPath, runOnSave: entry.runOnSave !== false, output: entry.output === undefined ? undefined : resolvePath(configPath, entry.output),
           recipe: { version: 1, id: entry.id, format: entry.format ?? 'table', source: validateSource(resolvePath(configPath, entry.input)), columns: entry.options?.columns ?? [], sql: entry.options?.sql ?? '' } };
         if (!legacy || mapped) return resolved;
         // An unrelated new export cannot shadow an ancestor's legacy table.
@@ -208,7 +197,7 @@ export class ExportDefinitions {
     parseConfig(text, context);
     if (text === saved) return;
     if (this.stopped() || cancelled()) throw new Error('Export update cancelled.');
-    const folder = path.slice(0, path.lastIndexOf('/'));
+    const folder = parentVaultPath(path);
     if (!await this.adapter.exists(folder)) await this.adapter.mkdir(folder);
     const temporary = `${folder}/.exports-${crypto.randomUUID()}.json`;
     try {
@@ -245,7 +234,7 @@ export class ExportDefinitions {
 
   private legacyPath(path: string): string { return path.replace(/exports\.json$/, 'tables.json'); }
 
-  migrateFolder(folder: string): Promise<void> { return this.migrate(folder && folder !== '/' ? `${folder}/${EXPORT_CONFIG_PATH}` : EXPORT_CONFIG_PATH); }
+  migrateFolder(folder: string): Promise<void> { return this.migrate(configPathForFolder(folder === '/' ? '' : folder, 'exports')); }
 
   /** Keep the original tables.json as a backup, after the merged exports file is verified. */
   private async migrate(path: string, context = path): Promise<void> {
@@ -284,10 +273,16 @@ export class ExportDefinitions {
     });
   }
 
-  async save(note: string, recipe: TableRecipe, cancelled?: () => boolean, runOnSave = true): Promise<TableRecipe> {
+  async scope(note: string): Promise<string> {
     let configPath = this.localOnly ? this.candidates(note)[0]! : EXPORT_CONFIG_PATH;
     for (const candidate of this.candidates(note)) if (await this.adapter.exists(candidate) || await this.adapter.exists(this.legacyPath(candidate))) { configPath = candidate; break; }
+    return configPath;
+  }
+
+  async save(note: string, recipe: TableRecipe, cancelled?: () => boolean, runOnSave = true, bootstrap = false, inherit?: ResolvedExport): Promise<TableRecipe> {
+    const configPath = await this.scope(note);
     await this.migrate(configPath);
+    const inherited = inherit && inherit.configPath !== configPath ? (await this.read(inherit.configPath))?.config.exports.find(entry => entry.id === inherit.recipe.id) : undefined;
     let result = recipe;
     await this.mutate(configPath, config => {
       const matching = config.exports.find(entry => entry.id === recipe.id);
@@ -299,8 +294,12 @@ export class ExportDefinitions {
         if (previous) { result = { ...recipe, id: previous.id }; return; }
         result = { ...recipe, id: crypto.randomUUID() };
       }
-      config.exports.push({ id: result.id, format: result.format ?? 'table', input: relativePath(configPath, result.source), output: relativePath(configPath, note),
-        runOnSave, options: { columns: result.columns, sql: result.sql } });
+      const template = inherited ?? (inherit ? config.exports.find(entry => entry.id === inherit.recipe.id) : undefined);
+      const entry: TableDefinition = { ...template, id: result.id, format: result.format ?? 'table', input: relativeReference(configPath, result.source), output: relativeReference(configPath, note),
+        runOnSave, options: { ...template?.options, columns: result.columns, sql: result.sql } };
+      delete entry.csvzallDefaultPreferences;
+      if (bootstrap && (!template || template.csvzallDefaultPreferences === true) && runOnSave) entry.csvzallDefaultPreferences = true;
+      config.exports.push(entry);
     }, cancelled);
     return result;
   }
@@ -318,7 +317,7 @@ export class ExportDefinitions {
           // to its former location, including references outside that folder.
           const resolved = resolvePath(previousConfig, entry[key]);
           const renamed = resolved === oldPath || resolved.startsWith(`${oldPath}/`) ? newPath + resolved.slice(oldPath.length) : resolved;
-          entry[key] = relativePath(path, renamed);
+          entry[key] = relativeReference(path, renamed);
         }
       }, undefined, previousConfig);
     }
