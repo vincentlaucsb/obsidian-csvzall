@@ -53,11 +53,11 @@ startup errors still appear in the status area. Progress dialogs for explicit
 file indexing, saving and resetting are retained. No startup timer or artificial
 minimum duration was added.
 
-The source change is recorded in local csvzall commit `a7d9664`. The packaged
-WASM assets record that clean source revision, with the unchanged source-refresh
-and digest checks. The native production helper pins have not changed: native
-release delivery still requires the normal upstream release and helper
-preparation workflow.
+The source change was introduced in csvzall commit `a7d9664` and is included in
+released csvzall 0.9.0. Packaged WASM assets record the released source revision,
+with the unchanged source-refresh and digest checks. Desktop 0.9.0 prepares its
+native production helpers from that same release through the normal verified
+three-platform helper workflow; see [the release log](desktop-release-0.9.0.md).
 
 For local Windows testing, `.test-build/quiet-startup-plugin-verified/` contains
 a development plugin embedding the rebuilt native helper, produced and smoke

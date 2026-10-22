@@ -1,10 +1,10 @@
 {
   "sourceRepo": "vincentlaucsb/csvzall",
-  "sourceCommit": "32435daf96d52555154be6d9e4d83f318d0ae29b",
+  "sourceCommit": "e101b3cd8c6b911a109eb8d7cfeb3fd55bf54c7b",
   "sourceRef": "master",
   "sourceDirty": false,
   "javascriptSha256": "2f7328eeb41a1ccbc8d8893cb286e86d03057f66ffa11028a7121f05776e1800",
   "sourcePath": "src/viewer_wasm/web/dist-embedded",
   "sourceDist": "E:\\GitHub\\csvzall\\src\\viewer_wasm\\web\\dist-embedded",
-  "syncedAt": "2026-10-21T04:57:26.885Z"
+  "syncedAt": "2026-10-22T06:38:00.623Z"
 }
