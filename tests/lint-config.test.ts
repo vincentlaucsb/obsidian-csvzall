@@ -26,6 +26,7 @@ void (text as string);
 /** @deprecated Use current APIs. */
 function outdated(): void {}
 outdated();
+async function invalidAwait(): Promise<void> { await 42; }
 `;
 
 test("desktop and mobile lint reject every reported type-safety category", async () => {
@@ -40,7 +41,7 @@ test("desktop and mobile lint reject every reported type-safety category", async
     "no-explicit-any", "no-unsafe-call", "no-unsafe-member-access",
     "no-unsafe-assignment", "no-unsafe-return", "no-unsafe-argument",
     "no-redundant-type-constituents", "prefer-promise-reject-errors",
-    "unbound-method", "no-unnecessary-type-assertion", "no-deprecated",
+    "unbound-method", "no-unnecessary-type-assertion", "no-deprecated", "await-thenable",
   ];
   for (const filePath of ["src/main.ts", "mobile-src/main.ts"]) {
     const results = await eslint.lintText(unsafeFixture, { filePath });
@@ -83,7 +84,9 @@ test("runtime lint rejects unused imports and dynamic imports in authored TS and
 });
 
 test("mobile runtime and shared utilities reject built-ins, Electron and guarded require calls", async () => {
-  const eslint = new ESLint();
+  const eslint = new ESLint({ overrideConfig: {
+    languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },
+  } });
   for (const filePath of ["mobile-src/main.ts", "src/utils/paths.ts"]) {
     for (const code of ['import "node:fs/promises";', 'import "fs";', 'import "electron";', 'if (true) require("path");', 'import fs = require("fs");']) {
       const results = await eslint.lintText(code, { filePath });
@@ -94,7 +97,9 @@ test("mobile runtime and shared utilities reject built-ins, Electron and guarded
 });
 
 test("settings heading and command naming instructions have effective rules", async () => {
-  const eslint = new ESLint();
+  const eslint = new ESLint({ overrideConfig: {
+    languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } },
+  } });
   const result = await eslint.lintText(`import { PluginSettingTab, Setting } from "obsidian";
     class Tab extends PluginSettingTab {
       getSettingDefinitions() {

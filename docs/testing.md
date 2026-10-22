@@ -40,8 +40,8 @@ The enforced TypeScript ESLint rules are `no-unsafe-call`,
 `no-unsafe-member-access`, `no-unsafe-assignment`, `no-unsafe-return`,
 `no-unsafe-argument`, `no-redundant-type-constituents`,
 `prefer-promise-reject-errors`, `no-explicit-any`, `unbound-method`,
-`no-unnecessary-type-assertion`, and `no-deprecated`. The regression suite
-injects invalid code for every category into both desktop and mobile lint
+`no-unnecessary-type-assertion`, `no-deprecated`, and `await-thenable`. The
+regression suite injects invalid code for every category into both desktop and mobile lint
 contexts to verify that the gate rejects it.
 
 The gate also rejects `TFile`/`TFolder` assertions and control-character regular

@@ -37,6 +37,7 @@ export default [
       "@typescript-eslint/no-unsafe-assignment": "error",
       "@typescript-eslint/no-unsafe-return": "error",
       "@typescript-eslint/no-unsafe-argument": "error",
+      "@typescript-eslint/await-thenable": "error",
       "@typescript-eslint/no-redundant-type-constituents": "error",
       "@typescript-eslint/prefer-promise-reject-errors": "error",
       "@typescript-eslint/unbound-method": "error",

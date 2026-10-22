@@ -80,12 +80,16 @@ export class ExportReflection {
     return this.running;
   }
 
-  private async reconcileCharts(source: string): Promise<void> {
+  private async waitForIdle(): Promise<void> {
     while (this.running) await this.running;
+  }
+
+  private async reconcileCharts(source: string): Promise<void> {
+    if (this.running) await this.waitForIdle();
     if (this.stopped || !this.initialized) return;
     // Pending moves must finish in their original scopes before a viewer opens.
     if (this.state.renames.length) await this.reconcile();
-    while (this.running) await this.running;
+    if (this.running) await this.waitForIdle();
     if (this.stopped) return;
     const paths = new Set(ancestorConfigPaths(source, "charts"));
     await this.startRun(paths);
