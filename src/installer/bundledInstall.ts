@@ -1,18 +1,20 @@
 import { randomUUID } from "crypto";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "fs/promises";
 import { join } from "path";
-import { extractCsvzallFilesFromArchive, sha256Hex } from "./archive.js";
-import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION } from "./bundledBinaries.generated.js";
+import { sha256Hex } from "./archive.js";
+import { decodeHelperPayload } from "./helperPayload.mjs";
+import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION, BUNDLED_CSVZALL_SHARED } from "./bundledPayloads.generated.js";
 
 export { BUNDLED_CSVZALL_VERSION };
 
-export interface BundledArchive {
+export interface BundledExecutable {
   assetName: string;
   sha256: string;
-  base64: string;
+  executableSha256: string;
+  brotliBase64: string;
 }
 
-export function bundledCsvzallAsset(platform: string = process.platform, arch: string = process.arch): BundledArchive {
+export function bundledCsvzallAsset(platform: string = process.platform, arch: string = process.arch): BundledExecutable {
   const asset = BUNDLED_CSVZALL_ASSETS[`${platform}-${arch}`];
   if (!asset) {
     throw new Error(`No bundled csvzall helper for ${platform}/${arch}. Configure a custom executable path in settings.`);
@@ -30,18 +32,23 @@ export async function installBundledCsvzall({
   pluginDir: string;
   platform?: string;
   arch?: string;
-  asset?: BundledArchive;
+  asset?: BundledExecutable;
   version?: string;
 }) {
-  const bytes = Buffer.from(asset.base64, "base64");
-  if (sha256Hex(bytes) !== asset.sha256) throw new Error(`SHA-256 verification failed for ${asset.assetName}.`);
   if (!/^\d+\.\d+\.\d+$/.test(version) || !/^[a-f0-9]{64}$/.test(asset.sha256) ||
+      !/^[a-f0-9]{64}$/.test(asset.executableSha256) ||
       !/^[a-z0-9]+$/.test(platform) || !/^[a-z0-9]+$/.test(arch)) throw new Error("Invalid bundled csvzall metadata.");
+  let bytes: Buffer;
+  try {
+    bytes = decodeHelperPayload(asset.brotliBase64, BUNDLED_CSVZALL_SHARED.sharedBrotliBase64);
+  } catch {
+    throw new Error(`Brotli decompression failed for ${asset.assetName}.`);
+  }
+  if (sha256Hex(bytes) !== asset.executableSha256) throw new Error(`Executable SHA-256 verification failed for ${asset.assetName}.`);
   const executableName = platform === "win32" ? "csvzall.exe" : "csvzall";
   // Target and digest isolate upgrades and vaults synced across operating systems.
   const installDir = join(pluginDir, "csvzall-bin", version, `${platform}-${arch}-${asset.sha256.slice(0, 16)}`);
-  const files = extractCsvzallFilesFromArchive(bytes, asset.assetName, executableName);
-  if (!files.has(executableName)) throw new Error(`Bundled archive is missing ${executableName}.`);
+  const files = new Map([[executableName, bytes]]);
   for (const directory of [join(pluginDir, "csvzall-bin"), join(pluginDir, "csvzall-bin", version), installDir]) {
     await mkdir(directory, { recursive: true });
     const entry = await lstat(directory);

@@ -1,6 +1,6 @@
 {
   "name": "obsidian-csvzall",
-  "version": "0.9.0",
+  "version": "0.10.1",
   "description": "A fast CSV viewer, editor, and charting tool.",
   "main": "main.js",
   "type": "module",
@@ -25,10 +25,10 @@
     "sync:bundled-helper": "node scripts/sync-native-binaries.mjs",
     "check:mobile": "node scripts/check-mobile-dist.mjs",
     "test": "npm run test:unit && npm run test:mobile",
-    "test:unit": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js tests/native-helper-pipeline.test.mjs",
+    "test:unit": "npm run build && tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js tests/native-helper-pipeline.test.mjs tests/bundled-payloads.test.mjs",
     "test:mobile": "npm run build:mobile && npm run check:mobile && node --test tests/mobile-*.test.mjs",
     "pretest:coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\"",
-    "test:coverage": "npm run build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info .test-build/tests/*.test.js tests/native-helper-pipeline.test.mjs",
+    "test:coverage": "npm run build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info .test-build/tests/*.test.js tests/native-helper-pipeline.test.mjs tests/bundled-payloads.test.mjs",
     "lint": "node scripts/lint.mjs",
     "review:obsidian": "node scripts/prepare-obsidian-review.mjs",
     "check:source-archive": "node scripts/check-source-archive.mjs"

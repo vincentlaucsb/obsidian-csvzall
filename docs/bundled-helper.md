@@ -4,6 +4,18 @@ The desktop plugin includes three Obsidian-specific native helpers in `main.js`.
 Obsidian installs only `main.js`, `manifest.json`, and `styles.css`; no separate
 helper download or install is needed. Lite remains independent of native helpers.
 
+The plugin bundling stage verifies the pinned archives and executable hashes,
+then stores identical embedded viewer text once across platforms. Each Brotli
+helper payload contains its remaining bytes and a compact reconstruction recipe;
+the shared text has its own Brotli payload. It uses Node's built-in compression
+support and does not rebuild native code. The installer decodes only the shared
+text and selected platform's payload, reconstructs the exact original executable,
+and verifies its executable hash before writing. Text detection does not depend
+on native symbol tables, platform binary formats, or a particular viewer layout.
+Archive hashes still identify installation directories, preserving existing
+installations across this packaging change. The native archives, receipts, and
+build identity remain independent of this JavaScript payload representation.
+
 ## Source and build identity
 
 `native-binaries/build.json` pins the csvzall source commit and version, every
@@ -11,6 +23,13 @@ compiled dependency's commit, CMake/Python/Ninja versions, target runner labels,
 and CMake configuration. Windows x64, macOS arm64, and Linux x64 are supported.
 The macOS recipe targets macOS 13.3 or later. Linux uses GCC 14; Windows uses
 Visual Studio 2022. The build verifies all three upstream source version markers.
+
+IPO (link-time optimization) is enabled only for Linux, where local measurements
+reduced the compressed helper payload. Windows measurements increased its size;
+Windows and untested macOS keep IPO disabled. Linux sets CMake policy CMP0069 to
+NEW so older dependency projects, including SQLiteCpp and SQLite, also use IPO.
+These settings are part of the build identity and require a newly prepared
+helper snapshot before release.
 
 The build identity hashes that complete configuration and the native workflow,
 build, packaging, and verification scripts. It excludes plugin-only changes.
@@ -69,6 +88,11 @@ npm run check:bundled-helper
 npm test
 npm run check:source-archive
 ```
+
+`node scripts/bundle-native-payloads.mjs` regenerates only the ignored TypeScript
+payload data. It needs neither Python nor a native toolchain. Production builds
+run it automatically; `check:bundled-helper` verifies the embedded Brotli
+payloads against the pinned executable hashes.
 
 `check:helper-snapshot` requires a prepared snapshot matching the current recipe;
 the offline production build also accepts the initial checksum-pinned import.

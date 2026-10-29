@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import process from "process";
 import { builtinModules } from "node:module";
 import { runTypeSafetyChecks } from "./scripts/lint.mjs";
-import { prepareNativeBinaries } from "./scripts/prepare-native-binaries.mjs";
+import { prepareBundledPayloads } from "./scripts/bundle-native-payloads.mjs";
 import { checkBundledHelper } from "./scripts/check-bundled-helper.mjs";
 
 const banner = `/*
@@ -15,7 +15,7 @@ const notices = ["./THIRD_PARTY_NOTICES.md", "./native-binaries/THIRD_PARTY_NOTI
 const releaseBanner = `${banner}\n/*!\n${notices}\n*/`;
 
 const prod = process.argv[2] === "production";
-prepareNativeBinaries();
+prepareBundledPayloads();
 if (prod) runTypeSafetyChecks();
 
 const context = await esbuild.context({

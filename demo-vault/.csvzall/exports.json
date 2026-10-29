@@ -20,6 +20,18 @@
       "options": {
         "sql": "SELECT COUNT(*) FROM data WHERE status = 'open'"
       }
+    },
+    {
+      "id": "sql-888baf583a572f5334b6eaecedce53b60fdfd2344f0796f3f3696ed5307efc8b",
+      "format": "table",
+      "input": "Productivity Tracker.csv",
+      "output": "SQL block demo.md",
+      "runOnSave": true,
+      "options": {
+        "columns": [],
+        "sql": "SELECT Date, \"Coffee Drank (Cups)\", \"KPIs Delivered\"\nFROM \"Productivity Tracker.csv\"\nLIMIT 5"
+      },
+      "csvzallDefaultPreferences": true
     }
   ]
 }

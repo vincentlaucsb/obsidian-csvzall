@@ -11,6 +11,14 @@ FROM "Productivity Tracker.csv"
 LIMIT 5
 ```
 
+| Date      | Coffee Drank (Cups) | KPIs Delivered |
+| --------- | ------------------- | -------------- |
+| 6-7-2026  | 6                   | 7              |
+| 6-8-2026  | 2                   | 3              |
+| 6-9-2026  | 3                   | 4              |
+| 6-10-2026 | 4                   | 5              |
+| 6-11-2026 | 1                   | 0              |
+
 ## Try the viewer workflow
 
 Open **Productivity Tracker.csv**, run a SQLite query, then choose **Insert into

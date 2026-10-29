@@ -5,7 +5,7 @@ import type { InstallerService } from "../installer/InstallerService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
 import type { ExportSettingsService } from "./ExportSettingsService.js";
-import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledBinaries.generated.js";
+import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledPayloads.generated.js";
 import { loadExports } from "./exportList.js";
 import { exportSummaryText } from "./exportSummary.js";
 import { closeSettings } from "../obsidian/settingsModal.js";
