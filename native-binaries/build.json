@@ -6,6 +6,7 @@
   "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12" },
   "cmakeOptions": {
     "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "OFF",
     "CSVZALL_CXX_STANDARD": "23",
     "CSVZALL_OBSIDIAN_BUILD": "ON",
     "CSVZALL_ENABLE_POSTGRESQL": "OFF",
@@ -31,7 +32,7 @@
     "catch2": { "repository": "catchorg/Catch2", "commit": "fa43b77429ba76c462b1898d6cd2f2d7a9416b14", "cmakeVariable": "FETCHCONTENT_SOURCE_DIR_CATCH2" }
   },
   "targets": {
-    "linux-x64": { "runner": "ubuntu-24.04", "platform": "linux", "arch": "x64", "generator": "Ninja", "cmakeOptions": { "CMAKE_C_COMPILER": "gcc-14", "CMAKE_CXX_COMPILER": "g++-14" } },
+    "linux-x64": { "runner": "ubuntu-24.04", "platform": "linux", "arch": "x64", "generator": "Ninja", "cmakeOptions": { "CMAKE_C_COMPILER": "gcc-14", "CMAKE_CXX_COMPILER": "g++-14", "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON", "CMAKE_POLICY_DEFAULT_CMP0069": "NEW" } },
     "darwin-arm64": { "runner": "macos-15", "platform": "darwin", "arch": "arm64", "generator": "Ninja", "cmakeOptions": { "CMAKE_OSX_ARCHITECTURES": "arm64", "CMAKE_OSX_DEPLOYMENT_TARGET": "13.3" } },
     "win32-x64": { "runner": "windows-2022", "platform": "win32", "arch": "x64", "generator": "Ninja", "cmakeOptions": { "CMAKE_C_COMPILER": "cl", "CMAKE_CXX_COMPILER": "cl" } }
   }

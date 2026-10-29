@@ -24,6 +24,13 @@ and CMake configuration. Windows x64, macOS arm64, and Linux x64 are supported.
 The macOS recipe targets macOS 13.3 or later. Linux uses GCC 14; Windows uses
 Visual Studio 2022. The build verifies all three upstream source version markers.
 
+IPO (link-time optimization) is enabled only for Linux, where local measurements
+reduced the compressed helper payload. Windows measurements increased its size;
+Windows and untested macOS keep IPO disabled. Linux sets CMake policy CMP0069 to
+NEW so older dependency projects, including SQLiteCpp and SQLite, also use IPO.
+These settings are part of the build identity and require a newly prepared
+helper snapshot before release.
+
 The build identity hashes that complete configuration and the native workflow,
 build, packaging, and verification scripts. It excludes plugin-only changes.
 The dependency checkouts are explicit, and CMake's FetchContent network fallback
