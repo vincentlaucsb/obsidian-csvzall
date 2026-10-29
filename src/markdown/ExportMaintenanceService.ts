@@ -16,6 +16,7 @@ export interface MaintenanceRefreshActions {
   initialize(): Promise<void>;
   sourceChanged(path: string): void;
   bindingsFor(file: TFile): readonly ResolvedExport[] | undefined;
+  isEditing(file: TFile): boolean;
 }
 
 /** Owns migration, definition maintenance, deletion and the cleanup write barrier. */
@@ -53,6 +54,7 @@ export class ExportMaintenanceService {
     const revision = this.notes.revision;
     let complete = true;
     for (const file of this.app.vault.getMarkdownFiles()) {
+      if (this.refresh.isEditing(file)) { complete = false; continue; }
       try {
         for (const table of await this.notes.tablesFor(file)) {
           if (!table.recipe) references.push({ note: file.path, id: table.fence?.legacy?.id ?? exportDefinitionId(file.path, table), legacy: table.marker === 'table' });
@@ -187,15 +189,22 @@ export class ExportMaintenanceService {
       const markers: Array<{ file: TFile; tables: ManagedTable[] }> = [];
       // An unreadable note or incomplete edit is not evidence that its export died.
       try {
-        for (const file of notes) markers.push({ file, tables: await this.notes.tablesFor(file) });
+        for (const file of notes) {
+          if (this.refresh.isEditing(file)) return;
+          markers.push({ file, tables: await this.notes.tablesFor(file) });
+        }
       } catch { return; }
       const live = new Set<string>();
-      for (const { file, tables } of markers) for (const table of tables) {
-        if (table.recipe) continue;
-        const resolved = await this.definitions.find(file.path, exportDefinitionId(file.path, table), table.marker === 'table');
-        if (resolved) this.reflection?.assertSqlBinding(file.path, resolved.recipe.id, resolved.configPath);
-        if (resolved) live.add(`${resolved.configPath}\0${resolved.recipe.id}`);
-      }
+      try {
+        for (const { file, tables } of markers) {
+          for (const table of tables) {
+            if (table.recipe) continue;
+            const resolved = await this.definitions.find(file.path, exportDefinitionId(file.path, table), table.marker === 'table');
+            if (resolved) this.reflection?.assertSqlBinding(file.path, resolved.recipe.id, resolved.configPath);
+            if (resolved) live.add(`${resolved.configPath}\0${resolved.recipe.id}`);
+          }
+        }
+      } catch { return; }
       let changed = false;
       for (const entry of saved) {
         if (cancelled()) break;

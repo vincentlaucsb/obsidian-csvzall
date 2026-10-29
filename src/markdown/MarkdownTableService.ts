@@ -38,6 +38,7 @@ export class MarkdownTableService {
     this.maintenance = new ExportMaintenanceService(app, this.notes, this.renderer, this.definitions, {
       index: file => this.refreshes.index(file), initialize: () => this.refreshes.initialize(),
       sourceChanged: path => this.refreshes.sourceChanged(path), bindingsFor: file => this.refreshes.bindingsFor(file),
+      isEditing: file => this.refreshes.isEditing(file),
     }, this.report, signal, reflection);
     this.refreshes = new ExportRefreshService(app, this.notes, this.renderer, this.definitions, this.maintenance, this.report, signal, reflection);
     this.editing = new ExportEditingService(app, this.notes, this.renderer, this.definitions, this.maintenance, this.refreshes, this.report, signal, preferences);
@@ -49,7 +50,7 @@ export class MarkdownTableService {
       if (!(file instanceof TFile)) return;
       this.notes.invalidateNote(file);
       if (isCsv(file)) { this.refreshes.sourceChanged(file.path); void this.refreshes.initialize().catch(error => this.report(file, error)); }
-      if (file.extension === 'md') { this.maintenance.invalidatePruning(); void this.refreshes.index(file).then(changed => changed ? this.pruneDeadExports() : undefined).catch(error => this.report(file, error)); }
+      if (file.extension === 'md') { this.maintenance.invalidatePruning(); this.refreshes.noteChanged(file); }
     }));
     plugin.registerEvent(this.app.vault.on('create', file => {
       if (file instanceof TFile) this.notes.invalidateNote(file);
@@ -71,7 +72,7 @@ export class MarkdownTableService {
       if (!(view instanceof MarkdownView) || !view.file) return;
       this.notes.invalidateNote(view.file);
       this.maintenance.invalidatePruning();
-      void this.refreshes.index(view.file).then(changed => changed ? this.pruneDeadExports() : undefined).catch(error => this.report(view.file, error));
+      this.refreshes.noteChanged(view.file);
     }));
     this.refreshes.start();
   }

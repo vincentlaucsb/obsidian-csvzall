@@ -18,7 +18,27 @@ class FakeFile {
 class FakeView {}
 class FakeFolder { constructor(public path: string) {} }
 
-async function harness(reflection?: any) {
+function fakeClock() {
+  let now = 0, next = 0;
+  const timers = new Map<number, { at: number; callback: () => void }>();
+  return {
+    setTimeout(callback: () => void, delay: number) { const id = ++next; timers.set(id, { at: now + delay, callback }); return id; },
+    clearTimeout(id: number) { timers.delete(id); },
+    async advance(delay: number) {
+      const end = now + delay;
+      for (;;) {
+        const next = Array.from(timers).filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        now = next[1].at; timers.delete(next[0]); next[1].callback();
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      now = end;
+      await new Promise<void>(resolve => setImmediate(resolve));
+    },
+  };
+}
+
+async function harness(reflection?: any, clock?: ReturnType<typeof fakeClock>) {
   let syncing = true;
   let formOptions: any, noteLink: any, destinationOptions: any;
   const opened: Array<{ kind: unknown; file: unknown; state: unknown }> = [];
@@ -31,7 +51,7 @@ async function harness(reflection?: any) {
   });
   const module = { exports: {} as any };
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports, console,
-    crypto: webcrypto, AbortController, window: { setTimeout, clearTimeout,
+    crypto: webcrypto, AbortController, window: { setTimeout: clock?.setTimeout ?? setTimeout, clearTimeout: clock?.clearTimeout ?? clearTimeout,
       setInterval(callback: () => void, delay: number) { const timer = setInterval(callback, delay); intervals.add(timer); return timer; },
       clearInterval(timer: ReturnType<typeof setInterval>) { intervals.delete(timer); clearInterval(timer); },
     }, require(name: string) {
@@ -92,7 +112,7 @@ async function harness(reflection?: any) {
   }, { record: async (_level: string, _message: string, detail: string) => { errors.push(detail); } }, reflection);
   const settle = () => new Promise<void>(resolve => setImmediate(resolve));
   return { service, note, queries, errors, configs, adapter, syncReady() { syncing = false; },
-    addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; } }; },
+    addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; }, set text(value: string) { extraNotes.set(file, value); } }; },
     failWrites(value = true) { failWrite = value; },
     async reindex() { await service.refreshes.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
     get formOptions() { return formOptions; }, get noteLink() { return noteLink; }, opened,
@@ -112,10 +132,167 @@ async function harness(reflection?: any) {
       };
       const view = Object.assign(new FakeView(), { file: note, editor, getMode: () => 'source' });
       leaves = [{ view }];
-      return { view, editor, setCursor(offset: number) { cursor = offset; }, get text() { return buffer; } };
+      return { view, editor, setCursor(offset: number) { cursor = offset; }, get text() { return buffer; }, set text(value: string) { buffer = value; } };
     },
   };
 }
+
+const sqlBlock = (sql: string) => `Before\n\n\`\`\`sql csvzall\n${sql}\n\`\`\`\n\n| title |\n| --- |\n| Old |`;
+const validSql = 'SELECT title FROM "../Data/tasks.csv"';
+
+test('SQL typing debounces parsing, definition writes, and queries across editor, save, and poll events', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain(); f.queries.length = 0;
+    const configs = JSON.stringify(Array.from(f.configs));
+    for (const prefix of ['S', 'SE', 'SEL', 'SELECT']) {
+      editing.text = sqlBlock(prefix);
+      await f.event('editor-change', editing.editor, editing.view);
+      await clock.advance(200);
+      await f.event('modify', f.note);
+      await f.event('modify', f.csv);
+      await f.reindex(); await f.drain();
+      assert.equal((await f.service.migrationReferences()).complete, false);
+      assert.equal(f.queries.length, 0); assert.equal(f.errors.length, 0);
+      assert.equal(JSON.stringify(Array.from(f.configs)), configs);
+      assert.match(editing.text, /\| Old \|/);
+    }
+    editing.text = sqlBlock(`${validSql} WHERE priority > 1`);
+    await f.event('editor-change', editing.editor, editing.view);
+    await clock.advance(499);
+    assert.equal(f.queries.length, 0); assert.equal(f.errors.length, 0);
+    await clock.advance(501);
+    assert.equal(f.queries.length, 1); assert.equal(f.errors.length, 0);
+    assert.match(f.queries[0]!.join(' '), /WHERE priority > 1/);
+    assert.match(editing.text, /\| New \|/);
+  } finally { f.service.unload(); }
+});
+
+test('typing in one note does not postpone another note export', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  const other = f.addNote('Reports/other.md', sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain(); f.queries.length = 0;
+    other.text = sqlBlock(`${validSql} WHERE priority > 2`);
+    await f.event('modify', other.file);
+    editing.text = sqlBlock('S');
+    await f.event('editor-change', editing.editor, editing.view);
+    await clock.advance(400);
+    await f.event('editor-change', editing.editor, editing.view);
+    for (let i = 0; i < 3; ++i) {
+      await clock.advance(200);
+      await f.event('editor-change', editing.editor, editing.view);
+    }
+    assert.equal(f.queries.length, 1); assert.equal(f.errors.length, 0);
+    assert.match(f.queries[0]!.join(' '), /WHERE priority > 2/);
+    assert.match(other.text, /\| New \|/);
+    assert.match(editing.text, /\| Old \|/);
+  } finally { f.service.unload(); }
+});
+
+for (const outcome of ['result', 'error']) test(`an edit supersedes an in-flight query ${outcome} and reruns after settling`, async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain();
+    let finish!: () => void, started!: () => void;
+    const generating = new Promise<void>(resolve => { started = resolve; });
+    f.setQuery(() => new Promise<string>((resolve, reject) => {
+      finish = () => outcome === 'error' ? reject(new Error('Syntax error in obsolete SQL')) : resolve('| title |\n| --- |\n| Stale |');
+      started();
+    }));
+    await f.event('modify', f.csv);
+    const pending = f.drain(); await generating;
+    // Prose-only edits must also retain a queued CSV refresh when SQL is unchanged.
+    editing.text = `Edited prose\n${sqlBlock(outcome === 'result' ? validSql : `${validSql} WHERE priority > 2`)}`;
+    await f.event('editor-change', editing.editor, editing.view);
+    finish(); await pending;
+    assert.equal(f.errors.length, 0); assert.doesNotMatch(editing.text, /Stale/);
+    assert.match(editing.text, /\| Old \|/);
+    f.setQuery(async () => '| title |\n| --- |\n| Latest |');
+    await clock.advance(1000);
+    assert.equal(f.queries.length, 3); assert.equal(f.errors.length, 0);
+    assert.match(editing.text, /Edited prose/); assert.match(editing.text, /\| Latest \|/);
+  } finally { f.service.unload(); }
+});
+
+test('an unchanged polling index does not supersede a running query', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain();
+    let finish!: (value: string) => void, started!: () => void;
+    const generating = new Promise<void>(resolve => { started = resolve; });
+    f.setQuery(() => { started(); return new Promise<string>(resolve => { finish = resolve; }); });
+    await f.event('modify', f.csv);
+    const pending = f.drain(); await generating;
+    await f.reindex(); finish('| title |\n| --- |\n| Latest |'); await pending;
+    await clock.advance(1000);
+    assert.equal(f.queries.length, 2); assert.equal(f.errors.length, 0);
+  } finally { f.service.unload(); }
+});
+
+test('settled invalid SQL reports once, while an explicit refresh bypasses the edit delay', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain(); f.queries.length = 0;
+    editing.text = sqlBlock('S');
+    await f.event('editor-change', editing.editor, editing.view);
+    await clock.advance(499); assert.equal(f.errors.length, 0);
+    await clock.advance(1); assert.equal(f.errors.length, 1);
+    await f.reindex(); assert.equal(f.errors.length, 1);
+    assert.match(editing.text, /\| Old \|/);
+    f.setQuery(async () => { throw new Error('near SE: syntax error'); });
+    editing.text = sqlBlock('SE title FROM "../Data/tasks.csv"');
+    await f.event('editor-change', editing.editor, editing.view);
+    await clock.advance(999); assert.equal(f.queries.length, 0);
+    await clock.advance(1); assert.equal(f.queries.length, 1); assert.equal(f.errors.length, 2);
+    await f.reindex(); await f.drain(); assert.equal(f.errors.length, 2);
+    assert.match(editing.text, /\| Old \|/);
+    f.setQuery(async () => '| title |\n| --- |\n| New |');
+    editing.text = sqlBlock(`${validSql} WHERE priority > 3`);
+    await f.event('editor-change', editing.editor, editing.view);
+    await f.service.refresh(f.note);
+    assert.equal(f.queries.length, 2); assert.match(editing.text, /\| New \|/);
+  } finally { f.service.unload(); }
+});
+
+test('a parse failure from an older asynchronous index is silent after another edit', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain(); f.queries.length = 0;
+    const prepare = f.service.maintenance.prepare.bind(f.service.maintenance);
+    let fail!: (error: Error) => void;
+    f.service.maintenance.prepare = () => new Promise((_resolve, reject) => { fail = reject; });
+    await f.event('create', f.note);
+    editing.text = sqlBlock(`${validSql} WHERE priority > 4`);
+    await f.event('editor-change', editing.editor, editing.view);
+    fail(new Error('Unclosed CSV export code block.'));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(f.errors.length, 0);
+    f.service.maintenance.prepare = prepare;
+    await clock.advance(1000);
+    assert.equal(f.queries.length, 1); assert.equal(f.errors.length, 0);
+    assert.match(editing.text, /\| New \|/);
+  } finally { f.service.unload(); }
+});
+
+for (const action of ['delete', 'unload']) test(`${action} cancels pending SQL edit work`, async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain(); f.queries.length = 0;
+    editing.text = sqlBlock('S');
+    await f.event('editor-change', editing.editor, editing.view);
+    if (action === 'delete') await f.event('delete', f.note); else f.service.unload();
+    await clock.advance(2000);
+    assert.equal(f.queries.length, 0); assert.equal(f.errors.length, 0);
+  } finally { f.service.unload(); }
+});
 
 test('CSV refresh writes a real Markdown region, preserving prose and skipping unchanged results', async () => {
   const f = await harness();
@@ -451,13 +628,15 @@ test('unchanged closed notes are read once across repeated reference scans and i
 });
 
 test('same-size note events invalidate reference caches and malformed edits remain incomplete', async () => {
-  const f = await harness();
+  const clock = fakeClock(), f = await harness(undefined, clock);
   Object.defineProperty(f.note, 'stat', { value: { mtime: 1, size: f.text.length } });
   f.service.register({ register() {}, registerEvent() {} });
   await f.service.migrationReferences();
   const reads = f.reads;
   f.text = f.text.split('tasks').join('other');
   await f.event('modify', f.note);
+  assert.equal((await f.service.migrationReferences()).complete, false);
+  await clock.advance(500);
   const changed = await f.service.migrationReferences();
   assert.equal(changed.references[0].id, 'other');
   assert.ok(f.reads > reads);
@@ -466,6 +645,7 @@ test('same-size note events invalidate reference caches and malformed edits rema
   assert.equal((await f.service.migrationReferences()).complete, false);
   f.text = oldTable;
   await f.event('modify', f.note);
+  await clock.advance(500);
   assert.equal((await f.service.migrationReferences()).references[0].id, 'tasks');
   f.service.unload();
 });
@@ -577,10 +757,10 @@ test('unloading during generation prevents writes', async () => {
 });
 
 test('startup and CSV saves regenerate tables, while generated note saves do not loop', async () => {
-  const f = await harness();
+  const clock = fakeClock(), f = await harness(undefined, clock);
   await f.start(); await f.drain();
   assert.equal(f.queries.length, 1);
-  await f.event('modify', f.note); await f.drain();
+  await f.event('modify', f.note); await clock.advance(500); await f.drain();
   assert.equal(f.queries.length, 1);
   await f.event('modify', f.csv); await f.event('modify', f.csv); await f.drain();
   assert.equal(f.queries.length, 2);
@@ -1097,8 +1277,8 @@ test('legacy exports without an output note are shown as unlinked without scanni
 });
 
 for (const format of ['table', 'value']) {
-  test(`manual removal immediately prunes linked SQL ${format} definitions, including unsaved edits`, async () => {
-    const f = await harness();
+  test(`removing SQL ${format} markers prunes definitions after unsaved editing settles`, async () => {
+    const clock = fakeClock(), f = await harness(undefined, clock);
     const config = JSON.parse(f.configs.get('.csvzall/exports.json')!);
     config.exports[0].format = format; config.exports[0].runOnSave = false;
     f.configs.set('.csvzall/exports.json', JSON.stringify(config));
@@ -1108,6 +1288,8 @@ for (const format of ['table', 'value']) {
     editing.editor.replaceRange('Kept prose', { line: 0, ch: 0 } as any, { line: 0, ch: editing.text.length } as any);
     await f.event('editor-change', editing.editor, editing.view);
     await f.service.pruneDeadExports();
+    assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
+    await clock.advance(500);
     assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 0);
     assert.equal(editing.text, 'Kept prose');
     assert.ok(f.text.includes('csvzall:export'), 'disk text can still contain the old marker');

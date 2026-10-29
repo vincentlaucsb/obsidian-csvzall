@@ -23,6 +23,8 @@ export class ExportRefreshService {
   private readonly signatures = new Map<TFile, string>();
   private readonly revisions = new Map<string, number>();
   private readonly indexRevisions = new Map<TFile, number>();
+  private readonly editTimers = new Map<TFile, number>();
+  private readonly editRevisions = new WeakMap<TFile, number>();
 
   constructor(private readonly app: App, private readonly notes: MarkdownNoteStore, private readonly renderer: ExportRenderer,
     private readonly definitions: ExportDefinitions, private readonly maintenance: ExportMaintenanceService,
@@ -42,13 +44,47 @@ export class ExportRefreshService {
     this.workerState = RefreshWorkerState.Stopped;
     if (this.poll !== null) window.clearInterval(this.poll);
     if (this.timer !== null) window.clearTimeout(this.timer);
+    for (const timer of this.editTimers.values()) window.clearTimeout(timer);
+    this.editTimers.clear();
     this.poll = null; this.timer = null; this.queued.clear();
   }
 
   bindingsFor(file: TFile): readonly ResolvedExport[] | undefined { return this.bindings.get(file); }
+  isEditing(file: TFile): boolean { return this.editTimers.has(file); }
 
   forget(file: TFile): void {
+    const timer = this.editTimers.get(file);
+    if (timer !== undefined) window.clearTimeout(timer);
+    this.editTimers.delete(file);
+    this.editRevisions.set(file, (this.editRevisions.get(file) ?? 0) + 1);
     this.sources.delete(file); this.bindings.delete(file); this.signatures.delete(file); this.queued.delete(file); this.indexRevisions.delete(file);
+  }
+
+  noteChanged(file: TFile): void {
+    if (this.isStopped()) return;
+    const revision = (this.editRevisions.get(file) ?? 0) + 1;
+    this.editRevisions.set(file, revision);
+    this.indexRevisions.set(file, (this.indexRevisions.get(file) ?? 0) + 1);
+    const previous = this.editTimers.get(file);
+    if (previous !== undefined) window.clearTimeout(previous);
+    this.editTimers.set(file, window.setTimeout(() => {
+      this.editTimers.delete(file);
+      void this.indexEdited(file, revision);
+    }, 500));
+  }
+
+  private async indexEdited(file: TFile, revision: number): Promise<void> {
+    const current = () => !this.isStopped() && this.editRevisions.get(file) === revision;
+    let changed: boolean;
+    try { changed = await this.index(file); }
+    catch (error) {
+      if (current()) { this.queued.delete(file); await this.report(file, error); }
+      return;
+    }
+    if (!current()) return;
+    // A CSV refresh queued before the edit must resume even if only prose changed.
+    if (!changed && this.queued.has(file)) this.schedule(file);
+    if (changed) await this.maintenance.pruneDeadExports().catch(error => current() ? this.report(file, error) : undefined);
   }
 
   async initialize(): Promise<void> {
@@ -70,27 +106,35 @@ export class ExportRefreshService {
   }
 
   async index(file: TFile): Promise<boolean> {
-    if (this.isStopped()) return false;
+    if (this.isStopped() || this.editTimers.has(file)) return false;
     const revision = (this.indexRevisions.get(file) ?? 0) + 1;
     this.indexRevisions.set(file, revision);
-    const tables = await this.maintenance.prepare(file);
-    if (this.reflection) for (const table of tables) {
-      if (!table.recipe && !table.fence) await this.reflection.recoverSql(file.path, table.id);
+    const current = () => !this.isStopped() && this.indexRevisions.get(file) === revision && this.app.vault.getAbstractFileByPath(file.path) === file;
+    try {
+      const tables = await this.maintenance.prepare(file);
+      if (!current()) return false;
+      if (this.reflection) for (const table of tables) {
+        if (!table.recipe && !table.fence) await this.reflection.recoverSql(file.path, table.id);
+      }
+      const results = await Promise.allSettled(tables.map(table => this.maintenance.resolveTable(file.path, table)));
+      if (!current()) return false;
+      const resolved = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') resolved.push(result.value);
+        else await this.report(file, result.reason);
+      }
+      if (!current()) return false;
+      this.bindings.set(file, resolved);
+      this.sources.set(file, resolved.filter(table => table.runOnSave).map(table => table.recipe.source));
+      const signature = JSON.stringify(resolved);
+      const changed = this.signatures.get(file) !== signature;
+      this.signatures.set(file, signature);
+      if (changed && resolved.some(table => table.runOnSave)) this.schedule(file);
+      return changed;
+    } catch (error) {
+      if (!current()) return false;
+      throw error;
     }
-    const results = await Promise.allSettled(tables.map(table => this.maintenance.resolveTable(file.path, table)));
-    const resolved = [];
-    for (const result of results) {
-      if (result.status === 'fulfilled') resolved.push(result.value);
-      else await this.report(file, result.reason);
-    }
-    if (this.isStopped() || this.indexRevisions.get(file) !== revision || this.app.vault.getAbstractFileByPath(file.path) !== file) return false;
-    this.bindings.set(file, resolved);
-    this.sources.set(file, resolved.filter(table => table.runOnSave).map(table => table.recipe.source));
-    const signature = JSON.stringify(resolved);
-    const changed = this.signatures.get(file) !== signature;
-    this.signatures.set(file, signature);
-    if (changed && resolved.some(table => table.runOnSave)) this.schedule(file);
-    return changed;
   }
 
   sourceChanged(path: string): void {
@@ -110,19 +154,27 @@ export class ExportRefreshService {
     this.workerState = RefreshWorkerState.Running;
     try {
       while (!this.isStopped() && this.queued.size) {
-        const [file] = this.queued;
+        const file = Array.from(this.queued).find(candidate => !this.editTimers.has(candidate));
         if (!(file instanceof TFile)) break;
         this.queued.delete(file);
-        try { await this.refresh(file, undefined, true); } catch (error) { await this.report(file, error); }
+        const revision = this.editRevisions.get(file);
+        try { await this.refresh(file, undefined, true); }
+        catch (error) { if (!this.isStopped() && this.editRevisions.get(file) === revision) await this.report(file, error); }
+        finally {
+          if (!this.isStopped() && this.editRevisions.get(file) !== revision && this.app.vault.getAbstractFileByPath(file.path) === file) this.queued.add(file);
+        }
       }
     } finally { if (!this.isStopped()) this.workerState = RefreshWorkerState.Idle; }
   }
 
   async refresh(file: TFile, onlyId?: string, automatic = false): Promise<void> {
-    if (this.isStopped()) return;
+    if (this.isStopped() || automatic && this.editTimers.has(file)) return;
+    const editRevision = this.editRevisions.get(file);
+    const current = () => !automatic || this.editRevisions.get(file) === editRevision && this.app.vault.getAbstractFileByPath(file.path) === file;
     await this.reflection?.reconcile();
-    if (this.isStopped()) return;
+    if (this.isStopped() || !current()) return;
     const tables = await this.maintenance.prepare(file);
+    if (!current()) return;
     const results = new Map<string, string>();
     for (const table of tables) {
       if (onlyId && table.id !== onlyId && exportDefinitionId(file.path, table) !== onlyId) continue;
@@ -135,18 +187,19 @@ export class ExportRefreshService {
         if (this.maintenance.isDeleting(recipe.source)) continue;
         const revision = this.revisions.get(recipe.source);
         const validate = () => {
+          if (!current()) throw new Error('CSV export changed while the query was running.');
           this.reflection?.assertReady(definition.configPath);
           this.reflection?.assertSqlBinding(file.path, recipe.id, definition.configPath);
         };
         const key = JSON.stringify([definition.configPath, recipe.id, snapshot, revision]);
         let markdown = results.get(key);
         if (markdown === undefined) { markdown = await this.renderer.render(recipe, undefined, validate); results.set(key, markdown); }
-        if (this.isStopped()) return;
+        if (this.isStopped() || !current()) return;
         if (this.maintenance.isDeleting(recipe.source)) continue;
         if (path !== file.path || snapshot !== await this.definitions.snapshot(file.path) || revision !== this.revisions.get(recipe.source)) { this.schedule(file); continue; }
         validate();
         await this.notes.replace(file, table, exportRegionText(table, recipe, markdown, file.path));
-      } catch (error) { await this.report(file, error, automatic); }
+      } catch (error) { if (this.isStopped() || !current()) return; await this.report(file, error, automatic); }
     }
   }
 }
