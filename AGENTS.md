@@ -1,5 +1,14 @@
 # Repository Guide
 
+## Scope and performance
+
+- Keep work proportional to the user's operation. Startup and opening a CSV must not trigger or wait for vault-wide discovery, reconciliation, or migration. Prepare only the affected file and its relevant export configuration.
+- Prefer direct lookups, known export definitions, cached results, and file events. Schedule required broader maintenance separately in bounded, incremental work; an async startup callback does not make a whole-vault scan acceptable.
+- When missing or incomplete information makes cleanup unsafe, defer that cleanup and preserve existing content. Do not expand a foreground operation to establish global certainty.
+- Validate affected state at the mutation boundary, including concurrent edits. Reuse completed discovery and validation while their inputs remain unchanged.
+- Tie new safeguards and recovery machinery to concrete failure modes. Use existing guards where possible; avoid speculative confirmations, fallback layers, and repeated validation.
+- Apply these boundaries to the requirements below and linked design plans. Keep each operation responsive while enforcing the guarantees relevant to the state it reads or changes.
+
 ## Git synchronization
 
 - When working on `master` or `main`, pull from `origin` before editing if the last successful pull is unknown or more than one hour old. Use `git pull --ff-only origin master` (or `main`, matching the current branch). A fetch alone does not update the working branch.
@@ -52,18 +61,21 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 
 ## Obsidian Sync compatibility
 
-- Obsidian Sync compatibility is a product requirement. Features, saved export configurations, and vault-relative references must work across devices using Obsidian Sync. The only accepted exception is the desktop `main.js` exceeding the Sync Standard 5 MB file limit, already documented in README; users install the plugin separately on each desktop.
-- Use the hybrid export storage model: csvzall keeps its standard `.csvzall/*.json` configuration files, and obsidian-csvzall reflects chart, table, and value definitions into its standard plugin `data.json` through Obsidian's plugin data APIs. Reconstruct missing local JSON from reflected definitions. Hidden `.csvzall/` folders remain CLI storage, but cannot be the only copy required for Sync; **Sync all other types** does not make hidden folders sync.
-- Keep Obsidian logic in this plugin. The allowed upstream integration is an explicit `csvzall view --obsidian` mode flag supplied by the plugin; do not add automatic vault/profile discovery, Obsidian settings access, or Sync logic to csvzall. In this mode the plugin owns automatic chart regeneration after CSV saves; standalone behavior and explicit chart actions remain available. The plugin uses Obsidian's active configuration folder directly. Intentionally separate per-device profiles may have separate plugin data; do not discover or merge other profiles.
-- Distinguish plugin configuration syncing from ordinary vault-file syncing. Plugin `data.json` uses installed community plugin syncing; CSV/TSV sources and ordinary JSON use **Sync all other types**. Flag disabled prerequisites when detection is reliable, report unknown when unavailable, and never silently change Sync settings. Keep the existing oversized `main.js` disclosure; do not expand this work into further Sync Standard accommodation.
-- Resolve conflicting export definitions with newest-wins ordering per scoped export, including deliberate deletions. Reflection, regeneration, polling, and reloads must not make unchanged definitions appear newer. Use deterministic ties and retain deletion records so stale copies cannot resurrect exports. Preserve independent edits to unrelated exports and all unrelated plugin data.
-- Preserve stale SQL table/value cleanup when no live note references remain, with safeguards for missing notes, staged Sync, renames, and incomplete indexing. Charts have no stale-definition cleanup: missing or deleted generated chart files do not delete chart configurations. Explicit export deletion remains available for both kinds.
-- Migration is automatic reflection, not replacement of the CLI format. Preserve definitions, export IDs, scoped bindings, path meaning, unknown fields, and generated content while localizing inherited entries as described below. Validate and verify durable writes before recording completion; make retries safe. Do not require ongoing manual copying of hidden folders.
-- Each folder's `.csvzall` serves only CSVs/export notes directly in that folder. Automatically localize inherited configurations: charts beside the source CSV, SQL exports beside each referencing note. Retire inherited entries only after verified destination writes; preserve relocation lineage so delayed Sync and notes recover without ancestor runtime lookup. See [docs/direct-folder-export-plan.md](docs/direct-folder-export-plan.md). Keep standalone CLI lookup unchanged; the plugin prepares a direct chart config before opening its native viewer.
-- Keep shared configuration portable across operating systems and vault locations. Recreate machine-specific helper installations locally rather than requiring users to sync executable paths or generated binaries.
-- Validate changes against missing or delayed configuration files, sync arriving in stages, and concurrent edits. Background failures must not cause repeating notices within the same session; preserve existing generated content and allow recovery when required files arrive.
-- Official Sync behavior and prerequisites: https://obsidian.md/help/sync/settings. Verify current guidance when changing storage or Sync integration.
-- The implementation design and upstream flag contract are in [docs/obsidian-sync-export-plan.md](docs/obsidian-sync-export-plan.md). See [docs/obsidian-sync-testing.md](docs/obsidian-sync-testing.md) for local helper selection and release status; do not assume the committed bundled helper snapshot includes unpublished local upstream changes.
+- Exports and vault-relative references must work across devices. Retain standard `.csvzall/*.json` CLI files and reflect chart, table, and value definitions through Obsidian's plugin data APIs into `data.json`, reconstructing missing local JSON automatically. Hidden folders cannot be the only Sync copy, even with **Sync all other types** enabled.
+- Keep conflict resolution local to each scoped export: newest wins, deterministic ties, retained deletion records, and no timestamp churn for unchanged definitions. Preserve unrelated exports and plugin data, including unknown fields.
+- Automatically localize inherited configurations beside their owners: charts beside the source CSV, SQL exports beside each referencing note. Preserve IDs, bindings, pause state, path meaning, metadata, and generated content. Retire inherited entries only after verified durable destination writes; retain relocation lineage for delayed Sync and retry safely. Runtime configurations serve only their direct folder; standalone CLI lookup stays unchanged.
+- Clean up SQL definitions only when their live references are known to be gone. Missing notes, staged Sync, renames, or incomplete indexing defer ambiguous cleanup. Missing chart outputs never delete chart configurations; explicit deletion remains available for both kinds. Background failures preserve generated content, recover when dependencies arrive, and avoid repeated notices within a session.
+- The plugin owns Obsidian integration through its active configuration folder and explicit `csvzall view --obsidian` mode. It owns hosted automatic chart regeneration; standalone behavior and explicit chart actions remain available. Keep vault/profile discovery, settings access, and Sync logic out of csvzall; do not discover or merge other profiles. Recreate machine-specific helper installations locally and keep shared configuration portable.
+- Plugin `data.json` uses **Installed community plugins** syncing; CSV/TSV sources and ordinary JSON use **Sync all other types**. Report disabled prerequisites only when detectable, otherwise unknown; never change Sync settings silently. Retain README's existing oversized-desktop-`main.js` exception and separate installation on each desktop; further Sync Standard accommodation is outside this requirement.
+
+For Sync changes, read [the storage and conflict design](docs/obsidian-sync-export-plan.md),
+[direct-folder migration](docs/direct-folder-export-plan.md), and
+[targeted testing and helper selection](docs/obsidian-sync-testing.md). Exercise
+the affected behavior with delayed/missing files, staged Sync, and concurrent
+edits. Verify current [official Sync guidance](https://obsidian.md/help/sync/settings)
+when changing storage or Sync integration. The committed helper snapshot may
+differ from unpublished local upstream changes. These guarantees do not require
+global preflight checks for unrelated operations.
 
 ## Viewer theme design
 
@@ -87,28 +99,21 @@ Keep new behavior in the narrowest module that owns the concern. Do not add proc
 
 ## Mobile WASM Viewer Notes
 
-- Android keyboard handling inside Obsidian's mobile WebView is fragile. Do not reflow, hide, or resize the WASM viewer layout while an AG Grid cell editor is active.
-- Avoid focus-driven keyboard shims for the hosted WASM viewer. Focus can move into AG Grid editor inputs or dropdown/menu roots and cause layout churn or immediate menu dismissal.
-- Do not add `body[data-host-mode][data-keyboard-open]` CSS that changes `grid-template-rows`, hides the topbar/footer, or otherwise changes the grid container size during editing.
-- Keep the iframe and hosted viewer layout stable. The Obsidian parent may send `viewport-resized` as a refresh signal, but it should not clamp the parent container height from `visualViewport`.
-- To keep the edited cell visible on mobile, use AG Grid edit lifecycle hooks. Store the active edit cell from `onCellEditingStarted`, then call AG Grid visibility refreshes such as `ensureIndexVisible(rowIndex, "middle")` and `ensureColumnVisible(column)` after short delays while the Android keyboard settles.
-- Never patch compiled/minified WASM viewer JavaScript. Implement runtime behavior in upstream source with explicit host hooks and source-level tests; use `npm run refresh:wasm-viewer` to rebuild, import, and validate it. See `docs/wasm-viewer-refresh.md`.
-- Keep `scripts/check-wasm-viewer.mjs` and `tests/wasm-viewer-assets.test.ts` aligned with required source capabilities and the imported JavaScript digest so unsupported or modified bundles cannot ship silently.
-- The mobile Community plugin is generated from `mobile-src/` with `npm run build:mobile`, validated with `npm run check:mobile`, and synced into the sibling `obsidian-csvzall-mobile` repo with `npm run sync:mobile-repo`.
-- Keep `mobile-src/` free of desktop services, installer code, child processes, Node.js built-ins, and Electron APIs. The generated mobile `main.js` must pass the no-Node marker scan in `scripts/check-mobile-dist.mjs`.
-- The mobile distribution embeds the WASM viewer assets into `main.js` and writes them into the plugin directory at runtime, because Obsidian Community installs only `main.js`, `manifest.json`, and optional `styles.css`.
-- Keep the native desktop plugin manifest `isDesktopOnly` set to `true`. The generated mobile plugin is a lightweight WASM CSV viewer/editor on both desktop and mobile, with no native helper. Enable only one CSV handler on desktop; do not restore the mobile-only load gate. Keep mobile keyboard and navigation UI gated to mobile in the shared view.
-- Mobile plugin metadata and versioning live in `mobile-src/manifest.json`, not the desktop `manifest.json`. Update the mobile manifest when cutting a mobile release.
-- The generated plugin's display name is `csvzall Lite`. Preserve its `csvzall-mobile` ID, view and command identifiers, and `obsidian-csvzall-mobile` repository name when changing branding.
+- Keep the hosted viewer layout stable during AG Grid editing, particularly with Android's keyboard open. Use edit lifecycle hooks for visibility; avoid focus-driven keyboard shims and viewport-height clamping. Detailed examples and constraints are in [the viewer maintenance guide](docs/wasm-viewer-refresh.md#mobile-runtime-and-editing-constraints).
+- Change shared runtime behavior upstream, then run `npm run refresh:wasm-viewer`. Preserve compiled JavaScript bytes and align capability/digest checks with the imported source; never repair minified bundles.
+- Lite is a native-helper-free WASM viewer/editor on desktop and mobile. Keep desktop services, installers, child processes, Node, and Electron out of its source and bundle. Retain the desktop plugin's `isDesktopOnly: true`, one CSV handler per desktop, and mobile-only gating for keyboard/navigation UI.
+- Preserve `csvzall Lite` branding, the `csvzall-mobile` plugin/view/command identifiers, and the `obsidian-csvzall-mobile` repository name. Mobile versions remain independent in `mobile-src/manifest.json`.
+
+For mobile changes, use [the build, packaging, and sync workflow](docs/wasm-viewer-refresh.md#mobile-runtime-and-editing-constraints)
+and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 
 ## Obsidian Review Rules
 
-- The repository-local agent skill [obsidian-warning-remediation](.agents/skills/obsidian-warning-remediation/SKILL.md) is the reusable entry point for this workflow. Invoke it as `$obsidian-warning-remediation`; keep detailed procedure in `docs/obsidian-warning-remediation.md`.
-- Run [the warning remediation workflow](docs/obsidian-warning-remediation.md) for Obsidian scorecard, submission, or validation feedback. Use supplied feedback when available; otherwise retrieve `https://community.obsidian.md/plugins/csvzall#scorecard`. Download current official guidance on each run with `npm run review:obsidian` (or `-- --warnings <file>`), then record findings, dispositions, verification, and unavailable checks in `docs/`.
+- For scorecard, submission, or validation feedback, use [$obsidian-warning-remediation](.agents/skills/obsidian-warning-remediation/SKILL.md). Follow [the remediation workflow](docs/obsidian-warning-remediation.md) for supplied/public feedback, current official guidance, dispositions, and validation records. Apply that workflow when addressing review feedback; it is not a gate for unrelated edits.
 - Direct Filesystem Access and Shell Execution are required desktop capabilities for native helper installation and execution. Preserve them, keep `isDesktopOnly: true`, and disclose outside-vault helper access in README. Do not hide APIs or weaken checks to remove capability warnings. Keep process arguments separate from executable paths, avoid shell interpolation, verify managed downloads, and keep mobile free of these dependencies.
 - Preserve scalar CSV control-run collapsing, Unicode, and literal Markdown escaping. Lint enforces the type-narrowing and control-regex restrictions.
 - Desktop settings use declarative definitions with minimum Obsidian 1.13.0; keep indexing cheap and side effects in render/action callbacks. Evaluate mobile against its own manifest minimum.
-- Production builds must succeed from a clean source archive without `.git` or Git installed. Keep the LF gate and imported `-text` byte preservation active in this mode. Run `npm run check:source-archive` before release and keep its CI check enabled.
+- Production builds must succeed from a clean source archive without `.git` or Git installed, retaining LF and imported-byte checks. Keep `npm run check:source-archive` required before release and in CI; [release procedure](docs/bundled-helper.md) owns helper preparation, verification, and publication.
 - Check dependency advisory ranges and dependency paths, update the lockfile with fixes, and review the Moment override when Obsidian's dependency constraints change. Do not assume an external runtime API removes the need to fix a flagged lockfile dependency.
 - Preserve Obsidian defaults and the user's theme in hosted UI: use the standard Modal title, supported semantic button APIs (`setDestructive()` for deletion) and classes such as `mod-cta`. Limit custom CSS to feature layout; shared viewers inherit host styling. Do not restyle native heading typography, control colors, fonts, line heights, padding, or vertical alignment. In authored host CSS, use explicit layout classes instead of `:has()`, and make display rules respect `[hidden]` without `!important`. Preserve canonical imported modules; change shared source upstream and use its sync workflow.
 - Follow the official Obsidian developer policies, plugin submission requirements, and plugin guidelines before cutting a release.
@@ -151,6 +156,14 @@ For the generated mobile plugin, the mobile release tag and generated
 When adding any new version-bearing file, metadata field, generated manifest, or release configuration, add it to this list in the same change.
 
 ## Type-safety checks
+
+Choose verification for the files and behavior changed. Documentation-only edits
+need link, formatting, and diff review; they do not require plugin builds,
+full regression suites, dependency audits, or release preparation. For runtime
+changes, run the lint gate and relevant tests. Broaden validation for affected
+integration boundaries and use [the release checks](docs/testing.md) when preparing
+a release. Reuse successful checks unless their inputs changed or a failure
+requires investigation.
 
 Read [eslint.config.mjs](eslint.config.mjs) for mechanical coding requirements,
 including unused values, type safety, API compatibility, imports, settings UI,

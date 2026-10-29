@@ -90,3 +90,37 @@ mobile checks for editing with the keyboard open. Source unit tests cover save
 failure, acknowledgement ordering, newer edits remaining dirty, and delayed grid
 visibility; packaged checks cover capabilities and integrity. Desktop viewer
 changes still require a native csvzall rebuild and the companion release.
+
+## Mobile runtime and editing constraints
+
+Android keyboard handling inside Obsidian's mobile WebView is fragile. Keep the
+iframe and hosted viewer layout stable while an AG Grid cell editor is active.
+Focus can move into editor inputs or dropdown/menu roots, so focus-driven
+keyboard shims can cause layout churn or immediate menu dismissal.
+
+Do not add `body[data-host-mode][data-keyboard-open]` CSS that changes
+`grid-template-rows`, hides the topbar/footer, or resizes the grid during editing.
+The Obsidian parent may send `viewport-resized` as a refresh signal, but should
+not clamp its container height from `visualViewport`. Keep mobile keyboard and
+navigation UI gated to mobile in the shared view.
+
+Keep the edited cell visible with AG Grid edit lifecycle hooks: store the cell
+from `onCellEditingStarted`, then call `ensureIndexVisible(rowIndex, "middle")`
+and `ensureColumnVisible(column)` after short delays while the keyboard settles.
+
+The mobile Community plugin is generated from `mobile-src/` with
+`npm run build:mobile`, validated with `npm run check:mobile`, and synced into
+the sibling `obsidian-csvzall-mobile` repository with `npm run sync:mobile-repo`.
+The generated bundle must pass the no-Node scan in
+`scripts/check-mobile-dist.mjs`. Keep `scripts/check-wasm-viewer.mjs` and
+`tests/wasm-viewer-assets.test.ts` aligned with required source capabilities and
+the imported JavaScript digest.
+
+The distribution embeds WASM assets into `main.js` and writes them into the
+plugin directory at runtime because Community installs only `main.js`,
+`manifest.json`, and optional `styles.css`. Lite runs on desktop and mobile
+without a native helper; enable only one CSV handler on desktop and do not
+restore a mobile-only load gate. Its independent metadata and release version
+live in `mobile-src/manifest.json`. Preserve `csvzall Lite` branding, the
+`csvzall-mobile` plugin/view/command identifiers, and the
+`obsidian-csvzall-mobile` repository name.
