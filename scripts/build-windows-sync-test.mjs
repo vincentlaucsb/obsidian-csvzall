@@ -9,6 +9,7 @@ import { build } from "esbuild";
 import { smokeNativeHelper } from "./build-native-helper.mjs";
 import { runTypeSafetyChecks } from "./lint.mjs";
 import { brotliCompressSync } from "node:zlib";
+import { encodeHelperPayload } from "./share-native-text.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const [helperArgument, outputArgument, ...extra] = process.argv.slice(2);
@@ -38,11 +39,11 @@ try {
   execFileSync(process.env.NATIVE_HELPER_PYTHON || "python", [join(root, "scripts/package-native-helper.py"), "pack", archive, frozenHelper], { windowsHide: true });
   const archiveBytes = readFileSync(archive);
   const asset = { assetName: `csvzall-${version}-obsidian-windows-x64.zip`, sha256: hash(archiveBytes),
-    executableSha256: hash(binary), brotliBase64: brotliCompressSync(binary).toString("base64") };
+    executableSha256: hash(binary), brotliBase64: brotliCompressSync(encodeHelperPayload(binary)).toString("base64") };
   const helperPlugin = { name: "windows-sync-test-helper", setup(builder) {
     builder.onResolve({ filter: /bundledPayloads\.generated\.js$/ }, () => ({ path: "windows-sync-test-helper", namespace: "test-helper" }));
     builder.onLoad({ filter: /.*/, namespace: "test-helper" }, () => ({ contents:
-      `export const BUNDLED_CSVZALL_VERSION=${JSON.stringify(version)};export const BUNDLED_CSVZALL_ASSETS=${JSON.stringify({ "win32-x64": asset })};`, loader: "js" }));
+      `export const BUNDLED_CSVZALL_VERSION=${JSON.stringify(version)};export const BUNDLED_CSVZALL_SHARED={sharedBrotliBase64:""};export const BUNDLED_CSVZALL_ASSETS=${JSON.stringify({ "win32-x64": asset })};`, loader: "js" }));
   } };
   const external = ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtinModules];
   const notices = ["THIRD_PARTY_NOTICES.md", "native-binaries/THIRD_PARTY_NOTICES.md"].map(file => readFileSync(join(root, file), "utf8")).join("\n\n");

@@ -4,9 +4,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gunzipSync, inflateRawSync } from "node:zlib";
 import { readBundledBinaries } from "./prepare-native-binaries.mjs";
+import { shareNativeText } from "./share-native-text.mjs";
+import { decodeHelperPayload } from "../src/installer/helperPayload.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
+const compress = bytes => brotliCompressSync(bytes, { params: {
+  [constants.BROTLI_PARAM_QUALITY]: 11,
+  [constants.BROTLI_PARAM_LGWIN]: 24,
+} }).toString("base64");
 
 // The native recipe produces a single executable per checksum-pinned archive.
 // Decode in memory so ordinary plugin builds need neither Python nor a compiler.
@@ -44,28 +50,36 @@ export function pinnedExecutable(bytes, assetName) {
 export function readBundledPayloads(directory = resolve(root, "native-binaries")) {
   const { version, assets: archives } = readBundledBinaries(directory);
   const manifest = JSON.parse(readFileSync(resolve(directory, "manifest.json"), "utf8"));
-  const assets = {};
+  const executables = {};
   for (const [target, archive] of Object.entries(archives)) {
     const executableSha256 = manifest.assets[target].executableSha256;
     const executable = pinnedExecutable(Buffer.from(archive.base64, "base64"), archive.assetName);
     if (!/^[a-f0-9]{64}$/.test(executableSha256) || sha256(executable) !== executableSha256) {
       throw new Error(`Executable SHA-256 verification failed for ${archive.assetName}.`);
     }
-    const bytes = brotliCompressSync(executable, { params: {
-      [constants.BROTLI_PARAM_QUALITY]: 11,
-      [constants.BROTLI_PARAM_LGWIN]: 24,
-    } });
-    assets[target] = { assetName: archive.assetName, sha256: archive.sha256, executableSha256,
-      brotliBase64: bytes.toString("base64") };
+    executables[target] = executable;
   }
-  return { version, assets };
+  const packed = shareNativeText(executables);
+  const shared = { sharedBrotliBase64: compress(packed.shared) };
+  const assets = {};
+  for (const [target, archive] of Object.entries(archives)) {
+    const executableSha256 = manifest.assets[target].executableSha256;
+    const brotliBase64 = compress(packed.payloads[target]);
+    if (!decodeHelperPayload(brotliBase64, shared.sharedBrotliBase64).equals(executables[target])) {
+      throw new Error(`Shared helper reconstruction failed for ${target}.`);
+    }
+    assets[target] = { assetName: archive.assetName, sha256: archive.sha256, executableSha256,
+      brotliBase64 };
+  }
+  return { version, assets, shared };
 }
 
 export function prepareBundledPayloads() {
-  const { version, assets } = readBundledPayloads();
+  const { version, assets, shared } = readBundledPayloads();
   writeFileSync(resolve(root, "src/installer/bundledPayloads.generated.ts"),
     "// Generated from verified native-binaries archives; do not edit.\n" +
     `export const BUNDLED_CSVZALL_VERSION: string = ${JSON.stringify(version)};\n` +
+    `export const BUNDLED_CSVZALL_SHARED: { sharedBrotliBase64: string } = ${JSON.stringify(shared)};\n` +
     `export const BUNDLED_CSVZALL_ASSETS: Record<string, { assetName: string; sha256: string; executableSha256: string; brotliBase64: string }> = ${JSON.stringify(assets)};\n`);
   return version;
 }

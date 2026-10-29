@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "fs/promises";
 import { join } from "path";
-import { brotliDecompressSync } from "zlib";
 import { sha256Hex } from "./archive.js";
-import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION } from "./bundledPayloads.generated.js";
+import { decodeHelperPayload } from "./helperPayload.mjs";
+import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION, BUNDLED_CSVZALL_SHARED } from "./bundledPayloads.generated.js";
 
 export { BUNDLED_CSVZALL_VERSION };
 
@@ -40,7 +40,7 @@ export async function installBundledCsvzall({
       !/^[a-z0-9]+$/.test(platform) || !/^[a-z0-9]+$/.test(arch)) throw new Error("Invalid bundled csvzall metadata.");
   let bytes: Buffer;
   try {
-    bytes = brotliDecompressSync(Buffer.from(asset.brotliBase64, "base64"));
+    bytes = decodeHelperPayload(asset.brotliBase64, BUNDLED_CSVZALL_SHARED.sharedBrotliBase64);
   } catch {
     throw new Error(`Brotli decompression failed for ${asset.assetName}.`);
   }

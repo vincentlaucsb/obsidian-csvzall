@@ -70,8 +70,12 @@ for (const [target, asset] of Object.entries(BUNDLED_CSVZALL_ASSETS)) {
     assert.notEqual(newer.executablePath, first.executablePath);
     assert.deepEqual(await readFile(first.executablePath), bytes, "upgrades leave old sessions' executable intact");
     await assert.rejects(installBundledCsvzall({ ...options, asset: { ...asset, brotliBase64: Buffer.from("corrupt").toString("base64") } }), /Brotli decompression failed/);
+    const wrongExecutable = Buffer.from("wrong executable");
+    const header = Buffer.alloc(12);
+    header.write("CZP1");
+    header.writeUInt32LE(wrongExecutable.length, 4);
     await assert.rejects(installBundledCsvzall({ ...options, asset: { ...asset,
-      brotliBase64: brotliCompressSync(Buffer.from("wrong executable")).toString("base64") } }), /Executable SHA-256/);
+      brotliBase64: brotliCompressSync(Buffer.concat([header, wrongExecutable])).toString("base64") } }), /Executable SHA-256/);
     assert.deepEqual(await readFile(first.executablePath), bytes, "invalid payloads must leave the installed executable intact");
   });
 }

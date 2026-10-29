@@ -5,9 +5,13 @@ Obsidian installs only `main.js`, `manifest.json`, and `styles.css`; no separate
 helper download or install is needed. Lite remains independent of native helpers.
 
 The plugin bundling stage verifies the pinned archives and executable hashes,
-then embeds each executable compressed with Brotli. It uses Node's built-in
-compression support and does not rebuild native code. The installer decodes only
-the selected platform's payload and verifies its executable hash before writing.
+then stores identical embedded viewer text once across platforms. Each Brotli
+helper payload contains its remaining bytes and a compact reconstruction recipe;
+the shared text has its own Brotli payload. It uses Node's built-in compression
+support and does not rebuild native code. The installer decodes only the shared
+text and selected platform's payload, reconstructs the exact original executable,
+and verifies its executable hash before writing. Text detection does not depend
+on native symbol tables, platform binary formats, or a particular viewer layout.
 Archive hashes still identify installation directories, preserving existing
 installations across this packaging change. The native archives, receipts, and
 build identity remain independent of this JavaScript payload representation.
