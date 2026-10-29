@@ -146,9 +146,23 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.
 - `src/views/CsvzallTableView.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
 
-After every Obsidian validation failure fix, bump the plugin patch version before
-creating or retrying a release tag. The release tag, `manifest.json`,
-`versions.json`, `package.json`, and `package-lock.json` must all agree.
+Before choosing or changing a release version, check GitHub releases and remote
+tags. A version in local metadata or a preparation PR is only a release candidate;
+it is not evidence that the version has shipped.
+
+- If the planned version has neither a public tag nor a published release, keep
+  that version while fixing or retrying lint, tests, builds, dependency audits,
+  and Obsidian validation. A failed pre-release check alone does not justify a
+  version increment. For example, fixing an audit finding in an untagged,
+  unreleased `0.10.0` candidate still ships as `0.10.0`, not `0.10.1`.
+- When publishing a correction that changes the source or artifacts bound to an
+  existing public tag or release, use a new patch version. Preserve existing
+  public tags and releases; do not move, delete, or rewrite them to conceal a
+  failed release or correction. Retrying publication of the unchanged tag and
+  artifacts keeps the same version.
+
+The chosen release tag, `manifest.json`, `versions.json`, `package.json`, and
+`package-lock.json` must all agree.
 
 For the generated mobile plugin, the mobile release tag and generated
 `versions.json` must agree with `mobile-src/manifest.json`.

@@ -102,8 +102,15 @@ Existing rules may be shortened, deduplicated, or grouped under a more general
 rule. Preserve substantive requirements, scope, exceptions, and verification
 obligations; retain specific examples where they prevent ambiguity. Record
 significant consolidations in the review report.
-Bump desktop patch metadata together after validation fixes; see `AGENTS.md`
-for all version locations. Mobile versioning is independent.
+Check GitHub releases and remote tags before changing the candidate version.
+Validation fixes and retries, including dependency audit fixes, retain the
+planned version when it is still untagged and unreleased. Local metadata and
+preparation PRs do not count as publication. Publishing corrected source or
+artifacts for an existing public tag or release requires a new patch version;
+preserve existing public tags and releases. Retrying publication of the unchanged
+tag and artifacts keeps the same version. Update desktop metadata together only
+when a new version is required; see `AGENTS.md` for all version locations. Mobile
+versioning is independent.
 
 ## Validate and close the run
 
