@@ -4,11 +4,13 @@ import { execFileSync, spawn } from "node:child_process";
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION } from "../src/installer/bundledBinaries.generated.js";
+import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION } from "../src/installer/bundledPayloads.generated.js";
 import { bundledCsvzallAsset, installBundledCsvzall } from "../src/installer/bundledInstall.js";
 import { normalizeSettings } from "../src/settings/settings.js";
 import { extractViewerUrl } from "../src/viewerHelpers.js";
 import { readFileSync } from "node:fs";
+import { brotliCompressSync } from "node:zlib";
+import { createHash } from "node:crypto";
 
 function cleanup(context: unknown, callback: () => Promise<void>): void {
   (context as { after(callback: () => Promise<void>): void }).after(callback);
@@ -38,7 +40,7 @@ test("bundled platform selection never silently substitutes another architecture
 });
 
 for (const [target, asset] of Object.entries(BUNDLED_CSVZALL_ASSETS)) {
-  test(`pinned ${target} archive extracts offline, survives reload, and repairs damaged files`, async t => {
+  test(`pinned ${target} executable extracts offline, survives reload, and repairs damaged files`, async t => {
     const pluginDir = await mkdtemp(join(tmpdir(), "csvzall-bundled-"));
     cleanup(t, () => rm(pluginDir, { recursive: true, force: true }));
     const [platform, arch] = target.split("-") as [string, string];
@@ -49,6 +51,10 @@ for (const [target, asset] of Object.entries(BUNDLED_CSVZALL_ASSETS)) {
     assert.ok(first.changed);
     assert.ok(first.executablePath.includes(target));
     const bytes = await readFile(first.executablePath);
+    assert.equal(createHash("sha256").update(bytes).digest("hex"), asset.executableSha256);
+    assert.equal(first.executablePath, join(pluginDir, "csvzall-bin", BUNDLED_CSVZALL_VERSION,
+      `${target}-${asset.sha256.slice(0, 16)}`, platform === "win32" ? "csvzall.exe" : "csvzall"),
+      "packaging changes preserve the archive-based install location");
     if (platform === "win32") assert.equal(bytes.toString("ascii", 0, 2), "MZ");
     else if (platform === "linux") assert.equal(bytes.toString("ascii", 1, 4), "ELF");
     else assert.equal(bytes.readUInt32LE(0), 0xfeedfacf);
@@ -63,7 +69,10 @@ for (const [target, asset] of Object.entries(BUNDLED_CSVZALL_ASSETS)) {
     const newer = await installBundledCsvzall({ ...options, version: "0.5.1" });
     assert.notEqual(newer.executablePath, first.executablePath);
     assert.deepEqual(await readFile(first.executablePath), bytes, "upgrades leave old sessions' executable intact");
-    await assert.rejects(installBundledCsvzall({ ...options, asset: { ...asset, base64: Buffer.from("corrupt").toString("base64") } }), /SHA-256/);
+    await assert.rejects(installBundledCsvzall({ ...options, asset: { ...asset, brotliBase64: Buffer.from("corrupt").toString("base64") } }), /Brotli decompression failed/);
+    await assert.rejects(installBundledCsvzall({ ...options, asset: { ...asset,
+      brotliBase64: brotliCompressSync(Buffer.from("wrong executable")).toString("base64") } }), /Executable SHA-256/);
+    assert.deepEqual(await readFile(first.executablePath), bytes, "invalid payloads must leave the installed executable intact");
   });
 }
 

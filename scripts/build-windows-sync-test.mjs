@@ -8,6 +8,7 @@ import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
 import { smokeNativeHelper } from "./build-native-helper.mjs";
 import { runTypeSafetyChecks } from "./lint.mjs";
+import { brotliCompressSync } from "node:zlib";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const [helperArgument, outputArgument, ...extra] = process.argv.slice(2);
@@ -36,9 +37,10 @@ try {
   const archive = join(work, `csvzall-${version}-obsidian-windows-x64.zip`);
   execFileSync(process.env.NATIVE_HELPER_PYTHON || "python", [join(root, "scripts/package-native-helper.py"), "pack", archive, frozenHelper], { windowsHide: true });
   const archiveBytes = readFileSync(archive);
-  const asset = { assetName: `csvzall-${version}-obsidian-windows-x64.zip`, sha256: hash(archiveBytes), base64: archiveBytes.toString("base64") };
+  const asset = { assetName: `csvzall-${version}-obsidian-windows-x64.zip`, sha256: hash(archiveBytes),
+    executableSha256: hash(binary), brotliBase64: brotliCompressSync(binary).toString("base64") };
   const helperPlugin = { name: "windows-sync-test-helper", setup(builder) {
-    builder.onResolve({ filter: /bundledBinaries\.generated\.js$/ }, () => ({ path: "windows-sync-test-helper", namespace: "test-helper" }));
+    builder.onResolve({ filter: /bundledPayloads\.generated\.js$/ }, () => ({ path: "windows-sync-test-helper", namespace: "test-helper" }));
     builder.onLoad({ filter: /.*/, namespace: "test-helper" }, () => ({ contents:
       `export const BUNDLED_CSVZALL_VERSION=${JSON.stringify(version)};export const BUNDLED_CSVZALL_ASSETS=${JSON.stringify({ "win32-x64": asset })};`, loader: "js" }));
   } };
@@ -47,7 +49,7 @@ try {
   await build({ absWorkingDir: root, entryPoints: ["src/main.ts"], bundle: true, format: "cjs", target: "es2018", minify: true,
     outfile: join(output, "main.js"), external, plugins: [helperPlugin],
     banner: { js: `/* CSVZALL_WINDOWS_SYNC_TEST_BUILD: development only; not a release. */\n/*!\n${notices}\n*/` } });
-  if (!readFileSync(join(output, "main.js"), "utf8").includes(asset.base64)) throw new Error("Development bundle does not contain the verified helper.");
+  if (!readFileSync(join(output, "main.js"), "utf8").includes(asset.brotliBase64)) throw new Error("Development bundle does not contain the verified helper.");
 
   // Exercise the ordinary bundled installer and wired process service, using the
   // exact embedded payload. No custom executable preference participates here.

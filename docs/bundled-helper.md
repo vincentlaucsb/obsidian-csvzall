@@ -4,6 +4,14 @@ The desktop plugin includes three Obsidian-specific native helpers in `main.js`.
 Obsidian installs only `main.js`, `manifest.json`, and `styles.css`; no separate
 helper download or install is needed. Lite remains independent of native helpers.
 
+The plugin bundling stage verifies the pinned archives and executable hashes,
+then embeds each executable compressed with Brotli. It uses Node's built-in
+compression support and does not rebuild native code. The installer decodes only
+the selected platform's payload and verifies its executable hash before writing.
+Archive hashes still identify installation directories, preserving existing
+installations across this packaging change. The native archives, receipts, and
+build identity remain independent of this JavaScript payload representation.
+
 ## Source and build identity
 
 `native-binaries/build.json` pins the csvzall source commit and version, every
@@ -69,6 +77,11 @@ npm run check:bundled-helper
 npm test
 npm run check:source-archive
 ```
+
+`node scripts/bundle-native-payloads.mjs` regenerates only the ignored TypeScript
+payload data. It needs neither Python nor a native toolchain. Production builds
+run it automatically; `check:bundled-helper` verifies the embedded Brotli
+payloads against the pinned executable hashes.
 
 `check:helper-snapshot` requires a prepared snapshot matching the current recipe;
 the offline production build also accepts the initial checksum-pinned import.
