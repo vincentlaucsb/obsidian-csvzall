@@ -140,6 +140,37 @@ async function harness(reflection?: any, clock?: ReturnType<typeof fakeClock>) {
 const sqlBlock = (sql: string) => `Before\n\n\`\`\`sql csvzall\n${sql}\n\`\`\`\n\n| title |\n| --- |\n| Old |`;
 const validSql = 'SELECT title FROM "../Data/tasks.csv"';
 
+for (const copies of [1, 2]) test(`generated output notifications do not rerun ${copies} open SQL block copies`, async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(Array(copies).fill(sqlBlock(validSql)).join('\n\n'));
+  try {
+    await f.start(); await f.drain();
+    const replace = editing.editor.replaceRange;
+    editing.editor.replaceRange = (...args: Parameters<typeof replace>) => {
+      replace(...args);
+      void f.event('editor-change', editing.editor, editing.view);
+      void f.event('modify', f.note);
+    };
+    f.setQuery(async () => '| title |\n| --- |\n| Updated |');
+    await f.event('modify', f.csv); await f.drain(); await clock.advance(2000);
+    assert.equal(f.queries.length, 2); assert.equal(f.errors.length, 0);
+    assert.equal((editing.text.match(/\| Updated \|/g) ?? []).length, copies);
+  } finally { f.service.unload(); }
+});
+
+test('a generated closed-note save does not rerun the completed query', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  try {
+    await f.start(); await f.drain();
+    const replace = f.service.notes.replace.bind(f.service.notes);
+    f.service.notes.replace = async (...args: unknown[]) => { const before = f.writes; await replace(...args); if (f.writes !== before) await f.event('modify', f.note); };
+    f.setQuery(async () => '| title |\n| --- |\n| Updated |');
+    await f.event('modify', f.csv); await f.drain(); await clock.advance(2000);
+    assert.equal(f.queries.length, 2); assert.equal(f.errors.length, 0);
+    assert.match(f.text, /\| Updated \|/);
+  } finally { f.service.unload(); }
+});
+
 test('SQL typing debounces parsing, definition writes, and queries across editor, save, and poll events', async () => {
   const clock = fakeClock(), f = await harness(undefined, clock);
   const editing = f.installEditor(sqlBlock(validSql));

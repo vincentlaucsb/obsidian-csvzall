@@ -158,23 +158,25 @@ export class ExportRefreshService {
         if (!(file instanceof TFile)) break;
         this.queued.delete(file);
         const revision = this.editRevisions.get(file);
-        try { await this.refresh(file, undefined, true); }
+        let completed = false;
+        try { completed = await this.refresh(file, undefined, true); }
         catch (error) { if (!this.isStopped() && this.editRevisions.get(file) === revision) await this.report(file, error); }
         finally {
-          if (!this.isStopped() && this.editRevisions.get(file) !== revision && this.app.vault.getAbstractFileByPath(file.path) === file) this.queued.add(file);
+          if (!completed && !this.isStopped() && this.editRevisions.get(file) !== revision && this.app.vault.getAbstractFileByPath(file.path) === file) this.queued.add(file);
         }
       }
     } finally { if (!this.isStopped()) this.workerState = RefreshWorkerState.Idle; }
   }
 
-  async refresh(file: TFile, onlyId?: string, automatic = false): Promise<void> {
-    if (this.isStopped() || automatic && this.editTimers.has(file)) return;
+  /** False means the pass was deferred or superseded, rather than completed. */
+  async refresh(file: TFile, onlyId?: string, automatic = false): Promise<boolean> {
+    if (this.isStopped() || automatic && this.editTimers.has(file)) return false;
     const editRevision = this.editRevisions.get(file);
     const current = () => !automatic || this.editRevisions.get(file) === editRevision && this.app.vault.getAbstractFileByPath(file.path) === file;
     await this.reflection?.reconcile();
-    if (this.isStopped() || !current()) return;
+    if (this.isStopped() || !current()) return false;
     const tables = await this.maintenance.prepare(file);
-    if (!current()) return;
+    if (!current()) return false;
     const results = new Map<string, string>();
     for (const table of tables) {
       if (onlyId && table.id !== onlyId && exportDefinitionId(file.path, table) !== onlyId) continue;
@@ -194,12 +196,13 @@ export class ExportRefreshService {
         const key = JSON.stringify([definition.configPath, recipe.id, snapshot, revision]);
         let markdown = results.get(key);
         if (markdown === undefined) { markdown = await this.renderer.render(recipe, undefined, validate); results.set(key, markdown); }
-        if (this.isStopped() || !current()) return;
+        if (this.isStopped() || !current()) return false;
         if (this.maintenance.isDeleting(recipe.source)) continue;
         if (path !== file.path || snapshot !== await this.definitions.snapshot(file.path) || revision !== this.revisions.get(recipe.source)) { this.schedule(file); continue; }
         validate();
         await this.notes.replace(file, table, exportRegionText(table, recipe, markdown, file.path));
-      } catch (error) { if (this.isStopped() || !current()) return; await this.report(file, error, automatic); }
+      } catch (error) { if (this.isStopped() || !current()) return false; await this.report(file, error, automatic); }
     }
+    return true;
   }
 }

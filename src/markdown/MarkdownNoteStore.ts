@@ -5,10 +5,12 @@ import { findManagedTables, replaceManagedTable, type ManagedTable } from './man
 export class MarkdownNoteStore {
   private noteTables = new WeakMap<TFile, { path: string; mtime: number; size: number; tables: ManagedTable[] }>();
   private notesRevision = 0;
+  private replacingEditor: TFile | null = null;
 
   constructor(private readonly app: App, private readonly signal: AbortSignal) {}
 
   get revision(): number { return this.notesRevision; }
+  isReplacingEditor(file: TFile): boolean { return this.replacingEditor === file; }
 
   invalidateAll(): void { this.noteTables = new WeakMap(); ++this.notesRevision; }
 
@@ -54,7 +56,12 @@ export class MarkdownNoteStore {
       const current = editor.getValue();
       const next = replaceManagedTable(current, table, text, guardSnapshot);
       const block = findManagedTables(current).find(candidate => candidate.id === table.id)!;
-      if (next !== current) editor.replaceRange(text, editor.offsetToPos(block.from), editor.offsetToPos(block.to));
+      if (next !== current) {
+        const previous = this.replacingEditor;
+        this.replacingEditor = file;
+        try { editor.replaceRange(text, editor.offsetToPos(block.from), editor.offsetToPos(block.to)); }
+        finally { this.replacingEditor = previous; }
+      }
     } else {
       await this.app.vault.process(file, current => this.signal.aborted ? current : replaceManagedTable(current, table, text, guardSnapshot));
     }
