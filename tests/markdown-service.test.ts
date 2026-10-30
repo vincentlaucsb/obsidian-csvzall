@@ -265,6 +265,24 @@ test('an unchanged polling index does not supersede a running query', async () =
   } finally { f.service.unload(); }
 });
 
+test('autosaving an unchanged open buffer does not supersede a running query', async () => {
+  const clock = fakeClock(), f = await harness(undefined, clock);
+  const editing = f.installEditor(sqlBlock(validSql));
+  try {
+    await f.start(); await f.drain();
+    let finish!: (value: string) => void, started!: () => void;
+    const generating = new Promise<void>(resolve => { started = resolve; });
+    f.setQuery(() => { started(); return new Promise<string>(resolve => { finish = resolve; }); });
+    await f.event('modify', f.csv);
+    const pending = f.drain(); await generating;
+    await f.event('modify', f.note);
+    finish('| title |\n| --- |\n| Latest |'); await pending;
+    await clock.advance(1500);
+    assert.equal(f.queries.length, 2); assert.equal(f.errors.length, 0);
+    assert.match(editing.text, /\| Latest \|/);
+  } finally { f.service.unload(); }
+});
+
 test('settled invalid SQL reports once, while an explicit refresh bypasses the edit delay', async () => {
   const clock = fakeClock(), f = await harness(undefined, clock);
   const editing = f.installEditor(sqlBlock(validSql));

@@ -50,7 +50,11 @@ export class MarkdownTableService {
       if (!(file instanceof TFile)) return;
       this.notes.invalidateNote(file);
       if (isCsv(file)) { this.refreshes.sourceChanged(file.path); void this.refreshes.initialize().catch(error => this.report(file, error)); }
-      if (file.extension === 'md') { this.maintenance.invalidatePruning(); if (!this.notes.isReplacingEditor(file)) this.refreshes.noteChanged(file); }
+      if (file.extension === 'md') {
+        this.maintenance.invalidatePruning();
+        // Open editor buffers are authoritative; their autosaves are not new query edits.
+        if (!this.notes.editorFor(file)) this.refreshes.noteChanged(file);
+      }
     }));
     plugin.registerEvent(this.app.vault.on('create', file => {
       if (file instanceof TFile) this.notes.invalidateNote(file);
