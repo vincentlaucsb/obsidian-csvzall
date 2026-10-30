@@ -38,6 +38,7 @@ export class MarkdownTableService {
     this.maintenance = new ExportMaintenanceService(app, this.notes, this.renderer, this.definitions, {
       index: file => this.refreshes.index(file), initialize: () => this.refreshes.initialize(),
       sourceChanged: path => this.refreshes.sourceChanged(path), bindingsFor: file => this.refreshes.bindingsFor(file),
+      isEditing: file => this.refreshes.isEditing(file),
     }, this.report, signal, reflection);
     this.refreshes = new ExportRefreshService(app, this.notes, this.renderer, this.definitions, this.maintenance, this.report, signal, reflection);
     this.editing = new ExportEditingService(app, this.notes, this.renderer, this.definitions, this.maintenance, this.refreshes, this.report, signal, preferences);
@@ -49,7 +50,11 @@ export class MarkdownTableService {
       if (!(file instanceof TFile)) return;
       this.notes.invalidateNote(file);
       if (isCsv(file)) { this.refreshes.sourceChanged(file.path); void this.refreshes.initialize().catch(error => this.report(file, error)); }
-      if (file.extension === 'md') { this.maintenance.invalidatePruning(); void this.refreshes.index(file).then(changed => changed ? this.pruneDeadExports() : undefined).catch(error => this.report(file, error)); }
+      if (file.extension === 'md') {
+        this.maintenance.invalidatePruning();
+        // Open editor buffers are authoritative; their autosaves are not new query edits.
+        if (!this.notes.editorFor(file)) this.refreshes.noteChanged(file);
+      }
     }));
     plugin.registerEvent(this.app.vault.on('create', file => {
       if (file instanceof TFile) this.notes.invalidateNote(file);
@@ -68,10 +73,10 @@ export class MarkdownTableService {
       void this.maintenance.rename(oldPath, file.path).catch(error => this.report(null, error));
     }));
     plugin.registerEvent(this.app.workspace.on('editor-change', (_editor, view) => {
-      if (!(view instanceof MarkdownView) || !view.file) return;
+      if (!(view instanceof MarkdownView) || !view.file || this.notes.isReplacingEditor(view.file)) return;
       this.notes.invalidateNote(view.file);
       this.maintenance.invalidatePruning();
-      void this.refreshes.index(view.file).then(changed => changed ? this.pruneDeadExports() : undefined).catch(error => this.report(view.file, error));
+      this.refreshes.noteChanged(view.file);
     }));
     this.refreshes.start();
   }
@@ -81,7 +86,7 @@ export class MarkdownTableService {
   migrationReferences(): Promise<ReferenceScan> { return this.maintenance.migrationReferences(); }
   refreshAfterSync(): Promise<void> { return this.refreshes.refreshAfterSync(); }
   render(value: Pick<TableValue, 'source' | 'columns' | 'sql' | 'format'>, limit?: number, validate?: () => void): Promise<string> { return this.renderer.render(value, limit, validate); }
-  refresh(file: TFile, onlyId?: string, automatic = false): Promise<void> { return this.refreshes.refresh(file, onlyId, automatic); }
+  async refresh(file: TFile, onlyId?: string, automatic = false): Promise<void> { await this.refreshes.refresh(file, onlyId, automatic); }
   currentTable(editor: Editor): ManagedTable | undefined { return this.notes.currentTable(editor); }
   open(view: MarkdownView | null, source?: TFile, existing?: ManagedTable): void { this.editing.open(view, source, existing); }
   insertQueryIntoNote(source: TFile, sql: string, cancelled: () => boolean, lifecycle?: AbortSignal): Promise<boolean> { return this.editing.insertQueryIntoNote(source, sql, cancelled, lifecycle); }

@@ -93,6 +93,11 @@ destructive scenarios:
   note content survive, with note regions detached into ordinary Markdown.
 - Disable the desktop plugin while a viewer is starting. Confirm its helper
   process exits.
+- Edit a `sql csvzall` note block through incomplete prefixes such as `S`, `SE`,
+  and `SEL`. Keep typing and confirm there are no per-keystroke error notices
+  or output replacements. Pause after completing the query and confirm it
+  updates once; a settled invalid query should retain the previous output and
+  report its error. Explicit refresh should run immediately.
 - Edit a desktop CSV, rename or move it, then restore its original path.
   Confirm the editor preserves changes and saving resumes only after the path
   is restored. Check cancellation of the discard-and-reopen action.
