@@ -154,4 +154,3 @@ test("incomplete deferred discovery retains inherited SQL until a late note arri
   assert.equal(JSON.parse(a.files.get(".csvzall/exports.json")!).exports.length, 0);
   assert.equal(a.reflection.pending, false); assert.equal(a.errors.length, 0);
 });
-
