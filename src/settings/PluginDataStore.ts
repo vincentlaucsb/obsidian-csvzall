@@ -59,7 +59,8 @@ export class PluginDataStore {
         for (const [key, revision] of readRevisions(latest)) this.retained[key] = revision;
         const merged = { ...latest, ...this.retained, ...patch };
         if (this.access.saveLocal) for (const key of DEVICE_KEYS) delete merged[key];
-        if (canonical(merged) !== canonical(latest)) await this.access.save(merged);
+        // A missing document still needs a durable first write, even for an empty patch.
+        if (disk === null || disk === undefined || canonical(merged) !== canonical(latest)) await this.access.save(merged);
         // Keep revisions durable in memory even if Sync replaces the file during save.
         for (const [key, revision] of readRevisions(next)) this.retained[key] = revision;
         const verified = await this.access.load();

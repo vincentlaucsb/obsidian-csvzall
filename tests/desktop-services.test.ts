@@ -255,6 +255,28 @@ test("chart service reload observes hidden configuration edits and deletions", a
 });
 
 
+test("chart execution prepares only its source scope and honors a pause arriving before execution", async () => {
+  const { ChartService } = await loadService("src/charts/ChartService.ts");
+  let paused = false, commands = 0;
+  const prepared: string[] = [];
+  const service = new ChartService({ vault: {
+    getAllLoadedFiles: () => { throw new Error('unrelated vault discovery'); },
+    adapter: { read: async () => JSON.stringify({ charts: [{ id: 'chart', input: 'data.csv', output: 'plot.svg', runOnSave: !paused }] }) },
+  } }, { record: async () => {} }, { getVaultRoot: () => '/vault' }, {
+    runCommand: async () => { commands++; },
+  }, {
+    knownConfigPaths: () => ['Data/.csvzall/charts.json'], usesDirectFolders: true,
+    assertReady: () => {}, reconcileCharts: async (source: string) => { prepared.push(source); paused = true; },
+  });
+  await service.reloadChartConfig();
+  const keys = service.allChartKeys();
+  await service.runConfiguredCharts(keys, true);
+  assert.deepEqual(prepared, ['Data/data.csv']);
+  assert.equal(commands, 0);
+  await service.runConfiguredCharts(keys, false);
+  assert.equal(commands, 1, 'manual execution still runs a paused chart');
+});
+
 test("delayed reopen for an old file never starts a viewer or cancels the current file", async () => {
   const { CsvService } = await loadService("src/csv/CsvService.ts");
   const view = new FakeView();

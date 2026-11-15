@@ -7,6 +7,7 @@ import type { ExportMaintenanceService } from './ExportMaintenanceService.js';
 import type { ExportReporter } from './exportReporting.js';
 import { exportDefinitionId } from './fencedExports.js';
 import { exportRegionText } from './exportContent.js';
+import { VaultExportDiscovery } from '../exports/VaultExportDiscovery.js';
 
 enum RefreshWorkerState { Idle, Running, Stopped }
 enum ScanState { Idle, Running }
@@ -25,6 +26,11 @@ export class ExportRefreshService {
   private readonly indexRevisions = new Map<TFile, number>();
   private readonly editTimers = new Map<TFile, number>();
   private readonly editRevisions = new WeakMap<TFile, number>();
+  private readonly exportNotes = new Set<TFile>();
+  private readonly syncNotes = new Set<TFile>();
+  private syncTimer: number | null = null;
+  private discovery: VaultExportDiscovery | null = null;
+  private discoveryTimer: number | null = null;
 
   constructor(private readonly app: App, private readonly notes: MarkdownNoteStore, private readonly renderer: ExportRenderer,
     private readonly definitions: ExportDefinitions, private readonly maintenance: ExportMaintenanceService,
@@ -35,15 +41,31 @@ export class ExportRefreshService {
   start(): void {
     this.app.workspace.onLayoutReady(() => {
       if (this.isStopped()) return;
+      if (this.reflection?.incrementalDiscovery) {
+        this.discovery = new VaultExportDiscovery(this.app);
+        this.scheduleDiscovery();
+        return;
+      }
       void this.initialize().catch(error => this.report(null, error));
       this.poll = window.setInterval(() => { void this.initialize().catch(error => this.report(null, error)); }, 10_000);
     });
+  }
+
+  private scheduleDiscovery(): void {
+    if (this.isStopped() || this.discoveryTimer !== null || this.discovery?.complete) return;
+    this.discoveryTimer = window.setTimeout(() => {
+      this.discoveryTimer = null;
+      void this.initialize().catch(error => this.report(null, error)).finally(() => this.scheduleDiscovery());
+    }, 100);
   }
 
   stop(): void {
     this.workerState = RefreshWorkerState.Stopped;
     if (this.poll !== null) window.clearInterval(this.poll);
     if (this.timer !== null) window.clearTimeout(this.timer);
+    if (this.discoveryTimer !== null) window.clearTimeout(this.discoveryTimer);
+    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
+    this.syncNotes.clear();
     for (const timer of this.editTimers.values()) window.clearTimeout(timer);
     this.editTimers.clear();
     this.poll = null; this.timer = null; this.queued.clear();
@@ -53,6 +75,7 @@ export class ExportRefreshService {
   isEditing(file: TFile): boolean { return this.editTimers.has(file); }
 
   forget(file: TFile): void {
+    this.exportNotes.delete(file); this.syncNotes.delete(file);
     const timer = this.editTimers.get(file);
     if (timer !== undefined) window.clearTimeout(timer);
     this.editTimers.delete(file);
@@ -92,6 +115,17 @@ export class ExportRefreshService {
     this.scanState = ScanState.Running;
     let failed = false;
     try {
+      if (this.reflection?.incrementalDiscovery) {
+        this.discovery ??= new VaultExportDiscovery(this.app);
+        if (this.discovery.complete) return;
+        this.discovery.step();
+        this.discovery.takeFolders();
+        for (const file of this.discovery.takeNotes()) {
+          if (this.isStopped()) return;
+          try { await this.index(file); } catch (error) { await this.report(file, error); }
+        }
+        return;
+      }
       await this.reflection?.reconcile();
       for (const file of this.app.vault.getMarkdownFiles()) {
         if (this.isStopped()) return;
@@ -102,7 +136,28 @@ export class ExportRefreshService {
   }
 
   async refreshAfterSync(): Promise<void> {
+    if (this.reflection?.incrementalDiscovery) {
+      for (const file of this.exportNotes) this.syncNotes.add(file);
+      this.scheduleSyncIndex();
+      return;
+    }
     try { await this.initialize(); } catch (error) { await this.report(null, error); }
+  }
+
+  private scheduleSyncIndex(): void {
+    if (this.isStopped() || this.syncTimer !== null || !this.syncNotes.size) return;
+    this.syncTimer = window.setTimeout(() => {
+      void this.indexSyncBatch().finally(() => { this.syncTimer = null; this.scheduleSyncIndex(); });
+    }, 100);
+  }
+
+  private async indexSyncBatch(): Promise<void> {
+    for (const file of [...this.syncNotes].slice(0, 16)) {
+      this.syncNotes.delete(file);
+      if (this.isStopped()) return;
+      if (this.app.vault.getAbstractFileByPath(file.path) !== file) { this.exportNotes.delete(file); continue; }
+      try { await this.index(file); } catch (error) { await this.report(file, error); }
+    }
   }
 
   async index(file: TFile): Promise<boolean> {
@@ -111,17 +166,18 @@ export class ExportRefreshService {
     this.indexRevisions.set(file, revision);
     const current = () => !this.isStopped() && this.indexRevisions.get(file) === revision && this.app.vault.getAbstractFileByPath(file.path) === file;
     try {
+      const hasExports = (await this.notes.tablesFor(file)).length > 0;
+      if (!current()) return false;
+      if (hasExports) this.exportNotes.add(file); else this.exportNotes.delete(file);
       const tables = await this.maintenance.prepare(file);
       if (!current()) return false;
-      if (this.reflection) for (const table of tables) {
-        if (!table.recipe && !table.fence) await this.reflection.recoverSql(file.path, table.id);
-      }
-      const results = await Promise.allSettled(tables.map(table => this.maintenance.resolveTable(file.path, table)));
-      if (!current()) return false;
-      const resolved = [];
-      for (const result of results) {
-        if (result.status === 'fulfilled') resolved.push(result.value);
-        else await this.report(file, result.reason);
+      const resolved: ResolvedExport[] = [];
+      for (const table of tables) {
+        if (!current()) return false;
+        try {
+          if (this.reflection && !table.recipe && !table.fence) await this.reflection.recoverSql(file.path, table.id, table.marker === 'table');
+          resolved.push(await this.maintenance.resolveTable(file.path, table));
+        } catch (error) { if (current()) await this.report(file, error); }
       }
       if (!current()) return false;
       this.bindings.set(file, resolved);
@@ -173,14 +229,14 @@ export class ExportRefreshService {
     if (this.isStopped() || automatic && this.editTimers.has(file)) return false;
     const editRevision = this.editRevisions.get(file);
     const current = () => !automatic || this.editRevisions.get(file) === editRevision && this.app.vault.getAbstractFileByPath(file.path) === file;
-    await this.reflection?.reconcile();
+    await this.reflection?.reconcileSql(file.path, onlyId);
     if (this.isStopped() || !current()) return false;
-    const tables = await this.maintenance.prepare(file);
+    const tables = await this.maintenance.prepare(file, onlyId);
     if (!current()) return false;
     const results = new Map<string, string>();
     for (const table of tables) {
-      if (onlyId && table.id !== onlyId && exportDefinitionId(file.path, table) !== onlyId) continue;
       try {
+        if (onlyId && table.id !== onlyId && exportDefinitionId(file.path, table) !== onlyId) continue;
         const path = file.path;
         const snapshot = await this.definitions.snapshot(path);
         const definition = await this.maintenance.resolveTable(file.path, table);

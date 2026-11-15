@@ -1,4 +1,4 @@
-import { Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 import { ChartService } from "./charts/ChartService.js";
 import { registerChartCommands } from "./commands/registerChartCommands.js";
 import { registerCsvCommands } from "./commands/registerCsvCommands.js";
@@ -26,6 +26,7 @@ import { registerVaultWatchers } from "./watchers/registerVaultWatchers.js";
 import { MarkdownTableService } from "./markdown/MarkdownTableService.js";
 import { registerMarkdownCommands } from "./commands/registerMarkdownCommands.js";
 import { ExportSettingsService } from "./settings/ExportSettingsService.js";
+import { VaultExportDiscovery } from "./exports/VaultExportDiscovery.js";
 
 export default class CsvzallPlugin extends Plugin {
   settings: CsvzallPluginSettings = DEFAULT_SETTINGS;
@@ -71,7 +72,7 @@ export default class CsvzallPlugin extends Plugin {
     this.exportSettings.register(this);
     this.exportsReady = true;
     this.registerInterval(window.setInterval(() => {
-      void this.reflection.reconcile().catch((error: unknown) => this.reportReflectionError(error));
+      void this.reflection.reconcile().then(() => this.markdownTables.pruneDeadExports()).catch((error: unknown) => this.reportReflectionError(error));
     }, 10000));
   }
 
@@ -138,9 +139,11 @@ export default class CsvzallPlugin extends Plugin {
   }
 
   private createServices(): void {
+    const discovery = new VaultExportDiscovery(this.app);
     this.reflection = new ExportReflection({ adapter: this.app.vault.adapter, store: this.dataStore,
       localDirectory: `${this.app.vault.configDir}/plugins/${this.manifest.id}/export-sync-local`,
-      folders: () => this.app.vault.getAllLoadedFiles().filter(file => file instanceof TFolder).map(folder => folder.path),
+      folders: () => { discovery.restart(); discovery.step(); return discovery.takeFolders(); },
+      deferDiscovery: true,
       directFolders: true,
       references: () => this.markdownTables.migrationReferences(),
       report: error => this.reportReflectionError(error),
@@ -158,7 +161,8 @@ export default class CsvzallPlugin extends Plugin {
       () => this.settings,
       this.eventLog,
       () => this.installerService.getExecutablePath(),
-      () => this.reflection.reconcile(),
+      // Each caller prepares its own chart/SQL scope before executing a command.
+      () => Promise.resolve(),
     );
     this.csvService = new CsvService(
       this.app,

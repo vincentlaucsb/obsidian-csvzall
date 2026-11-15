@@ -21,6 +21,7 @@ export interface ReflectionOptions {
   now?: () => number;
   directFolders?: boolean;
   references?(): Promise<ExportReference[] | ReferenceScan>;
+  deferDiscovery?: boolean;
 }
 
 /** Owns reflection only; CLI JSON stays the local execution format. */
@@ -33,11 +34,13 @@ export class ExportReflection {
   private stopped = false;
   private initialized = false;
   private localizationPending = false;
+  private pollCursor = 0;
 
   constructor(private readonly options: ReflectionOptions) {}
   stop(): void { this.stopped = true; }
   get pending(): boolean { return this.running !== null || this.blocked.size > 0 || this.state.renames.length > 0 || this.localizationPending; }
   get usesDirectFolders(): boolean { return this.options.directFolders === true; }
+  get incrementalDiscovery(): boolean { return this.options.deferDiscovery === true; }
 
   async initialize(): Promise<void> {
     const path = `${this.options.localDirectory}/state.json`;
@@ -56,14 +59,19 @@ export class ExportReflection {
       Object.assign(this.state, saved);
     }
     this.initialized = true;
-    await this.reconcile();
+    if (!this.options.deferDiscovery) await this.reconcile();
+  }
+
+  knownConfigPaths(): string[] {
+    return [...new Set([...Object.keys(this.state.files), ...[...readRevisions(this.state.records).values()].map(record => record.path)])];
   }
 
   /** Called after a verified plugin mutation, before its next consumer runs. */
   async edited(path: string, reason: DeleteReason = "explicit"): Promise<void> {
     this.edits.set(path, reason);
     if (this.running) await this.running;
-    await this.reconcile();
+    if (this.options.deferDiscovery) await this.startRun(new Set([path]));
+    else await this.reconcile();
   }
 
   reconcile(): Promise<void> {
@@ -74,9 +82,11 @@ export class ExportReflection {
     return this.startRun();
   }
 
-  private startRun(paths?: Set<string>): Promise<void> {
+  private startRun(paths?: Set<string>, references?: ExportReference[]): Promise<void> {
+    if (this.stopped || !this.initialized) return Promise.resolve();
+    if (this.running) return this.running.then(() => this.startRun(paths, references));
     this.scopedRun = paths !== undefined;
-    this.running = this.run(paths).finally(() => { this.running = null; this.scopedRun = false; });
+    this.running = this.run(paths, references).finally(() => { this.running = null; this.scopedRun = false; });
     return this.running;
   }
 
@@ -84,7 +94,7 @@ export class ExportReflection {
     while (this.running) await this.running;
   }
 
-  private async reconcileCharts(source: string): Promise<void> {
+  async reconcileCharts(source: string): Promise<void> {
     if (this.running) await this.waitForIdle();
     if (this.stopped || !this.initialized) return;
     // Pending moves must finish in their original scopes before a viewer opens.
@@ -93,6 +103,13 @@ export class ExportReflection {
     if (this.stopped) return;
     const paths = new Set(ancestorConfigPaths(source, "charts"));
     await this.startRun(paths);
+  }
+
+  async reconcileSql(note: string, id?: string, legacy = false): Promise<void> {
+    if (!this.options.deferDiscovery) { await this.reconcile(); return; }
+    if (this.running) await this.waitForIdle();
+    if (this.stopped || !this.initialized) return;
+    await this.startRun(new Set(ancestorConfigPaths(note, 'exports')), id ? [{ note, id, legacy }] : []);
   }
 
   private async journal(): Promise<void> {
@@ -128,9 +145,11 @@ export class ExportReflection {
       origin: this.state.origin, ...(value === null ? { reason: reason ?? "entry-removed" } : {}) };
   }
 
-  private async run(chartPaths?: Set<string>): Promise<void> {
+  private async run(chartPaths?: Set<string>, scopedReferences?: ExportReference[]): Promise<void> {
     const { adapter, store } = this.options;
-    if (!chartPaths) this.blocked.clear();
+    const previousWinners = winners(readRevisions(this.state.records).values());
+    const scoped = chartPaths !== undefined;
+    if (!chartPaths && !this.options.deferDiscovery) this.blocked.clear();
     const pending = [];
     for (const move of this.state.renames) if (!await this.applyRename(move.from, move.to)) pending.push(move);
     this.state.renames = pending;
@@ -138,7 +157,7 @@ export class ExportReflection {
     for (const [key, revision] of readRevisions(incoming)) this.state.records[key] = revision;
     const history = [...readRevisions(this.state.records).values()];
     const currentWinners = winners(history);
-    let references: ExportReference[] = [], sqlComplete = true;
+    let references: ExportReference[] = scopedReferences ?? [], sqlComplete = true;
     if (this.usesDirectFolders && !chartPaths) {
       try {
         const scan = await this.options.references?.() ?? [];
@@ -147,16 +166,16 @@ export class ExportReflection {
       } catch (error) { sqlComplete = false; this.options.report(error); }
     }
     if (!chartPaths) this.localizationPending = !sqlComplete;
-    const paths = chartPaths ?? new Set([...Object.keys(this.state.files), ...[...currentWinners.values()].map(record => record.path)]);
-    for (const reference of references) paths.add(directConfig(reference.note, "exports"));
+    const known = [...new Set([...Object.keys(this.state.files), ...[...currentWinners.values()].map(record => record.path)])];
+    const batch = this.options.deferDiscovery && !chartPaths ? Array.from({ length: Math.min(16, known.length) }, (_, index) => known[(this.pollCursor + index) % known.length]!) : known;
+    if (!chartPaths && known.length) this.pollCursor = (this.pollCursor + batch.length) % known.length;
+    const paths = chartPaths ?? new Set(batch);
+    if (!this.options.deferDiscovery) for (const reference of references) paths.add(directConfig(reference.note, "exports"));
     for (const folder of chartPaths ? [] : new Set(["", ...this.options.folders()])) {
       const configFolder = folder === "/" ? "" : folder;
       paths.add(configPathForFolder(configFolder, "charts")); paths.add(configPathForFolder(configFolder, "exports"));
-      if (this.usesDirectFolders) {
-        try { await new ExportDefinitions(adapter, () => this.stopped).migrateFolder(folder); }
-        catch (error) { this.blocked.add(configPathForFolder(configFolder, "exports")); this.options.report(error); }
-      }
     }
+    if (!chartPaths && this.options.deferDiscovery) chartPaths = paths;
     const snapshots = new Map<string, string | null>();
     for (const path of paths) {
       if (this.stopped) return;
@@ -167,12 +186,13 @@ export class ExportReflection {
         for (const record of currentWinners.values()) {
           if (record.path !== path) continue;
           const value = historicalValue(record, history)?.value;
-          if (typeof value?.input === "string") paths.add(directConfig(absoluteReference(path, value.input), "charts"));
+          if (typeof value?.input === "string") paths.add(directConfig(absoluteReference(path, value.input), path.endsWith('charts.json') ? 'charts' : 'exports'));
           if (record.relocatedFrom) paths.add(record.relocatedFrom.path);
           for (const target of record.relocatedTo ?? []) paths.add(target.path);
         }
       }
       try {
+        if (this.usesDirectFolders && path.endsWith('exports.json')) await new ExportDefinitions(adapter, () => this.stopped).migrateFolder(configRoot(path));
         const text = await adapter.exists(path) ? await adapter.read(path) : null;
         snapshots.set(path, text);
         if (text === null) continue; // Absence is never a deletion instruction.
@@ -214,7 +234,7 @@ export class ExportReflection {
     const localize = (): number => {
       const records = readRevisions(this.state.records);
       const selected = chartPaths ? new Map([...records].filter(([, record]) => chartPaths.has(record.path))) : records;
-      localizeRecords(selected, references, chartPaths ? false : sqlComplete);
+      localizeRecords(selected, references, scoped ? false : sqlComplete);
       for (const [key, record] of selected) { this.state.records[key] = record; records.set(key, record); }
       return records.size;
     };
@@ -246,7 +266,7 @@ export class ExportReflection {
       const original = historicalValue(record, [...readRevisions(this.state.records).values()]);
       if (original) staged.set(identity(record), original);
     }
-    let changed = false;
+    let changed = [...winners(readRevisions(this.state.records).values())].some(([key, record]) => canonical(previousWinners.get(key)?.value ?? null) !== canonical(record.value));
     for (const path of new Set([...staged.values()].map(record => record.path))) changed = await this.materialize(path, staged, snapshots) || changed;
     await this.journal();
     for (const path of new Set(retired.map(record => record.path))) {
@@ -414,8 +434,8 @@ export class ExportReflection {
   }
 
   /** A valid late note can recover automatic cleanup, never an explicit deletion. */
-  async recoverSql(note: string, id: string): Promise<boolean> {
-    await this.reconcile();
+  async recoverSql(note: string, id: string, legacy = false): Promise<boolean> {
+    await this.reconcileSql(note, id, legacy);
     const all = [...readRevisions(this.state.records).values()];
     for (const path of this.usesDirectFolders ? [directConfig(note, "exports")] : ancestorConfigPaths(note, "exports")) {
       const key = identity({ path, id: `entry:${id}` });
@@ -428,7 +448,7 @@ export class ExportReflection {
         const restored = this.revision(path, previous.id, previous.value, this.options.now?.() ?? Date.now(), true);
         this.state.records[revisionKey(restored)] = restored;
         await this.journal();
-        await this.reconcile();
+        await this.reconcileSql(note, id, legacy);
         return true;
       }
     }

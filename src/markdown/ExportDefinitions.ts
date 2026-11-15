@@ -297,6 +297,9 @@ export class ExportDefinitions {
       const template = inherited ?? (inherit ? config.exports.find(entry => entry.id === inherit.recipe.id) : undefined);
       const entry: TableDefinition = { ...template, id: result.id, format: result.format ?? 'table', input: relativeReference(configPath, result.source), output: relativeReference(configPath, note),
         runOnSave, options: { ...template?.options, columns: result.columns, sql: result.sql } };
+      // Legacy markers keep their binding when a canonical query gets its own
+      // identity; preferences and metadata may be shared, aliases may not.
+      if (template && result.id !== template.id) delete entry.legacyTableId;
       delete entry.csvzallDefaultPreferences;
       if (bootstrap && (!template || template.csvzallDefaultPreferences === true) && runOnSave) entry.csvzallDefaultPreferences = true;
       config.exports.push(entry);

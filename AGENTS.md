@@ -128,6 +128,7 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `package.json`: npm package version.
 - `package.json` `engines.node`: supported Node.js versions for the lint/build toolchain.
 - `package.json` `overrides.moment`: patched transitive dependency version, independent of plugin releases.
+- `package.json` `overrides["minimatch@>=7 <11.0.1"]`: patched lint-toolchain dependency version, independent of plugin releases.
 - Ignored `.test-build/obsidian-review/complete.json` `guidanceCommit`: official documentation revision used for a remediation run, independent of plugin releases.
 - `package-lock.json`: npm lockfile root package version.
 - `native-binaries/build.json`: bundled csvzall source version/commit, dependency commit pins, build-tool versions, platform runners, and CMake configuration. The native helper build identity also hashes its workflow and recipe scripts. Changes require release preparation before tagging.

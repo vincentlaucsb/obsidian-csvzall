@@ -322,10 +322,10 @@ test("an edited migrated SQL note can return to its original folder with its ID 
   const stable = canonical(a.data); await a.reflection.reconcile(); assert.equal(canonical(a.data), stable);
 });
 
-async function device(initial: string | null = config(), clock = 1000, data: JsonObject = {}, directFolders = false, references: ExportReference[] = []) {
+async function device(initial: string | null = config(), clock = 1000, data: JsonObject = {}, directFolders = false, references: ExportReference[] = [], deferDiscovery = false) {
   const files = new Map<string, string>(), times = new Map<string, number>();
   const directories = new Set(["", ".obsidian", ".obsidian/plugins", ".obsidian/plugins/csvzall"]);
-  let disk = structuredClone(data), writes = 0, now = clock;
+  let disk = structuredClone(data), writes = 0, now = clock, changes = 0;
   const scan = { complete: true, fail: false };
   const scans = { notes: 0, folders: 0 };
   if (initial !== null) { files.set(path, initial); times.set(path, clock); directories.add(".csvzall"); }
@@ -343,14 +343,55 @@ async function device(initial: string | null = config(), clock = 1000, data: Jso
   await store.initialize();
   const errors: unknown[] = [];
   const reflection = new ExportReflection({ adapter, store, localDirectory: ".obsidian/plugins/csvzall/export-sync-local",
-    folders: () => { scans.folders++; return [...directories].filter(path => !path.startsWith(".")); }, report: error => errors.push(error), changed: () => {}, now: () => now,
-    directFolders, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } });
+    folders: () => { scans.folders++; return [...directories].filter(path => !path.startsWith(".")); }, report: error => errors.push(error), changed: () => { changes++; }, now: () => now,
+    directFolders, deferDiscovery, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } });
   await reflection.initialize();
   return { files, times, adapter, store, reflection, errors, directories, references, scan, scans,
     get data() { return structuredClone(disk); }, set data(value: JsonObject) { disk = structuredClone(value); },
     edit(text: string, time: number) { files.set(path, text); times.set(path, time); now = time; },
-    get writes() { return writes; } };
+    get writes() { return writes; }, get changes() { return changes; } };
 }
+
+test('hidden SQL pause changes notify consumers even when the CLI file needs no write', async () => {
+  const a = await device(null);
+  const sqlPath = '.csvzall/exports.json';
+  a.files.set(sqlPath, JSON.stringify({ exports: [{ id: 'query', input: 'data.csv', output: 'note.md', runOnSave: false }] }));
+  await a.reflection.reconcile();
+  const before = a.changes;
+  const text = a.files.get(sqlPath)!.replace('"runOnSave":false', '"runOnSave":true');
+  assert.notEqual(text, a.files.get(sqlPath));
+  a.files.set(sqlPath, text); a.times.set(sqlPath, 2000);
+  const process = a.adapter.process;
+  let configWrites = 0;
+  a.adapter.process = async (path, update) => { if (path === sqlPath) configWrites++; return process(path, update); };
+  await a.reflection.reconcile();
+  assert.equal(configWrites, 0);
+  assert.equal(a.changes, before + 1);
+  await a.reflection.reconcile();
+  assert.equal(a.changes, before + 1);
+});
+
+test('incoming changes outside the current discovery batch still notify consumers', async () => {
+  const data: JsonObject = {};
+  for (let index = 0; index < 30; index++) {
+    const record = { version: 1 as const, path: `Scope${index}/.csvzall/exports.json`, id: 'entry:query',
+      value: { id: 'query', input: 'data.csv', runOnSave: false }, clockMs: 1000, counter: 0, origin: 'source' };
+    data[revisionKey(record)] = record;
+  }
+  const a = await device(null, 1000, data, false, [], true);
+  await a.reflection.reconcile();
+  const target = a.reflection.knownConfigPaths()[10]!;
+  const record = [...readRevisions(a.data).values()].find(entry => entry.path === target)!;
+  const incoming = { ...record, clockMs: 2000, value: { ...record.value!, runOnSave: true } };
+  a.data = { ...a.data, [revisionKey(incoming)]: incoming };
+  const before = a.changes;
+  const paths: string[] = [];
+  const exists = a.adapter.exists;
+  a.adapter.exists = async path => { paths.push(path); return exists(path); };
+  await a.reflection.reconcile();
+  assert.equal(paths.includes(target), false, 'target is outside this bounded batch');
+  assert.equal(a.changes, before + 1);
+});
 
 test("data.json alone reconstructs missing CLI configs and retains nested scope and metadata", async () => {
   const first = await device();
