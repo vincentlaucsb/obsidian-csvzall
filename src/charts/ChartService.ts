@@ -57,11 +57,9 @@ export class ChartService {
 
   private async loadChartConfig(): Promise<void> {
     try {
-      await this.reflection?.reconcile();
-      const folders = this.app.vault.getAllLoadedFiles()
-        .filter((file) => file instanceof TFolder)
-        .map((folder) => folder.path);
-      const configPaths = await findChartConfigPaths(this.app.vault.adapter, folders);
+      const configPaths = this.reflection ? this.reflection.knownConfigPaths().filter(path => this.isChartConfigPath(path)) :
+        await findChartConfigPaths(this.app.vault.adapter, this.app.vault.getAllLoadedFiles()
+          .filter((file) => file instanceof TFolder).map(folder => folder.path));
       const charts: ConfiguredChart[] = [];
       for (const configPath of configPaths) {
         try {
@@ -127,13 +125,20 @@ export class ChartService {
 
     let failures = 0;
     for (const key of keys) {
-      const chart = this.charts.find((candidate) => chartRunKey(candidate) === key);
+      let chart = this.charts.find((candidate) => chartRunKey(candidate) === key);
       if (!chart) {
         failures += 1;
         if (!automatic || this.errors.first("missing", key)) await this.eventLog.record("error", "Failed to regenerate chart", `Chart config entry not found: ${key}`);
         continue;
       }
-      try { this.reflection?.assertReady(chart.configPath); }
+      try {
+        await this.reflection?.reconcileCharts(chart.input);
+        await this.reloadChartConfig();
+        chart = this.charts.find(candidate => chartRunKey(candidate) === key);
+        if (!chart) throw new Error(`Chart config entry not found: ${key}`);
+        if (automatic && chart.runOnSave === false) continue;
+        this.reflection?.assertReady(chart.configPath);
+      }
       catch (error) {
         failures++;
         const message = error instanceof Error ? error.message : String(error);

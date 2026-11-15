@@ -10,6 +10,8 @@ import type { ExportReporter } from './exportReporting.js';
 import { fencedTableText } from './fencedTables.js';
 import { canonicalFenceRecipe, exportDefinitionId, fenceRecipe, resolveFencedExport } from './fencedExports.js';
 import { rebaseSqlSource } from './sqlSources.js';
+import { VaultExportDiscovery } from '../exports/VaultExportDiscovery.js';
+import { configRoot, directConfig } from '../exports/paths.js';
 
 export interface MaintenanceRefreshActions {
   index(file: TFile): Promise<boolean>;
@@ -26,12 +28,31 @@ export class ExportMaintenanceService {
   private pruning: Promise<void> = Promise.resolve();
   private readonly exportListeners = new Set<() => void>();
   private readonly deletingSources = new Set<string>();
+  private readonly incompleteNotes = new Set<string>();
+  private discovery: VaultExportDiscovery | null = null;
+  private discoveryRevision = -1;
+  private readonly discoveredNotes = new Map<string, TFile>();
+  private readonly referencePaths = new WeakMap<TFile, string>();
+  private readonly discoveredReferences = new Map<string, ExportReference[]>();
+  private readonly dirtyReferences = new Set<TFile>();
+  private cachedReferences: ExportReference[] | null = null;
+  private referencesComplete = false;
+  private readonly referenceScopes = new Map<string, ExportReference[]>();
+  private lastPrunedRevision = -1;
+  private pruningRevision = -1;
+  private pruneCursor = 0;
 
-  constructor(private readonly app: App, private readonly notes: MarkdownNoteStore, private readonly renderer: ExportRenderer,
+  constructor(private readonly app: App, private readonly notes: MarkdownNoteStore, _renderer: ExportRenderer,
     private readonly definitions: ExportDefinitions, private readonly refresh: MaintenanceRefreshActions,
     private readonly report: ExportReporter, private readonly signal: AbortSignal, private readonly reflection?: ExportReflection) {}
 
   invalidatePruning(): void { ++this.pruneRevision; }
+
+  invalidateReferences(file: TFile): void {
+    if (file.extension !== 'md') return;
+    this.dirtyReferences.add(file);
+    this.referencesComplete = false;
+  }
 
   isDeleting(source: string): boolean { return this.deletingSources.has(source); }
 
@@ -43,6 +64,8 @@ export class ExportMaintenanceService {
 
   async rename(oldPath: string, path: string): Promise<void> {
     this.notes.invalidateAll();
+    this.discovery = null; this.referencesComplete = false;
+    this.discoveredNotes.clear(); this.discoveredReferences.clear(); this.cachedReferences = null;
     await this.withWrite(async () => {
       await this.reflection?.renamed(oldPath, path);
       await this.renameSource(oldPath, path);
@@ -50,6 +73,7 @@ export class ExportMaintenanceService {
   }
 
   async migrationReferences(): Promise<ReferenceScan> {
+    if (this.reflection?.incrementalDiscovery) return this.incrementalReferences();
     const references: ExportReference[] = [];
     const revision = this.notes.revision;
     let complete = true;
@@ -64,37 +88,89 @@ export class ExportMaintenanceService {
     return { references, complete: complete && revision === this.notes.revision };
   }
 
-  async prepare(file: TFile): Promise<ManagedTable[]> {
-    return this.withWrite(async () => {
-      for (const table of await this.notes.tablesFor(file)) {
-        if (table.fence) {
-          const recipe = fenceRecipe(file.path, table);
-          this.renderer.sourceFile(recipe.source);
-          let policy: boolean | undefined;
-          let inherited: ResolvedExport | undefined;
-          if (table.fence.legacy) {
-            let legacy: ResolvedExport;
-            try { legacy = await this.resolveDefinition(file.path, table.fence.legacy.id); }
-            catch (error) {
-              if (!await this.reflection?.recoverSql(file.path, table.fence.legacy.id)) throw error;
-              legacy = await this.resolveDefinition(file.path, table.fence.legacy.id);
-            }
-            inherited = legacy;
-            if (!await this.definitions.find(file.path, recipe.id)) policy = legacy.runOnSave;
-          }
-          await resolveFencedExport(file.path, recipe, this.definitions, this.reflection, { autoUpdate: policy, inherit: inherited });
-          if (table.fence.legacy) await this.notes.replace(file, table, fencedTableText(file.path, recipe, table.body));
-          continue;
-        }
-        if (!table.recipe && table.marker !== 'table') continue;
-        const legacy = table.recipe ? undefined : await this.resolveDefinition(file.path, table.id, true);
-        // Rebind in the note's current scope so a nearer, unrelated export ID
-        // cannot shadow the migrated table once its marker becomes canonical.
-        const recipe = await this.definitions.save(file.path, table.recipe ?? legacy!.recipe, undefined, legacy?.runOnSave ?? true);
-        // Persist the definition first. A failed or concurrent note edit keeps its inline recipe.
-        await this.notes.replace(file, table, shortenManagedTable(table, recipe.id));
+  private async incrementalReferences(): Promise<ReferenceScan> {
+    const revision = this.notes.revision;
+    if (!this.discovery) {
+      this.discovery = new VaultExportDiscovery(this.app);
+    }
+    this.discovery.step();
+    this.discovery.takeFolders();
+    let readable = true;
+    for (const file of this.discovery.takeNotes()) this.dirtyReferences.add(file);
+    for (const file of [...this.dirtyReferences].slice(0, 16)) {
+      this.dirtyReferences.delete(file);
+      const previous = this.referencePaths.get(file);
+      if (previous !== undefined && previous !== file.path) {
+        this.discoveredNotes.delete(previous); this.discoveredReferences.delete(previous); this.cachedReferences = null;
       }
-      return await this.notes.tablesFor(file);
+      if (this.app.vault.getAbstractFileByPath(file.path) !== file) {
+        this.discoveredNotes.delete(file.path); this.discoveredReferences.delete(file.path); this.cachedReferences = null;
+        continue;
+      }
+      this.discoveredNotes.set(file.path, file);
+      this.referencePaths.set(file, file.path);
+      if (this.refresh.isEditing(file)) { readable = false; this.dirtyReferences.add(file); continue; }
+      try {
+        const references: ExportReference[] = [];
+        for (const table of await this.notes.tablesFor(file)) {
+          if (!table.recipe) references.push({ note: file.path, id: table.fence?.legacy?.id ?? exportDefinitionId(file.path, table), legacy: table.marker === 'table' });
+        }
+        this.discoveredReferences.set(file.path, references);
+        this.cachedReferences = null;
+        if (revision !== this.notes.revision) this.dirtyReferences.add(file);
+      } catch (error) { readable = false; this.dirtyReferences.add(file); await this.report(file, error); }
+    }
+    this.discoveryRevision = revision;
+    this.referencesComplete = this.discovery.complete && !this.dirtyReferences.size && readable && revision === this.notes.revision;
+    if (!this.cachedReferences) {
+      this.cachedReferences = [...this.discoveredReferences.values()].flat();
+      this.referenceScopes.clear();
+      for (const reference of this.cachedReferences) {
+        const scope = directConfig(reference.note, 'exports');
+        const scoped = this.referenceScopes.get(scope) ?? [];
+        scoped.push(reference); this.referenceScopes.set(scope, scoped);
+      }
+    }
+    return { references: this.cachedReferences, complete: this.referencesComplete };
+  }
+
+  async prepare(file: TFile, onlyId?: string): Promise<ManagedTable[]> {
+    return this.withWrite(async () => {
+      if (!onlyId) this.incompleteNotes.add(file.path);
+      const failed = new Set<string>();
+      for (const table of await this.notes.tablesFor(file)) {
+        try {
+          if (onlyId && table.id !== onlyId && exportDefinitionId(file.path, table) !== onlyId) continue;
+          if (table.fence) {
+            const recipe = fenceRecipe(file.path, table);
+            let policy: boolean | undefined;
+            let inherited: ResolvedExport | undefined;
+            if (table.fence.legacy) {
+              let legacy: ResolvedExport;
+              try { legacy = await this.resolveDefinition(file.path, table.fence.legacy.id); }
+              catch (error) {
+                if (!this.reflection) throw error;
+                await this.reflection.recoverSql(file.path, table.fence.legacy.id, true);
+                legacy = await this.resolveDefinition(file.path, table.fence.legacy.id);
+              }
+              inherited = legacy;
+              if (!await this.definitions.find(file.path, recipe.id)) policy = legacy.runOnSave;
+            }
+            await resolveFencedExport(file.path, recipe, this.definitions, this.reflection, { autoUpdate: policy, inherit: inherited });
+            if (table.fence.legacy) await this.notes.replace(file, table, fencedTableText(file.path, recipe, table.body));
+            continue;
+          }
+          if (!table.recipe && table.marker !== 'table') continue;
+          const legacy = table.recipe ? undefined : await this.resolveDefinition(file.path, table.id, true);
+          // Rebind in the note's current scope so a nearer, unrelated export ID
+          // cannot shadow the migrated table once its marker becomes canonical.
+          const recipe = await this.definitions.save(file.path, table.recipe ?? legacy!.recipe, undefined, legacy?.runOnSave ?? true);
+          // Persist the definition first. A failed or concurrent note edit keeps its inline recipe.
+          await this.notes.replace(file, table, shortenManagedTable(table, recipe.id));
+        } catch (error) { failed.add(table.id); this.incompleteNotes.add(file.path); await this.report(file, error); }
+      }
+      if (!failed.size && !onlyId) this.incompleteNotes.delete(file.path);
+      return (await this.notes.tablesFor(file)).filter(table => !failed.has(table.id));
     });
   }
 
@@ -174,18 +250,33 @@ export class ExportMaintenanceService {
   pruneDeadExports(folders?: string[]): Promise<void> {
     const work = this.pruning.catch(() => {}).then(async () => {
       if (this.signal.aborted || this.pendingWrites) return;
+      for (const path of this.incompleteNotes) {
+        if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return;
+        this.incompleteNotes.delete(path);
+      }
+      if (this.reflection?.incrementalDiscovery && (!this.referencesComplete || this.discoveryRevision !== this.notes.revision)) return;
+      const incremental = this.reflection?.incrementalDiscovery === true && folders === undefined;
+      if (incremental && this.lastPrunedRevision === this.pruneRevision) return;
+      if (this.pruningRevision !== this.pruneRevision) { this.pruningRevision = this.pruneRevision; this.pruneCursor = 0; }
       const revision = this.pruneRevision;
       const cancelled = () => this.signal.aborted || this.pendingWrites > 0 || revision !== this.pruneRevision;
-      const directories = folders ?? this.app.vault.getAllLoadedFiles()
-        .filter(file => file instanceof TFolder).map(file => file.path === '/' ? '' : file.path);
-      const saved = (await this.definitions.list(directories)).filter(entry => entry.output !== undefined);
-      if (!saved.length || cancelled()) return;
+      const directories = folders ?? (this.reflection?.incrementalDiscovery ? [...new Set(this.reflection.knownConfigPaths().filter(path => path.endsWith('/exports.json')).map(configRoot))] : this.app.vault.getAllLoadedFiles()
+        .filter(file => file instanceof TFolder).map(file => file.path === '/' ? '' : file.path));
+      const selected = incremental ? directories.slice(this.pruneCursor, this.pruneCursor + 16) : directories;
+      const completed = () => {
+        if (!incremental || cancelled()) return;
+        this.pruneCursor += selected.length;
+        if (this.pruneCursor >= directories.length) this.lastPrunedRevision = revision;
+      };
+      const saved = (await this.definitions.list(selected)).filter(entry => entry.output !== undefined);
+      if (!saved.length) { completed(); return; }
+      if (cancelled()) return;
       if (this.reflection?.pending) return;
       if (this.reflection) {
         const sync = syncStatus(this.app);
         if (sync.state !== 'inactive' && sync.idle !== true) return;
       }
-      const notes = this.app.vault.getMarkdownFiles();
+      const notes = this.reflection?.incrementalDiscovery ? [] : this.app.vault.getMarkdownFiles();
       const markers: Array<{ file: TFile; tables: ManagedTable[] }> = [];
       // An unreadable note or incomplete edit is not evidence that its export died.
       try {
@@ -196,6 +287,13 @@ export class ExportMaintenanceService {
       } catch { return; }
       const live = new Set<string>();
       try {
+        if (this.reflection?.incrementalDiscovery) for (const scope of new Set(saved.map(entry => entry.configPath))) {
+          for (const reference of this.referenceScopes.get(scope) ?? []) {
+            const resolved = await this.definitions.find(reference.note, reference.id, reference.legacy);
+            if (resolved) this.reflection.assertSqlBinding(reference.note, resolved.recipe.id, resolved.configPath);
+            if (resolved) live.add(`${resolved.configPath}\0${resolved.recipe.id}`);
+          }
+        }
         for (const { file, tables } of markers) {
           for (const table of tables) {
             if (table.recipe) continue;
@@ -219,6 +317,7 @@ export class ExportMaintenanceService {
         }
       }
       if (changed) for (const listener of this.exportListeners) listener();
+      completed();
     });
     this.pruning = work;
     return work;

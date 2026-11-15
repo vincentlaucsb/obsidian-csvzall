@@ -1,6 +1,6 @@
 {
   "name": "obsidian-csvzall",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "A fast CSV viewer, editor, and charting tool.",
   "main": "main.js",
   "type": "module",
@@ -56,7 +56,8 @@
     "obsidian": "1.13.1"
   },
   "overrides": {
-    "moment": "2.31.0"
+    "moment": "2.31.0",
+    "minimatch@>=7 <11.0.1": "11.0.1"
   },
   "engines": {
     "node": "^20.19.0 || ^22.13.0 || >=24"

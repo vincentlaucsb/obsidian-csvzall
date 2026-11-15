@@ -103,7 +103,9 @@ export function localizeRecords(records: Map<string, Revision>, references: Expo
     const original = historicalValue(source, history);
     if (!original?.value) continue;
     const kind = source.path.endsWith("charts.json") ? "charts" : "exports";
-    if (kind === "exports" && !sqlComplete) continue;
+    // A known live reference can acquire its local copy before unrelated notes
+    // have been indexed. Keep the ancestor until every owner is known.
+    if (kind === "exports" && !sqlComplete && !owners.has(identity(source))) continue;
     // Chart owners are determined by the CSV, so live descendants handle moves;
     // historical charts cannot acquire a new note owner as SQL exports can.
     if (kind === "charts" && !source.value) continue;
@@ -164,7 +166,7 @@ export function localizeRecords(records: Map<string, Revision>, references: Expo
       if (canonical(document?.value) !== canonical(payload)) add({ ...original, path, id: "document", value: payload,
         clockMs: Math.max(original.clockMs, document?.clockMs ?? 0), counter: Math.max(original.counter, document?.counter ?? 0) + 1 });
     }
-    if (targets.has(source.path) || !destinations.length) continue;
+    if (kind === 'exports' && !sqlComplete || targets.has(source.path) || !destinations.length) continue;
     destinations.sort((a, b) => lexical(identity(a), identity(b)));
     if (source.reason === "relocated" && canonical(source.relocatedTo) === canonical(destinations)) continue;
     add({ ...original, value: null, reason: "relocated", relocatedTo: destinations, counter: Math.max(original.counter, source.counter) + 1 });

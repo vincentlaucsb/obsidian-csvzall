@@ -49,6 +49,7 @@ export class MarkdownTableService {
     plugin.registerEvent(this.app.vault.on('modify', file => {
       if (!(file instanceof TFile)) return;
       this.notes.invalidateNote(file);
+      this.maintenance.invalidateReferences(file);
       if (isCsv(file)) { this.refreshes.sourceChanged(file.path); void this.refreshes.initialize().catch(error => this.report(file, error)); }
       if (file.extension === 'md') {
         this.maintenance.invalidatePruning();
@@ -58,12 +59,14 @@ export class MarkdownTableService {
     }));
     plugin.registerEvent(this.app.vault.on('create', file => {
       if (file instanceof TFile) this.notes.invalidateNote(file);
+      if (file instanceof TFile) this.maintenance.invalidateReferences(file);
       this.maintenance.invalidatePruning();
       if (file instanceof TFile && file.extension === 'md') void this.refreshes.index(file).catch(error => this.report(file, error));
       if (file instanceof TFile && isCsv(file)) this.refreshes.sourceChanged(file.path);
     }));
     plugin.registerEvent(this.app.vault.on('delete', file => {
       if (file instanceof TFile) this.notes.invalidateNote(file);
+      if (file instanceof TFile) this.maintenance.invalidateReferences(file);
       if (file instanceof TFile) this.refreshes.forget(file);
       this.refreshes.sourceChanged(file.path);
       this.maintenance.invalidatePruning();
@@ -75,6 +78,7 @@ export class MarkdownTableService {
     plugin.registerEvent(this.app.workspace.on('editor-change', (_editor, view) => {
       if (!(view instanceof MarkdownView) || !view.file || this.notes.isReplacingEditor(view.file)) return;
       this.notes.invalidateNote(view.file);
+      this.maintenance.invalidateReferences(view.file);
       this.maintenance.invalidatePruning();
       this.refreshes.noteChanged(view.file);
     }));
@@ -84,7 +88,7 @@ export class MarkdownTableService {
   unload(): void { this.lifetime.abort(); this.refreshes.stop(); }
 
   migrationReferences(): Promise<ReferenceScan> { return this.maintenance.migrationReferences(); }
-  refreshAfterSync(): Promise<void> { return this.refreshes.refreshAfterSync(); }
+  refreshAfterSync(): Promise<void> { this.maintenance.invalidatePruning(); return this.refreshes.refreshAfterSync(); }
   render(value: Pick<TableValue, 'source' | 'columns' | 'sql' | 'format'>, limit?: number, validate?: () => void): Promise<string> { return this.renderer.render(value, limit, validate); }
   async refresh(file: TFile, onlyId?: string, automatic = false): Promise<void> { await this.refreshes.refresh(file, onlyId, automatic); }
   currentTable(editor: Editor): ManagedTable | undefined { return this.notes.currentTable(editor); }

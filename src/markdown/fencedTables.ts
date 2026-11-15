@@ -86,7 +86,6 @@ export function findFencedTables(text: string): ManagedTable[] {
       legacy = { id: value.id, source: value.source };
     }
     const sql = literal.slice(metadata?.[0].length ?? 0).trim();
-    if (!sql) throw new Error('Enter a SQLite query in the CSV export code block.');
     const end = from + code.length, output = adjacentTable(text, end);
     // Occurrence order is only a transient replacement address, never a saved identity.
     tables.push({ id: `@fence-${tables.length}`, marker: 'fence', fence: { sql, legacy, code, snapshot: text }, from, to: output.to,
