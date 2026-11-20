@@ -69,7 +69,7 @@ async function loadTab() {
     platform: "node", format: "cjs", write: false, external: ["obsidian"] });
   const module = { exports: {} as any };
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports,
-    require: () => ({ PluginSettingTab: BaseTab, Setting: Row, Platform: { isDesktopApp: true } }),
+    require: () => ({ PluginSettingTab: BaseTab, Setting: Row, Platform: { isDesktopApp: true }, Notice: class {} }),
     window: { open() {} },
   });
   return module.exports.CsvzallSettingTab;
@@ -100,10 +100,10 @@ test("declarative settings persist controls and refresh install/log actions", as
     const definitions = tab.getSettingDefinitions();
     assert.equal(tab.containerEl.children.length, 0, "indexing must not render or perform actions");
     assert.equal(installs + saves, 0);
-    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
+    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Agent integration", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
     tab.update();
     const row = (name: string): Row => tab.containerEl.children.find((r: Row) => r.name === name);
-    assert.equal(tab.containerEl.children.length, 10);
+    assert.equal(tab.containerEl.children.length, 11);
     assert.equal(row("Custom executable path").control!.value, "");
     await row("Custom executable path").control!.change('"C:/csvzall.exe"');
     assert.equal(settings.csvzallPath, "C:/csvzall.exe");
@@ -129,7 +129,7 @@ test("declarative settings persist controls and refresh install/log actions", as
     await row("Chart and error log").control!.click();
     assert.equal(row("Chart and error log").control!.disabled, true);
     assert.equal(row("Chart and error log").descEl.children[0]!.children[0]!.options.text, "No csvzall events yet.");
-    assert.equal(tab.containerEl.children.length, 10, "refresh must not duplicate rows");
+    assert.equal(tab.containerEl.children.length, 11, "refresh must not duplicate rows");
     assert.ok(tab.updates > 1);
 });
 
@@ -150,6 +150,30 @@ test('settings show only an export summary and open the exports tab from Configu
   await row.controls[0]!.click();
   assert.equal(opened, 1); assert.equal(closed, 1);
   assert.equal(row.children.length, 0, 'settings must not render per-file export rows');
+});
+
+test('agent setup actions stay lazy and disable duplicate clicks until completion', async () => {
+  const Tab = await loadTab();
+  const calls: string[] = [];
+  let finish: () => void = () => {};
+  const tab = new Tab({ app: {} }, { getSettings: () => DEFAULT_SETTINGS,
+    exports: { list: async () => [] }, agents: {
+      enable: async () => { calls.push('enable'); await new Promise<void>(resolve => { finish = resolve; }); },
+      remove: async () => { calls.push('remove'); },
+      testConnection: async () => { calls.push('test'); return 'help'; },
+    } });
+  tab.getSettingDefinitions();
+  assert.deepEqual(calls, []);
+  tab.update();
+  const controls = () => (tab.containerEl.children.find((r: Row) => r.name === 'Agent integration') as Row).controls;
+  const pending = controls()[0]!.click();
+  assert.ok(controls().every(control => control.disabled));
+  await controls()[0]!.click();
+  assert.deepEqual(calls, ['enable']);
+  finish(); await pending;
+  assert.ok(controls().every(control => !control.disabled));
+  await controls()[1]!.click(); await controls()[2]!.click();
+  assert.deepEqual(calls, ['enable', 'test', 'remove']);
 });
 
 test('Configure still opens the exports tab when the settings modal API is unavailable', async () => {

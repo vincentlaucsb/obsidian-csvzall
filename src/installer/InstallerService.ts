@@ -7,6 +7,8 @@ import type { CsvzallPluginSettings } from "../settings/settings.js";
 export class InstallerService {
   private pending?: Promise<boolean>;
   private preparedPath?: string;
+  private preparedBundled?: Awaited<ReturnType<typeof installBundledCsvzall>>;
+  private preparingBundled?: Promise<Awaited<ReturnType<typeof installBundledCsvzall>>>;
 
   constructor(
     private readonly getSettings: () => CsvzallPluginSettings,
@@ -22,6 +24,20 @@ export class InstallerService {
 
   async installDesktopCsvzall(): Promise<boolean> {
     return await this.install(true);
+  }
+
+  /** Share completed preparation with agent setup without changing viewer settings. */
+  async prepareBundledHelper(repair = true): Promise<Awaited<ReturnType<typeof installBundledCsvzall>>> {
+    if (this.preparingBundled) return await this.preparingBundled;
+    if (!repair && this.preparedBundled) return this.preparedBundled;
+    const pluginDir = this.filesystem.getPluginDataDir();
+    if (!pluginDir) throw new Error("Could not resolve the plugin data directory.");
+    this.preparedBundled = undefined;
+    this.preparingBundled = installBundledCsvzall({ pluginDir });
+    try {
+      this.preparedBundled = await this.preparingBundled;
+      return this.preparedBundled;
+    } finally { this.preparingBundled = undefined; }
   }
 
   getExecutablePath(): string {
@@ -45,9 +61,7 @@ export class InstallerService {
     const initialPath = this.getSettings().csvzallPath;
     this.preparedPath = undefined;
     try {
-      const pluginDir = this.filesystem.getPluginDataDir();
-      if (!pluginDir) throw new Error("Could not resolve the plugin data directory.");
-      const result = await installBundledCsvzall({ pluginDir });
+      const result = await this.prepareBundledHelper();
       const settings = this.getSettings();
       if (settings.csvzallPath !== initialPath || settings.csvzallExecutableMode !== initialMode) return false;
       const changed = result.changed || settings.csvzallPath !== result.executablePath ||

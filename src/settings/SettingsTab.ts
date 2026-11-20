@@ -2,6 +2,7 @@ import { Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type { Plugin, SettingDefinitionRender } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { InstallerService } from "../installer/InstallerService.js";
+import type { AgentIntegrationService } from "../agents/AgentIntegrationService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
 import type { ExportSettingsService } from "./ExportSettingsService.js";
@@ -18,12 +19,14 @@ export interface CsvzallSettingTabServices {
   saveSettings(): Promise<void>;
   eventLog: EventLog;
   installer: InstallerService;
+  agents: Pick<AgentIntegrationService, "enable" | "remove" | "testConnection">;
   exports: Pick<ExportSettingsService, "list">;
   openExports(): Promise<void>;
 }
 
 export class CsvzallSettingTab extends PluginSettingTab {
   private installing = false;
+  private agentAction = false;
   private exportsRevision = 0;
 
   constructor(
@@ -48,6 +51,18 @@ export class CsvzallSettingTab extends PluginSettingTab {
       this.installing = false;
       this.refreshSettings();
     }
+  }
+
+  private async runAgentAction(action: "enable" | "remove" | "testConnection"): Promise<void> {
+    if (this.agentAction) return;
+    this.agentAction = true;
+    this.refreshSettings();
+    try {
+      await this.services.agents[action]();
+      new Notice(action === "testConnection" ? "Bundled helper ran successfully with PATH empty." :
+        action === "remove" ? "Agent integration disabled; unchanged generated files removed." : "Agent skills installed. Open a new agent chat in the vault root.");
+    } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
+    finally { this.agentAction = false; this.refreshSettings(); }
   }
 
   getSettingDefinitions(): Array<Omit<SettingDefinitionRender, "render"> & { render: (setting: Setting) => void }> {
@@ -108,6 +123,19 @@ export class CsvzallSettingTab extends PluginSettingTab {
                 await this.services.saveSettings();
               }),
           );
+        },
+      },
+
+      {
+        name: "Agent integration",
+        desc: "Install csvzall/SKILL.md in this vault's .agents/skills, .claude/skills, and .opencode/skills folders for Copilot, Claude Code, and Codex. Uses the bundled helper, independently of your custom executable. No PATH setup needed. Edited or linked skills are preserved.",
+        render: setting => {
+          setting.addButton(button => button.setButtonText("Enable or repair").setDisabled(this.agentAction || !Platform.isDesktopApp)
+            .onClick(() => this.runAgentAction("enable")));
+          setting.addButton(button => button.setButtonText("Test connection").setDisabled(this.agentAction || !Platform.isDesktopApp)
+            .onClick(() => this.runAgentAction("testConnection")));
+          setting.addButton(button => button.setButtonText("Remove").setDestructive().setDisabled(this.agentAction || !Platform.isDesktopApp)
+            .onClick(() => this.runAgentAction("remove")));
         },
       },
 

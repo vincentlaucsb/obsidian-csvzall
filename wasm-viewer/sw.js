@@ -1,12 +1,12 @@
-const CACHE_NAME = "csvzall-viewer-59ea9d60bd5a";
+const CACHE_NAME = "csvzall-viewer-3d0765602f05";
 const PRECACHE_URLS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
-  "./assets/index-CLLkM8pw.css",
-  "./assets/index-DKUIsL14.js"
+  "./assets/index-BUDtcXsf.js",
+  "./assets/index-CLTJKfdO.css"
 ];
 
 self.addEventListener('install', (event) => {

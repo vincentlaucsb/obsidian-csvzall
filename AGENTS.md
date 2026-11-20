@@ -26,6 +26,7 @@
 - `src/process/`: `csvzall` child-process startup, command execution, viewer sessions, and process failure handling.
 - `src/installer.ts`: Pure download, release asset selection, checksum verification, ZIP extraction, and binary install logic.
 - `src/installer/`: Obsidian-facing installer service glue.
+- `src/agents/`: Desktop agent skill installation, local ownership, and bundled-helper discovery. Keep this integration out of mobile and shared utilities.
 - `src/installer/archive.ts` and `src/installer/bundledInstall.ts`: Offline archive extraction, integrity checks, and pinned native helper materialization. Keep the legacy downloader out of the desktop runtime dependency graph.
 - `src/logging/`: Event log mutation helpers.
 - `src/exports/`: Desktop export reflection, revision ordering, and local configuration reconstruction.
@@ -122,6 +123,8 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - Keep each distribution's minimum at the lowest version required by its APIs, enforced by `obsidianmd/no-unsupported-api`. Adopting a newer API requires updating the desktop `manifest.json` and current `versions.json` entry together, or `mobile-src/manifest.json` for mobile, to at least its introduction version. Runtime guards do not replace metadata updates. Desktop capability and `isDesktopOnly` requirements above still apply.
 
 ## Version Locations
+
+- `src/agents/AgentIntegration.ts` local `Installation.version` and generated `agent-runtime/<platform>-<arch>.json` `version`: agent integration ownership and locator schemas (currently 1), independent of plugin releases. Locator `helperVersion` and `executableSha256` identify the prepared bundled helper, independently of the plugin version.
 
 - `manifest.json`: Obsidian plugin version and minimum supported Obsidian app version.
 - `versions.json`: Obsidian plugin compatibility map from plugin version to minimum supported Obsidian app version.
