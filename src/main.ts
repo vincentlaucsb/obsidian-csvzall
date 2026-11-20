@@ -27,6 +27,7 @@ import { MarkdownTableService } from "./markdown/MarkdownTableService.js";
 import { registerMarkdownCommands } from "./commands/registerMarkdownCommands.js";
 import { ExportSettingsService } from "./settings/ExportSettingsService.js";
 import { VaultExportDiscovery } from "./exports/VaultExportDiscovery.js";
+import { AgentIntegrationService } from "./agents/AgentIntegrationService.js";
 
 export default class CsvzallPlugin extends Plugin {
   settings: CsvzallPluginSettings = DEFAULT_SETTINGS;
@@ -37,6 +38,7 @@ export default class CsvzallPlugin extends Plugin {
   private csvService!: CsvService;
   private chartService!: ChartService;
   private installerService!: InstallerService;
+  private agentIntegration!: AgentIntegrationService;
   private markdownTables!: MarkdownTableService;
   private exportSettings!: ExportSettingsService;
   private dataStore!: PluginDataStore;
@@ -49,6 +51,7 @@ export default class CsvzallPlugin extends Plugin {
     this.createServices();
     await this.reflection.initialize();
     await this.installerService.ensureBundledCsvzall();
+    void this.agentIntegration.refresh().catch((error: unknown) => new Notice(`Agent integration: ${error instanceof Error ? error.message : String(error)}`));
     await this.chartService.reloadChartConfig();
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
@@ -59,6 +62,7 @@ export default class CsvzallPlugin extends Plugin {
       saveSettings: () => this.saveSettings(),
       eventLog: this.eventLog,
       installer: this.installerService,
+      agents: this.agentIntegration,
       exports: this.exportSettings,
       openExports: () => openExportsView(this.app),
     }));
@@ -185,6 +189,7 @@ export default class CsvzallPlugin extends Plugin {
       this.eventLog,
       this.filesystem,
     );
+    this.agentIntegration = new AgentIntegrationService(this.app, this.filesystem, this.installerService);
     this.markdownTables = new MarkdownTableService(this.app, this.filesystem, this.processService, this.eventLog, this.reflection, {
       syntax: () => this.settings.exportSyntax,
       saveSyntax: async syntax => { if (this.settings.exportSyntax !== syntax) { this.settings.exportSyntax = syntax; await this.saveSettings(); } },

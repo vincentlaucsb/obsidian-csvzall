@@ -48,6 +48,11 @@ directory automatically. Update the plugin through Obsidian to receive helper
 updates. You can set a **Custom executable path** to use an independently managed
 helper, including a command on PATH. Choose **Use bundled helper** to switch back.
 
+To use CSV data with Obsidian Copilot, Claude Code, or Codex, choose **Enable or
+repair** under **Agent integration** in settings. This installs local skills
+that locate the bundled helper without adding csvzall to PATH. See the
+[agent setup guide](docs/agent-integration.md) for setup and tested compatibility.
+
 ## Privacy and Network Use
 
 The plugin does not collect telemetry and works entirely offline. It uses direct filesystem access to install and run the bundled helper, or a custom helper you configure outside your vault.
