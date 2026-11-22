@@ -7,12 +7,12 @@ import { runInNewContext } from "node:vm";
 const compiled = buildSync({
   entryPoints: ["mobile-src/main.ts"], bundle: true, write: false,
   platform: "browser", format: "cjs",
-  external: ["obsidian", "./WasmAssetInstaller.js", "../src/views/CsvzallTableView.js"],
+  external: ["obsidian", "./WasmViewerSession.js", "../src/views/CsvzallTableView.js"],
 }).outputFiles[0].text;
 
-function fixture(isMobileApp, assetError = null) {
+function fixture(isMobileApp) {
   const views = [], extensions = [], commands = [], menus = [], notices = [], opened = [], writes = [];
-  let installs = 0, releases = 0, activeFile = null;
+  let releases = 0, activeFile = null;
   class TFile {
     constructor(path) { this.path = path; this.name = path.split("/").at(-1); this.basename = this.name.replace(/\.[^.]+$/, ""); this.extension = this.name.split(".").at(-1); }
   }
@@ -33,8 +33,7 @@ function fixture(isMobileApp, assetError = null) {
   runInNewContext(compiled, { module, exports: module.exports, console, require(name) {
     if (name === "obsidian") return { Plugin, TFile, TFolder, Platform: { isMobileApp }, Notice: class { constructor(message) { notices.push(message); } } };
     if (name.endsWith("CsvzallTableView.js")) return { CsvzallTableView: TableView };
-    if (name.endsWith("WasmAssetInstaller.js")) return {
-      async ensureEmbeddedWasmViewerAssets() { installs++; if (assetError) throw assetError; },
+    if (name.endsWith("WasmViewerSession.js")) return {
       embeddedWasmViewerUrl() { return "resource://bundled-viewer/index.html"; },
       releaseEmbeddedWasmViewer() { releases++; },
     };
@@ -53,13 +52,12 @@ function fixture(isMobileApp, assetError = null) {
     },
   };
   return { plugin, views, extensions, commands, menus, notices, opened, writes, leaf, TFile,
-    installs: () => installs, releases: () => releases, setFile: file => { activeFile = file; } };
+    releases: () => releases, setFile: file => { activeFile = file; } };
 }
 
 for (const mobile of [false, true]) test(`bundled plugin registers and opens the WASM viewer on ${mobile ? "mobile" : "desktop"}`, async () => {
   const f = fixture(mobile);
   await f.plugin.onload();
-  assert.equal(f.installs(), 1);
   assert.equal(f.views[0][0], "csvzall-mobile-view");
   assert.deepEqual(Array.from(f.extensions[0][0]), ["csv", "tsv"]);
   assert.equal(f.extensions[0][1], "csvzall-mobile-view");
@@ -113,11 +111,22 @@ test("TSV files use the same command and context menu on desktop and mobile", as
   }
 });
 
-test("failed asset installation keeps the desktop view available with an actionable error", async () => {
-  const f = fixture(false, new Error("vault is read-only"));
+test("the bundled viewer loads when the plugin filesystem is unavailable", async () => {
+  const f = fixture(false);
+  Object.defineProperty(f.plugin.app.vault, "adapter", { get() { throw new Error("Plugin filesystem is unavailable"); } });
   await f.plugin.onload();
   await f.plugin.openCsvInLeaf(new f.TFile("Tasks.csv"), f.leaf);
   assert.equal(f.views.length, 1);
-  assert.match(f.leaf.view.error, /vault is read-only/);
-  assert.equal(f.leaf.view.shown, undefined);
+  assert.equal(f.leaf.view.error, undefined);
+  assert.equal(f.leaf.view.shown[1], "resource://bundled-viewer/index.html");
+});
+
+test("opening a Lite CSV removed after command selection shows a notice", async () => {
+  const f = fixture(true);
+  await f.plugin.onload();
+  f.setFile(new f.TFile("Tasks.csv"));
+  f.leaf.setViewState = async () => { throw Object.assign(new Error("CSV disappeared"), { code: "ENOENT" }); };
+  f.commands.find(command => command.id === "open-active-csv").checkCallback(false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(f.notices[0], /failed to open CSV:.*CSV disappeared/);
 });

@@ -5,6 +5,8 @@ import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
 import { findChartConfigPaths } from "../src/charts/chartConfigFiles.js";
+import { EventLog } from "../src/logging/EventLog.js";
+import { DEFAULT_SETTINGS } from "../src/settings/settings.js";
 
 const nodeRequire = createRequire(import.meta.url);
 class FakeFile { constructor(public path: string) {} }
@@ -12,7 +14,9 @@ class FakeFile { constructor(public path: string) {} }
 class FakeView {
   file: unknown;
   displayed: string[] = [];
+  missingHelper = "";
   showViewer(_title: string, url: string) { this.displayed.push(url); }
+  showMissingCsvzall(message: string) { this.missingHelper = message; }
 }
 
 async function loadService(entry: string, spawn?: () => unknown, notices: string[] = []): Promise<any> {
@@ -52,6 +56,54 @@ test("an unavailable bundled helper prevents both commands and viewers from spaw
   await assert.rejects(service.captureCommand(["--version"], "."), /bundled helper unavailable/);
   await assert.rejects(service.startViewer("data.csv"), /bundled helper unavailable/);
   assert.equal(spawns, 0);
+});
+
+test("an unavailable log destination cannot replace the original operation result", async () => {
+  const settings = { ...DEFAULT_SETTINGS, eventLog: [] } as typeof DEFAULT_SETTINGS;
+  let missing = true;
+  const log = new EventLog(() => settings, async () => {
+    if (missing) throw Object.assign(new Error("plugin directory disappeared"), { code: "ENOENT" });
+  });
+  await log.record("error", "Original failure");
+  assert.equal(settings.eventLog[0]?.message, "Original failure");
+  await assert.rejects(log.clear(), /plugin directory disappeared/);
+  assert.equal(settings.eventLog[0]?.message, "Original failure");
+  missing = false;
+  await log.clear();
+  assert.deepEqual(settings.eventLog, []);
+});
+
+test("only the helper launch failure offers reinstall when a path disappears", async () => {
+  const { CsvService } = await loadService("src/csv/CsvService.ts");
+  const missing = Object.assign(new Error("path disappeared"), { code: "ENOENT" });
+  for (const phase of ["configuration", "source", "helper"]) {
+    const file = { path: "a.csv", basename: "a" }, view = new FakeView();
+    view.file = file;
+    let fileError = "";
+    const service = new CsvService({}, () => ({}), { record: async () => {} }, { getFullPath: () => "a.csv" }, {
+      viewerContinuation: () => () => true,
+      showLeafErrorText: (_leaf: unknown, message: string) => { fileError = message; },
+      startViewer: () => { throw phase === "helper" ? missing : new Error("input file not found"); },
+    }, { prepareViewer: async () => { if (phase === "configuration") throw missing; } });
+    await service.openCsvInLeaf(file, { view });
+    assert.equal(Boolean(view.missingHelper), phase === "helper");
+    assert.equal(Boolean(fileError), phase !== "helper");
+  }
+});
+
+test("opening a missing generated chart reports its path without creating a note", async () => {
+  const notices: string[] = [];
+  const { registerChartCommands } = await loadService("src/commands/registerChartCommands.ts", undefined, notices);
+  const file = new FakeFile("tasks.csv");
+  const commands: Array<{ id: string; checkCallback(checking: boolean): boolean }> = [];
+  const workspace = { getActiveFile: () => file, getLeaf: () => { throw new Error("Must not open a leaf"); },
+    openLinkText: () => { throw new Error("Must not create a note"); } };
+  registerChartCommands({ addCommand: (command: typeof commands[number]) => commands.push(command),
+    app: { workspace, vault: { getAbstractFileByPath: () => null } } },
+    { outputChartsForCsv: () => [{ output: "charts/deleted.svg" }] }, { isCsv: () => true });
+  const open = commands.find(command => command.id === "open-generated-chart")!;
+  assert.equal(open.checkCallback(false), true);
+  assert.match(notices[0]!, /charts\/deleted\.svg/);
 });
 
 test("process failures reject with Error objects even for untyped event payloads", async () => {

@@ -53,8 +53,8 @@ It builds and validates upstream source before importing assets; runtime bundle
 patches are not supported.
 
 The mobile distribution is generated into `.mobile-dist/`. Its `main.js`
-embeds the packaged `wasm-viewer/` assets and materializes them into the plugin
-directory at runtime. This lets the mobile release use Obsidian's standard
+embeds the packaged `wasm-viewer/` assets and opens the viewer directly from
+those bytes using Blob URLs. This lets the mobile release use Obsidian's standard
 Community plugin asset model:
 
 - `main.js`

@@ -53,7 +53,7 @@ async function bundle(entry: string, globals: Record<string, unknown> = {}) {
   return module.exports;
 }
 
-async function loadTab() {
+async function loadTab(notices: string[] = []) {
   class BaseTab { containerEl = new Element(); updates = 0; constructor(public app: unknown) {} }
   Object.assign(BaseTab.prototype, {
     update(this: any) {
@@ -69,14 +69,17 @@ async function loadTab() {
     platform: "node", format: "cjs", write: false, external: ["obsidian"] });
   const module = { exports: {} as any };
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports,
-    require: () => ({ PluginSettingTab: BaseTab, Setting: Row, Platform: { isDesktopApp: true }, Notice: class {} }),
+    require: () => ({ PluginSettingTab: BaseTab, Setting: Row, Platform: { isDesktopApp: true }, Notice: class {
+      constructor(message: string) { notices.push(message); }
+    } }),
     window: { open() {} },
   });
   return module.exports.CsvzallSettingTab;
 }
 
 test("declarative settings persist controls and refresh install/log actions", async () => {
-    const Tab = await loadTab();
+    const notices: string[] = [];
+    const Tab = await loadTab(notices);
     const settings = { ...DEFAULT_SETTINGS, eventLog: [{ level: "error" as const,
       timestamp: "2026-09-13T00:00:00Z", message: "Failed", detail: "Details" }],
       installedCsvzallVersion: "1.0", installedCsvzallAssetName: "binary.zip", csvzallLastUpdateCheckAt: "today" };
@@ -123,7 +126,8 @@ test("declarative settings persist controls and refresh install/log actions", as
     assert.equal(row("Bundled helper").control!.label, "Use bundled helper");
     rejectInstall = true;
     const failed = row("Bundled helper").control!.click();
-    finishInstall(); await assert.rejects(failed, /extraction failed/);
+    finishInstall(); await failed;
+    assert.match(notices.at(-1)!, /extraction failed/);
     assert.equal(row("Bundled helper").control!.disabled, false);
     assert.equal(row("Chart and error log").descEl.children[0]!.children.length, 1);
     await row("Chart and error log").control!.click();

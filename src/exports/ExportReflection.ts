@@ -7,14 +7,17 @@ import {
 import { historicalValue, localizeRecords, type ExportReference, type ReferenceScan } from "./localFolders.js";
 import { absoluteReference, ancestorConfigPaths, configPathForFolder, configRoot, directConfig, relativeReference } from "./paths.js";
 import { parentVaultPath } from "../utils/paths.js";
+import { hasErrorCode } from "../utils/errors.js";
 import { ExportDefinitions } from "../markdown/ExportDefinitions.js";
 
 interface Baseline { text: string; mtime: number; scope?: string }
-interface Journal { version: 1; origin: string; records: JsonObject; files: Record<string, Baseline>; backups: Record<string, string>; renames: Array<{ from: string; to: string }> }
+interface Rename { from: string; to: string; rewriteNotes?: boolean; configReady?: boolean }
+interface Journal { version: 1; origin: string; records: JsonObject; files: Record<string, Baseline>; backups: Record<string, string>; renames: Rename[] }
 export interface ReflectionOptions {
   adapter: DataAdapter;
   store: PluginDataStore;
   localDirectory: string;
+  createLocalDirectory?(): Promise<void>;
   folders(): string[];
   report(error: unknown): void;
   changed(): void;
@@ -44,13 +47,22 @@ export class ExportReflection {
 
   async initialize(): Promise<void> {
     const path = `${this.options.localDirectory}/state.json`;
-    if (await this.options.adapter.exists(path)) {
-      const saved: unknown = JSON.parse(await this.options.adapter.read(path));
+    let text: string | undefined;
+    try {
+      if (await this.options.adapter.stat(path)) text = await this.options.adapter.read(path);
+    } catch (error) {
+      if (!hasErrorCode(error, "ENOENT")) throw error;
+    }
+    if (text !== undefined) {
+      const saved: unknown = JSON.parse(text);
       if (!object(saved) || saved.version !== 1 || typeof saved.origin !== "string" || !object(saved.records) || !object(saved.files) || !object(saved.backups)) {
         throw new Error("Invalid local export Sync journal. The existing journal has been kept.");
       }
       readRevisions(saved.records);
-      if (saved.renames !== undefined && (!Array.isArray(saved.renames) || saved.renames.some((move: unknown) => !object(move) || typeof move.from !== "string" || typeof move.to !== "string"))) throw new Error("Invalid pending export moves.");
+      if (saved.renames !== undefined && (!Array.isArray(saved.renames) || saved.renames.some((move: unknown) => !object(move) ||
+          typeof move.from !== "string" || typeof move.to !== "string" ||
+          (move.rewriteNotes !== undefined && typeof move.rewriteNotes !== "boolean") ||
+          (move.configReady !== undefined && typeof move.configReady !== "boolean")))) throw new Error("Invalid pending export moves.");
       for (const [path, baseline] of Object.entries(saved.files)) {
         if (!configPath(path) || !object(baseline) || typeof baseline.text !== "string" || typeof baseline.mtime !== "number") throw new Error("Invalid local export baseline.");
         if (baseline.scope !== undefined && (typeof baseline.scope !== "string" || !configPath(baseline.scope))) throw new Error("Invalid moved export baseline.");
@@ -98,7 +110,7 @@ export class ExportReflection {
     if (this.running) await this.waitForIdle();
     if (this.stopped || !this.initialized) return;
     // Pending moves must finish in their original scopes before a viewer opens.
-    if (this.state.renames.length) await this.reconcile();
+    if (this.state.renames.some(move => !move.configReady)) await this.reconcile();
     if (this.running) await this.waitForIdle();
     if (this.stopped) return;
     const paths = new Set(ancestorConfigPaths(source, "charts"));
@@ -115,7 +127,10 @@ export class ExportReflection {
   private async journal(): Promise<void> {
     if (this.stopped) throw new Error("Export reflection stopped.");
     const { adapter, localDirectory } = this.options;
-    if (!await adapter.exists(localDirectory)) await adapter.mkdir(localDirectory);
+    if (!await adapter.exists(localDirectory)) {
+      if (this.options.createLocalDirectory) await this.options.createLocalDirectory();
+      else await adapter.mkdir(localDirectory);
+    }
     const text = JSON.stringify(this.state) + "\n";
     if (await adapter.exists(`${localDirectory}/state.json`) && await adapter.read(`${localDirectory}/state.json`) === text) return;
     const temporary = `${localDirectory}/state-${crypto.randomUUID()}.json`;
@@ -151,7 +166,14 @@ export class ExportReflection {
     const scoped = chartPaths !== undefined;
     if (!chartPaths && !this.options.deferDiscovery) this.blocked.clear();
     const pending = [];
-    for (const move of this.state.renames) if (!await this.applyRename(move.from, move.to)) pending.push(move);
+    const noteMovesReady: Rename[] = [];
+    for (const move of this.state.renames) {
+      if (!move.configReady && !await this.applyRename(move.from, move.to)) pending.push(move);
+      else if (move.rewriteNotes) {
+        pending.push(move);
+        if (!move.configReady) noteMovesReady.push(move);
+      }
+    }
     this.state.renames = pending;
     const incoming = await store.read();
     for (const [key, revision] of readRevisions(incoming)) this.state.records[key] = revision;
@@ -282,6 +304,7 @@ export class ExportReflection {
       }
       if (ready) changed = await this.materialize(path, reduced, snapshots) || changed;
     }
+    for (const move of noteMovesReady) move.configReady = true;
     await this.journal();
     if (changed && !this.stopped) this.options.changed();
   }
@@ -330,11 +353,29 @@ export class ExportReflection {
   }
 
   /** A vault rename is explicit evidence: move scoped identities, never resurrect old scopes. */
-  async renamed(oldPath: string, newPath: string): Promise<void> {
-    if (this.running) await this.running;
-    this.state.renames.push({ from: oldPath, to: newPath });
+  async renamed(oldPath: string, newPath: string, rewriteNotes = false): Promise<void> {
+    while (this.running) await this.running.catch(() => {});
+    this.state.renames.push({ from: oldPath, to: newPath, ...(rewriteNotes ? { rewriteNotes } : {}) });
     await this.journal();
     await this.reconcile();
+  }
+
+  get hasNoteRenames(): boolean { return this.state.renames.some(move => move.rewriteNotes); }
+
+  nextNoteRename(): Readonly<Rename> | undefined {
+    const first = this.state.renames.find(move => move.rewriteNotes);
+    if (this.running || !first?.configReady) return undefined;
+    for (const path of this.blocked) if (path.startsWith(`${first.from}/`) || path.startsWith(`${first.to}/`)) return undefined;
+    return first;
+  }
+
+  async finishNoteRename(move: Readonly<Rename>): Promise<void> {
+    while (this.running) await this.running.catch(() => {});
+    const index = this.state.renames.indexOf(move);
+    if (index === -1) return;
+    this.state.renames.splice(index, 1);
+    try { await this.journal(); }
+    catch (error) { this.state.renames.splice(index, 0, move); throw error; }
   }
 
   private async applyRename(oldPath: string, newPath: string): Promise<boolean> {
@@ -377,6 +418,7 @@ export class ExportReflection {
     }
     const records = winners(readRevisions(this.state.records).values());
     const time = this.options.now?.() ?? Date.now();
+    const checkedDestinations = new Set<string>();
     for (const record of records.values()) {
       const originalValue = record.value ?? (record.reason === "relocated" ? historicalValue(record, [...readRevisions(this.state.records).values()])?.value : undefined);
       if (!originalValue) continue;
@@ -406,11 +448,17 @@ export class ExportReflection {
       }
       if (path === record.path && canonical(value) === canonical(record.value)) continue;
       if (path !== record.path) {
+        const { adapter } = this.options;
+        if (!this.state.files[path] && !checkedDestinations.has(path)) {
+          if (await adapter.exists(path)) {
+            // The destination may carry edits that the import pass has not read yet.
+            throw new Error(`${path} appeared while handling rename. Reflection will retry.`);
+          }
+          checkedDestinations.add(path);
+        }
+        // Keep destination I/O above this point so a retry cannot see only the deletion.
         const removed = this.revision(record.path, record.id, null, time, true, "explicit");
         this.state.records[revisionKey(removed)] = removed;
-        if (!this.state.files[path] && await this.options.adapter.exists(path)) {
-          this.state.files[path] = { text: await this.options.adapter.read(path), mtime: (await this.options.adapter.stat(path))?.mtime ?? 0, scope: record.path };
-        }
       }
       const moved = this.revision(path, record.id, value, time, true);
       const lineage = record.relocatedFrom ?? [...readRevisions(this.state.records).values()].find(item => identity(item) === identity(record) && item.relocatedFrom)?.relocatedFrom;

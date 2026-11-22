@@ -8,6 +8,7 @@ import { AgentIntegration } from "./AgentIntegration.js";
 /** Desktop-only glue; helper preparation never changes the viewer's settings. */
 export class AgentIntegrationService {
   private integration?: AgentIntegration;
+  private stopped = false;
   private readonly key: string;
 
   constructor(private readonly app: App, private readonly filesystem: ObsidianFilesystem, private readonly installer: InstallerService) {
@@ -15,6 +16,7 @@ export class AgentIntegrationService {
   }
 
   private get(): AgentIntegration {
+    if (this.stopped) throw new Error("Agent integration was unloaded.");
     if (this.integration) return this.integration;
     const root = this.filesystem.getVaultRoot();
     const pluginDir = this.filesystem.getPluginDataDir();
@@ -33,9 +35,13 @@ export class AgentIntegrationService {
   }
 
   async refresh(): Promise<void> {
+    if (this.stopped) return;
     const value: unknown = this.app.loadLocalStorage(this.key);
-    if (value && typeof value === "object" && "enabled" in value && value.enabled === true) await this.get().refresh();
+    if (!value || typeof value !== "object" || !("enabled" in value) || value.enabled !== true) return;
+    try { await this.get().refresh(); }
+    catch (error) { if (!this.stopped) throw error; }
   }
+  stop(): void { this.stopped = true; this.integration?.stop(); }
   async enable(): Promise<void> { await this.get().enable(); }
   async remove(): Promise<void> { await this.get().remove(); }
   async testConnection(): Promise<string> { return await this.get().testConnection(); }

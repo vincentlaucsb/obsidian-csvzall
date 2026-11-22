@@ -148,7 +148,7 @@ export class CsvzallTableView extends FileView {
     this.missingCsvzallText = "";
     this.loading = true;
     this.render();
-    await this.owner.openCsvInLeaf(file, this.leaf);
+    await this.openCurrentFile(file);
   }
 
   async onUnloadFile(_file: TFile): Promise<void> {
@@ -184,7 +184,8 @@ export class CsvzallTableView extends FileView {
           this.renameWarning = warning;
           warning.createEl("p", { text: `This CSV moved while it had unsaved edits. Editing is paused to protect the save destination. Move it back to “${this.desktopSourcePath}”, save your edits, then move it again.` });
           warning.createEl("button", { text: "Discard edits and reopen" }).addEventListener("click", () => {
-            void this.runProtectedLeafAction(() => this.onLoadFile(file));
+            void this.runProtectedLeafAction(() => this.onLoadFile(file))
+              .catch((error: unknown) => new Notice(String(error)));
           });
           this.containerEl.prepend(warning);
         }
@@ -199,10 +200,20 @@ export class CsvzallTableView extends FileView {
       this.missingCsvzallText = "";
       this.loading = true;
       this.render();
-      await this.owner.openCsvInLeaf(file, this.leaf);
+      await this.openCurrentFile(file);
       return;
     }
     this.render();
+  }
+
+  private async openCurrentFile(file: TFile): Promise<void> {
+    const generation = this.renderGeneration;
+    try { await this.owner.openCsvInLeaf(file, this.leaf); }
+    catch (error) {
+      if (generation === this.renderGeneration && file === this.file) {
+        this.showError(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   showViewer(title: string, url: string): void {
@@ -406,7 +417,8 @@ export class CsvzallTableView extends FileView {
     const originalSetViewState = leaf.setViewState;
     /* eslint-enable @typescript-eslint/unbound-method -- Resume checks after capturing methods whose receivers are supplied explicitly. */
     const patchedDetach = (): void => {
-      void this.runProtectedLeafAction(() => originalDetach.call(leaf));
+      void this.runProtectedLeafAction(() => originalDetach.call(leaf))
+        .catch((error: unknown) => new Notice(String(error)));
     };
     const patchedOpenFile = async (file: TFile, openState?: OpenViewState): Promise<void> => {
       await this.runProtectedLeafAction(() => originalOpenFile.call(leaf, file, openState));
@@ -470,10 +482,14 @@ export class CsvzallTableView extends FileView {
       return;
     }
 
+    const wasDirty = this.dirty;
     this.setDirty(false);
     this.allowingProtectedLeafAction = true;
     try {
       await action();
+    } catch (error) {
+      if (generation === this.renderGeneration && file === this.file) this.setDirty(wasDirty);
+      throw error;
     } finally {
       this.allowingProtectedLeafAction = false;
     }
@@ -725,13 +741,16 @@ export class CsvzallTableView extends FileView {
       this.loading = true;
       this.render();
       const generation = this.renderGeneration;
-      void this.owner.installCsvzallFromView(file, this.leaf).then((installed) => {
-        if (generation !== this.renderGeneration || this.file !== file || file.path !== path) return;
+      const current = () => generation === this.renderGeneration && this.file === file && file.path === path;
+      void this.owner.installCsvzallFromView(file, this.leaf).then(async installed => {
+        if (!current()) return;
         if (!installed) {
           this.showMissingCsvzall(message);
         } else {
-          void this.owner.openCsvInLeaf(file, this.leaf);
+          await this.openCurrentFile(file);
         }
+      }).catch((error: unknown) => {
+        if (current()) this.showMissingCsvzall(error instanceof Error ? error.message : String(error));
       });
     });
 

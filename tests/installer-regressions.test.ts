@@ -145,6 +145,7 @@ test("a failed bundled extraction never falls back to an unpinned helper", async
   runInNewContext(bundle.outputFiles[0]!.text, { module, exports: module.exports,
     console: { error() {} }, require(name: string) {
       if (name === "obsidian") return { Platform: { isDesktopApp: true }, Notice: class {} };
+      if (name === "fs/promises") return {};
       assert.equal(name, "./bundledInstall.js");
       return { installBundledCsvzall: async () => {
         installs++;

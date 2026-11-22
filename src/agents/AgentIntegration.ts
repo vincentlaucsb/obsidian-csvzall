@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { randomUUID, createHash } from "crypto";
 import { execFile } from "child_process";
 import { SKILL_PATHS, csvzallSkill } from "./skill.js";
+import { hasErrorCode } from "../utils/errors.js";
 
 export interface AgentHelper {
   executablePath: string;
@@ -40,12 +41,9 @@ function record(value: unknown): Installation {
   return { version: 1, enabled: value.enabled, files };
 }
 
-function missing(error: unknown): boolean {
-  return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
-}
-
 export class AgentIntegration {
   private pending = false;
+  private stopped = false;
   private readonly pluginDirectory: string;
   private readonly locator: string;
 
@@ -54,6 +52,12 @@ export class AgentIntegration {
     if (!this.pluginDirectory || this.pluginDirectory.startsWith("../") || isAbsolute(this.pluginDirectory)) throw new Error("Plugin directory must be inside this vault.");
     if (!/^(win32-x64|darwin-arm64|linux-x64)$/.test(options.target)) throw new Error("Agent integration has no bundled helper for this platform.");
     this.locator = `${this.pluginDirectory}/agent-runtime/${options.target}.json`;
+  }
+
+  stop(): void { this.stopped = true; }
+
+  private assertRunning(): void {
+    if (this.stopped) throw new Error("Agent integration was unloaded.");
   }
 
   private absolute(path: string): string {
@@ -66,12 +70,14 @@ export class AgentIntegration {
   /** Check each known component, never traverse links or discover other folders. */
   private async parents(path: string, create: boolean): Promise<void> {
     const rel = relative(resolve(this.options.root), dirname(this.absolute(path)));
+    const plugin = this.absolute(this.pluginDirectory);
     let current = resolve(this.options.root);
     for (const part of rel.split(sep)) {
       current = join(current, part);
-      if (create) await mkdir(current).catch((error: unknown) => {
-        if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
-      });
+      if (create && (path !== this.locator || current.startsWith(`${plugin}${sep}`))) {
+        this.assertRunning();
+        await mkdir(current).catch((error: unknown) => { if (!hasErrorCode(error, "EEXIST")) throw error; });
+      }
       const info = await lstat(current);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`Agent integration preserves linked or non-directory paths: ${current}`);
     }
@@ -84,18 +90,22 @@ export class AgentIntegration {
       const info = await lstat(full);
       if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Agent integration preserves linked or non-file paths: ${path}`);
       return await readFile(full, "utf8");
-    } catch (error) { if (missing(error)) return undefined; throw error; }
+    } catch (error) { if (hasErrorCode(error, "ENOENT")) return undefined; throw error; }
   }
 
-  private async write(path: string, before: string | undefined, text: string): Promise<void> {
+  private async write(path: string, before: string | undefined, text: string, assertLocked: () => Promise<void>): Promise<void> {
     if (before === text) {
       if (await this.read(path) !== before) throw new Error(`Concurrent edit preserved: ${path}`);
+      await assertLocked();
       return;
     }
+    await assertLocked();
     await this.parents(path, true);
     const full = this.absolute(path);
+    this.assertRunning();
     if (before === undefined) {
       // Exclusive creation prevents adopting a concurrently created file.
+      await assertLocked();
       await writeFile(full, text, { flag: "wx" });
       return;
     }
@@ -103,30 +113,53 @@ export class AgentIntegration {
     try {
       await writeFile(temporary, text, { flag: "wx" });
       if (await this.read(path) !== before) throw new Error(`Concurrent edit preserved: ${path}`);
+      await assertLocked();
       await rename(temporary, full);
-    } finally { await unlink(temporary).catch((error: unknown) => { if (!missing(error)) throw error; }); }
+    } finally { await unlink(temporary).catch((error: unknown) => { if (!hasErrorCode(error, "ENOENT")) throw error; }); }
   }
 
-  private async exclusive(action: () => Promise<void>): Promise<void> {
+  private async exclusive(action: (assertLocked: () => Promise<void>) => Promise<void>, disableBeforeLock = false): Promise<void> {
+    this.assertRunning();
     if (this.pending) throw new Error("Agent integration is already being updated.");
     this.pending = true;
     // A vault-wide lock coordinates profiles without reading another profile.
     const lock = ".agents/csvzall-install.lock";
+    const lockPath = this.absolute(lock);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
+    let ownsLock: (() => Promise<boolean>) | undefined;
     try {
+      // Turning off automatic refresh is device-local and must work with the vault offline.
+      if (disableBeforeLock) this.options.save({ ...record(this.options.load()), enabled: false });
       await this.parents(lock, true);
-      handle = await open(this.absolute(lock), "wx").catch((error: unknown) => {
-        if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      handle = await open(lockPath, "wx").catch((error: unknown) => {
+        if (hasErrorCode(error, "EEXIST")) {
           throw new Error("Agent integration is locked by another setup. If a previous setup crashed, remove .agents/csvzall-install.lock after confirming no setup is running, then retry.");
         }
         throw error;
       });
-      await action();
+      const original = await handle.stat({ bigint: true });
+      ownsLock = async () => {
+        try {
+          if (!(await lstat(dirname(lockPath))).isDirectory()) return false;
+          const current = await lstat(lockPath, { bigint: true });
+          return current.isFile() && current.dev === original.dev && current.ino === original.ino;
+        } catch (error) {
+          if (hasErrorCode(error, "ENOENT") || hasErrorCode(error, "ENOTDIR")) return false;
+          throw error;
+        }
+      };
+      const check = ownsLock;
+      await action(async () => {
+        if (!await check()) throw new Error("Agent integration lost its setup lock. Retry the operation.");
+        this.assertRunning();
+      });
     } finally {
       try {
         if (handle) {
           try { await handle.close(); }
-          finally { await unlink(this.absolute(lock)).catch((error: unknown) => { if (!missing(error)) throw error; }); }
+          finally {
+            if (await ownsLock?.()) await unlink(lockPath).catch((error: unknown) => { if (!hasErrorCode(error, "ENOENT")) throw error; });
+          }
         }
       } finally { this.pending = false; }
     }
@@ -140,7 +173,7 @@ export class AgentIntegration {
   }
 
   private async update(explicit: boolean): Promise<void> {
-    await this.exclusive(async () => {
+    await this.exclusive(async assertLocked => {
       const state = record(this.options.load());
       const template = csvzallSkill(this.pluginDirectory);
       const snapshots = new Map<string, string | undefined>();
@@ -153,20 +186,23 @@ export class AgentIntegration {
       }
       const locatorBefore = await this.read(this.locator);
       const helper = await this.options.prepare(explicit);
+      this.assertRunning();
       const executable = relative(this.absolute(this.pluginDirectory), resolve(helper.executablePath)).split(sep).join("/");
       if (executable.startsWith("../") || isAbsolute(executable) || !executable.startsWith("csvzall-bin/")) throw new Error("Prepared agent helper must be inside this plugin's csvzall-bin directory.");
+      await this.requireHelperFile(executable);
       const locatorText = JSON.stringify({ version: 1, target: this.options.target, executable,
         helperVersion: helper.version, executableSha256: helper.executableSha256 }, null, 2) + "\n";
       // Locators can arrive on another device, but only identical content is adopted.
       if (locatorBefore !== undefined && locatorBefore !== locatorText && locatorBefore !== state.files[this.locator]) {
         throw new Error(`Agent locator was changed: ${this.locator}. Use the same plugin version or resolve the conflict before repairing.`);
       }
-      await this.write(this.locator, locatorBefore, locatorText);
+      await this.write(this.locator, locatorBefore, locatorText, assertLocked);
       state.files[this.locator] = locatorText;
       state.enabled = true;
       this.options.save(state);
       for (const [path, before] of snapshots) {
-        await this.write(path, before, template);
+        this.assertRunning();
+        await this.write(path, before, template, assertLocked);
         state.files[path] = template;
         this.options.save(state);
       }
@@ -174,10 +210,8 @@ export class AgentIntegration {
   }
 
   async remove(): Promise<void> {
-    await this.exclusive(async () => {
+    await this.exclusive(async assertLocked => {
       const state = record(this.options.load());
-      state.enabled = false;
-      this.options.save(state);
       const conflicts: string[] = [];
       for (const path of [...SKILL_PATHS, this.locator]) {
         if (state.files[path] === undefined) continue;
@@ -186,14 +220,35 @@ export class AgentIntegration {
           if (before !== undefined && before !== state.files[path]) { conflicts.push(path); continue; }
           if (before !== undefined) {
             if (await this.read(path) !== before) throw new Error(`Concurrent edit preserved: ${path}`);
-            await unlink(this.absolute(path));
+            await assertLocked();
+            try { await unlink(this.absolute(path)); }
+            catch (error) {
+              if (!hasErrorCode(error, "ENOENT")) throw error;
+              await this.parents(path, false);
+            }
+          } else {
+            // A missing ancestor can hide a file we still own on a moved or offline path.
+            await this.parents(path, false);
+            await assertLocked();
           }
           delete state.files[path];
           this.options.save(state);
         } catch { conflicts.push(path); }
       }
       if (conflicts.length) throw new Error(`Automatic refresh disabled; modified or linked files preserved: ${conflicts.join(", ")}`);
-    });
+    }, true);
+  }
+
+  private async requireHelperFile(executable: string): Promise<string> {
+    const relativePath = `${this.pluginDirectory}/${executable}`;
+    const path = this.absolute(relativePath);
+    try {
+      await this.parents(relativePath, false);
+      if ((await lstat(path)).isFile()) return path;
+    } catch (error) {
+      if (!hasErrorCode(error, "ENOENT")) throw error;
+    }
+    throw new Error("Bundled agent helper is unavailable. Enable or repair it first.");
   }
 
   async testConnection(): Promise<string> {
@@ -203,10 +258,7 @@ export class AgentIntegration {
     const value: unknown = JSON.parse(text);
     if (!value || typeof value !== "object" || !("executable" in value) || typeof value.executable !== "string" || !value.executable.startsWith("csvzall-bin/") ||
         !("executableSha256" in value) || typeof value.executableSha256 !== "string") throw new Error("Invalid helper locator.");
-    const executable = this.absolute(`${this.pluginDirectory}/${value.executable}`);
-    await this.parents(`${this.pluginDirectory}/${value.executable}`, false);
-    const info = await lstat(executable);
-    if (!info.isFile() || info.isSymbolicLink()) throw new Error("Bundled agent helper is unavailable. Enable or repair it first.");
+    const executable = await this.requireHelperFile(value.executable);
     if (createHash("sha256").update(await readFile(executable)).digest("hex") !== value.executableSha256) throw new Error("Bundled agent helper changed. Enable or repair it first.");
     return await new Promise<string>((accept, reject) => {
       execFile(executable, ["--help"], { cwd: this.options.root, env: { ...process.env, PATH: "", Path: "" },

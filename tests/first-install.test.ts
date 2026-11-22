@@ -77,6 +77,64 @@ test("legacy device migration retains unknown and concurrently arriving shared f
   assert.deepEqual(disk, { unknown: { keep: true }, futureSetting: "synced", exportSyntax: "code" });
 });
 
+test("legacy device settings arriving during startup are migrated before stripping their keys", async () => {
+  let disk: JsonObject | null = null, local: JsonObject = {}, reads = 0;
+  const custom = "/custom/csvzall";
+  const store = new PluginDataStore({
+    load: async () => {
+      if (++reads === 1) throw Object.assign(new Error("File disappeared"), { code: "ENOENT" });
+      if (reads === 3) disk = { csvzallPath: custom, unknown: 42 };
+      return disk;
+    },
+    save: async value => { disk = value; },
+    loadLocal: () => local, saveLocal: value => { local = value; },
+  });
+  assert.equal((await store.initialize()).csvzallPath, custom);
+  assert.equal(local.csvzallPath, custom);
+  assert.deepEqual(disk, { unknown: 42 });
+});
+
+test("saving after a missing readback recovers the last readable shared settings", async () => {
+  let disk: JsonObject = { unknown: { keep: true }, openInObsidian: false }, reads = 0;
+  const store = new PluginDataStore({
+    load: async () => {
+      if (++reads === 2) throw Object.assign(new Error("File disappeared"), { code: "ENOENT" });
+      return disk;
+    },
+    save: async value => { disk = value; },
+  });
+  await store.patch({ startupTimeoutMs: 3000 });
+  assert.deepEqual(disk, { unknown: { keep: true }, openInObsidian: false, startupTimeoutMs: 3000 });
+});
+
+test("deferred startup migration preserves legacy helper settings when plugin data returns", async () => {
+  let available = false, disk: JsonObject | null = null;
+  let local: JsonObject | undefined;
+  const store = new PluginDataStore({
+    load: async () => disk,
+    save: async value => { if (available) disk = value; },
+    loadLocal: () => local, saveLocal: value => { local = value; },
+    directoryAvailable: async () => available,
+  });
+  const settings = await store.initialize();
+  assert.equal(local, undefined, "defaults must not shadow the offline helper preference");
+  available = true;
+  disk = { csvzallPath: "/legacy/csvzall", unknown: true };
+  settings.openInObsidian = false;
+  await store.saveSettings(settings);
+  assert.equal(settings.csvzallPath, "/legacy/csvzall");
+  assert.equal((local as JsonObject | undefined)?.csvzallPath, "/legacy/csvzall");
+  assert.deepEqual(disk, { openInObsidian: false, unknown: true });
+});
+
+test("migration detects a swallowed write that leaves legacy device keys on disk", async () => {
+  const store = new PluginDataStore({
+    load: async () => ({ csvzallPath: "/legacy/csvzall" }),
+    save: async () => {}, saveLocal: () => {},
+  });
+  await assert.rejects(store.initialize(), /Plugin data changed while saving/);
+});
+
 test("first install reports persistence failure instead of claiming initialization succeeded", async () => {
   const store = new PluginDataStore({
     load: async () => null,

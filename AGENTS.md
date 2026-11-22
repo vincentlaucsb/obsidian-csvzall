@@ -6,6 +6,8 @@
 - Prefer direct lookups, known export definitions, cached results, and file events. Schedule required broader maintenance separately in bounded, incremental work; an async startup callback does not make a whole-vault scan acceptable.
 - When missing or incomplete information makes cleanup unsafe, defer that cleanup and preserve existing content. Do not expand a foreground operation to establish global certainty.
 - Validate affected state at the mutation boundary, including concurrent edits. Reuse completed discovery and validation while their inputs remain unchanged.
+- A cached path or existence probe does not guarantee the next I/O will succeed. Handle disappearance at the operation that requires the path. Treat confirmed absence of optional state separately from unreadable files or failed mutations. Create only directories the feature owns.
+- Keep startup and detached UI or background work recoverable when a path disappears. Diagnostic persistence must not mask the original result. Complete fallible destination reads before recording a source deletion or publishing a locator.
 - Tie new safeguards and recovery machinery to concrete failure modes. Use existing guards where possible; avoid speculative confirmations, fallback layers, and repeated validation.
 - Apply these boundaries to the requirements below and linked design plans. Keep each operation responsive while enforcing the guarantees relevant to the state it reads or changes.
 

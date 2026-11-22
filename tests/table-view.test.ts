@@ -199,6 +199,25 @@ test('late confirmation cannot navigate a replacement CSV view', async () => {
   assert.equal(acted, false);
 });
 
+test('navigation to a disappearing file preserves the existing edit guard', async () => {
+  const f = fixture();
+  f.view.dirty = true;
+  f.view.confirmDiscardChanges = async () => true;
+  await assert.rejects(f.view.runProtectedLeafAction(() => Promise.reject(new Error('target file disappeared'))), /target file disappeared/);
+  assert.equal(f.view.dirty, true);
+});
+
+test('a rejected repair returns the current pane to a retryable state', async () => {
+  const f = fixture();
+  f.owner.installCsvzallFromView = async () => { throw Object.assign(new Error('plugin directory disappeared'), { code: 'ENOENT' }); };
+  f.view.missingCsvzallText = 'missing';
+  f.view.renderMissingCsvzall();
+  f.install();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.view.loading, false);
+  assert.match(f.view.missingCsvzallText, /plugin directory disappeared/);
+});
+
 for (const installed of [true, false]) {
   test(`late install ${installed ? "success" : "failure"} cannot replace a newer same-file viewer`, async () => {
     const f = fixture(); const install = deferred<boolean>();

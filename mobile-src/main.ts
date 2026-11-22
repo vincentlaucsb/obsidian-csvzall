@@ -4,9 +4,8 @@ import { parentVaultPath } from "../src/utils/paths.js";
 import { CsvzallTableView } from "../src/views/CsvzallTableView.js";
 import {
   embeddedWasmViewerUrl,
-  ensureEmbeddedWasmViewerAssets,
   releaseEmbeddedWasmViewer,
-} from "./WasmAssetInstaller.js";
+} from "./WasmViewerSession.js";
 
 const VIEW_TYPE_CSVZALL_MOBILE = "csvzall-mobile-view";
 const DEFAULT_CSV_TEXT = "column\n";
@@ -16,8 +15,7 @@ export default class CsvzallMobilePlugin extends Plugin {
 
   async onload(): Promise<void> {
     try {
-      await ensureEmbeddedWasmViewerAssets(this.app, this.manifest);
-      embeddedWasmViewerUrl(this.app, this.manifest);
+      embeddedWasmViewerUrl();
     } catch (error) {
       this.assetError = error instanceof Error ? error.message : String(error);
       console.error("csvzall Lite failed to install bundled WASM viewer assets", error);
@@ -50,7 +48,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       return;
     }
 
-    leaf.view.showWasmViewer(file.basename, embeddedWasmViewerUrl(this.app, this.manifest), file);
+    leaf.view.showWasmViewer(file.basename, embeddedWasmViewerUrl(), file);
   }
 
   async installCsvzallFromView(_file: TFile, _leaf: WorkspaceLeaf): Promise<boolean> {
@@ -63,6 +61,13 @@ export default class CsvzallMobilePlugin extends Plugin {
   }
 
   private async openCsv(file: TFile): Promise<void> {
+    try { await this.openCsvView(file); }
+    catch (error) {
+      new Notice(`csvzall Lite failed to open CSV: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async openCsvView(file: TFile): Promise<void> {
     const leaf = this.app.workspace.getLeaf(true);
     await leaf.setViewState({
       type: VIEW_TYPE_CSVZALL_MOBILE,
@@ -76,7 +81,7 @@ export default class CsvzallMobilePlugin extends Plugin {
     try {
       const path = nextCsvPath(folder.path, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
-      await this.openCsv(file);
+      await this.openCsvView(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`csvzall Lite failed to create CSV: ${message}`);
@@ -90,7 +95,7 @@ export default class CsvzallMobilePlugin extends Plugin {
     try {
       const path = nextCsvPath(folderPath, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
-      await this.openCsv(file);
+      await this.openCsvView(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`csvzall Lite failed to create CSV: ${message}`);

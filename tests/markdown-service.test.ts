@@ -603,6 +603,34 @@ test('CSV rename preserves unknown fields when the shared query key changes', as
   f.service.unload();
 });
 
+test('deferred chained folder renames rebase fenced SQL in move order', async () => {
+  const first = { from: 'Data', to: 'Moved' }, second = { from: 'Moved', to: 'Final' };
+  const moves: Array<typeof first> = [];
+  let ready = false;
+  const f = await harness({
+    renamed: async (from: string) => {
+      if (from === first.from) { moves.push(first); throw new Error('Destination appeared while handling rename'); }
+      moves.push(second); ready = true;
+    },
+    get hasNoteRenames() { return moves.length > 0; },
+    nextNoteRename: () => ready ? moves[0] : undefined,
+    finishNoteRename: async (move: typeof first) => { assert.equal(move, moves.shift()); },
+    reconcile: async () => {}, edited: async () => {}, assertReady() {}, assertSqlBinding() {},
+  });
+  try {
+    f.text = fencedTableText(f.note.path, recipe, '| title |\n| --- |\n| Old |');
+    f.csv.path = 'Moved/tasks.csv';
+    await assert.rejects(f.service.maintenance.rename('Data', 'Moved'), /Destination appeared/);
+    await f.service.pruneDeadExports();
+    assert.match(f.text, /Data\/tasks\.csv/);
+    f.csv.path = 'Final/tasks.csv';
+    await f.service.maintenance.rename('Moved', 'Final');
+    await f.service.pruneDeadExports();
+    assert.match(f.text, /Final\/tasks\.csv/);
+    assert.match(f.text, /\| Old \|/);
+  } finally { f.service.unload(); }
+});
+
 test('old development metadata is removed while retaining paused preferences and ordinary SQL comments', async () => {
   const f = await harness();
   const config = JSON.parse(f.configs.get('.csvzall/exports.json')!); config.exports[0].runOnSave = false;

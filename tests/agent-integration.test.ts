@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat, symlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdtemp, mkdir, readFile, writeFile, rename, rm, stat, symlink } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -15,6 +15,7 @@ import { runInNewContext } from "node:vm";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "csvzall agent ü & '-"));
   const pluginDirectory = ".custom-profile/plugins/csvzall";
+  await mkdir(join(root, pluginDirectory), { recursive: true });
   let state: unknown;
   let preparations = 0;
   let version = "1.0.0";
@@ -23,9 +24,11 @@ async function fixture() {
     save: (value: unknown) => { state = structuredClone(value); },
     prepare: async () => {
       preparations++;
+      const executablePath = join(root, pluginDirectory, "csvzall-bin", version, "win32-x64-test", "csvzall.exe");
+      await mkdir(dirname(executablePath), { recursive: true });
+      await writeFile(executablePath, "fixture helper");
       await duringPrepare();
-      return { executablePath: join(root, pluginDirectory, "csvzall-bin", version, "win32-x64-test", "csvzall.exe"),
-        version, executableSha256: "a".repeat(64) };
+      return { executablePath, version, executableSha256: "a".repeat(64) };
     } };
   return { root, pluginDirectory, options, service: new AgentIntegration(options),
     get preparations() { return preparations; },
@@ -152,7 +155,68 @@ test("prepared bundled helper runs help and SQL without PATH, Node or Python", a
     assert.match(result, /total\r?\n5/);
     assert.equal(await readFile(csv, "utf8"), "item,amount\nA,2\nB,3\n");
     await rm(executable);
-    await assert.rejects(service.testConnection(), /ENOENT/);
+    await assert.rejects(service.testConnection(), /Enable or repair/);
+  } finally { await f.cleanup(); }
+});
+
+test("a missing helper or stopped integration cannot publish a locator", async () => {
+  for (const stop of [false, true]) {
+    const f = await fixture();
+    try {
+      f.duringPrepare(async () => {
+        if (stop) f.service.stop();
+        else await rm(join(f.root, f.pluginDirectory, "csvzall-bin/1.0.0/win32-x64-test/csvzall.exe"));
+      });
+      await assert.rejects(f.service.enable(), stop ? /unloaded/ : /Enable or repair/);
+      await assert.rejects(stat(join(f.root, f.pluginDirectory, "agent-runtime/win32-x64.json")), { code: "ENOENT" });
+      await assert.rejects(stat(join(f.root, SKILL_PATHS[0]!)), { code: "ENOENT" });
+    } finally { await f.cleanup(); }
+  }
+});
+
+test("disable persists when the lock parent becomes unavailable", async () => {
+  const f = await fixture();
+  try {
+    await f.service.enable();
+    const agents = join(f.root, ".agents");
+    await rename(agents, `${agents}-moved`);
+    await writeFile(agents, "occupies the lock parent");
+    await assert.rejects(f.service.remove(), /non-directory/);
+    const preparations = f.preparations;
+    await f.service.refresh();
+    assert.equal(f.preparations, preparations);
+    await rm(agents);
+    await rename(`${agents}-moved`, agents);
+    await f.service.remove();
+    await assert.rejects(stat(join(f.root, SKILL_PATHS[0]!)), { code: "ENOENT" });
+  } finally { await f.cleanup(); }
+});
+
+test("removal retains ownership when a skill directory has moved offline", async () => {
+  const f = await fixture();
+  try {
+    await f.service.enable();
+    const skill = join(f.root, SKILL_PATHS[1]!);
+    const parent = dirname(skill);
+    await rename(parent, `${parent}-moved`);
+    await assert.rejects(f.service.remove(), /files preserved/);
+    await rename(`${parent}-moved`, parent);
+    await f.service.remove();
+    await assert.rejects(stat(skill), { code: "ENOENT" });
+  } finally { await f.cleanup(); }
+});
+
+test("a setup that loses its lock preserves the replacement and stops before publication", async () => {
+  const f = await fixture();
+  try {
+    const lock = join(f.root, ".agents/csvzall-install.lock");
+    f.duringPrepare(async () => {
+      await rename(lock, `${lock}.old`);
+      await writeFile(lock, "replacement lock", { flag: "wx" });
+    });
+    await assert.rejects(f.service.enable(), /lost its setup lock/);
+    assert.equal(await readFile(lock, "utf8"), "replacement lock");
+    await assert.rejects(stat(join(f.root, f.pluginDirectory, "agent-runtime/win32-x64.json")), { code: "ENOENT" });
   } finally { await f.cleanup(); }
 });
 
@@ -177,6 +241,8 @@ test("desktop agent integration emits CommonJS Node imports", () => {
 
 test("agent refresh reuses viewer preparation while explicit repair preserves custom settings", async () => {
   let extractions = 0;
+  let helperPresent = true;
+  let holdProbe = false, releaseProbe = () => {};
   const compiled = await build({ entryPoints: ['src/installer/InstallerService.ts'], bundle: true,
     platform: 'node', format: 'cjs', write: false, external: ['obsidian'], plugins: [{
       name: 'fake-payload-extraction', setup(builder) {
@@ -187,8 +253,14 @@ test("agent refresh reuses viewer preparation while explicit repair preserves cu
   runInNewContext(compiled.outputFiles[0]!.text, { module, exports: module.exports, console,
     require(name: string) {
       if (name === 'obsidian') return { Platform: { isDesktopApp: true }, Notice: class {} };
+      if (name === 'fs/promises') return { lstat: async () => {
+        if (holdProbe) await new Promise<void>(resolve => { releaseProbe = resolve; });
+        if (!helperPresent) throw Object.assign(new Error('Missing helper'), { code: 'ENOENT' });
+        return { isFile: () => true };
+      } };
       if (name === 'fake-extraction') return { installBundledCsvzall: async () => {
         extractions++;
+        helperPresent = true;
         return { executablePath: '/vault/.obsidian/plugins/csvzall/csvzall-bin/helper', tagName: '1.0.0', assetName: 'test', changed: true, sha256: 'test' };
       } };
       throw new Error(`Unexpected import ${name}`);
@@ -201,11 +273,21 @@ test("agent refresh reuses viewer preparation while explicit repair preserves cu
   await service.ensureBundledCsvzall();
   await service.prepareBundledHelper(false);
   assert.equal(extractions, 1, 'startup agent refresh reuses completed verification');
+  helperPresent = false;
+  await service.prepareBundledHelper(false);
+  assert.equal(extractions, 2, 'automatic refresh repairs a deleted executable');
   settings.csvzallExecutableMode = 'custom'; settings.csvzallPath = '/custom/csvzall';
   const before = structuredClone(settings);
   const saved = saves;
   await Promise.all([service.prepareBundledHelper(true), service.prepareBundledHelper(true)]);
-  assert.equal(extractions, 2, 'concurrent preparation shares the in-flight extraction');
+  assert.equal(extractions, 3, 'concurrent preparation shares the in-flight extraction');
+  holdProbe = true;
+  const automatic = service.prepareBundledHelper(false);
+  await service.prepareBundledHelper(true);
+  assert.equal(extractions, 4, 'explicit repair performs full verification during a cache probe');
+  releaseProbe();
+  await automatic;
+  assert.equal(extractions, 4);
   assert.deepEqual(settings, before);
   assert.equal(saves, saved, 'agent preparation never saves viewer settings');
 });

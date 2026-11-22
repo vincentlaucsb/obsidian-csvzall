@@ -116,9 +116,9 @@ The generated bundle must pass the no-Node scan in
 `tests/wasm-viewer-assets.test.ts` aligned with required source capabilities and
 the imported JavaScript digest.
 
-The distribution embeds WASM assets into `main.js` and writes them into the
-plugin directory at runtime because Community installs only `main.js`,
-`manifest.json`, and optional `styles.css`. Lite runs on desktop and mobile
+The distribution embeds WASM assets into `main.js`. Lite opens the viewer directly
+from those bundled bytes using Blob URLs. Community installs only
+`main.js`, `manifest.json`, and optional `styles.css`. Lite runs on desktop and mobile
 without a native helper; enable only one CSV handler on desktop and do not
 restore a mobile-only load gate. Its independent metadata and release version
 live in `mobile-src/manifest.json`. Preserve `csvzall Lite` branding, the

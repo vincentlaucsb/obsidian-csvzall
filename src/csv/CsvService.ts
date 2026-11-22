@@ -6,10 +6,7 @@ import type { CsvzallPluginSettings } from "../settings/settings.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
 import { isCsv, nextCsvPath } from "./csvFiles.js";
 import type { ExportReflection } from "../exports/ExportReflection.js";
-
-function isMissingExecutableError(message: string): boolean {
-  return /\bENOENT\b/i.test(message) || /not found/i.test(message);
-}
+import { hasErrorCode } from "../utils/errors.js";
 
 export class CsvService {
   constructor(
@@ -26,25 +23,22 @@ export class CsvService {
   }
 
   async openCsv(file: TFile): Promise<void> {
-    if (this.getSettings().openInObsidian) {
-      const leaf = this.app.workspace.getLeaf(true);
-      await leaf.openFile(file);
-      this.app.workspace.setActiveLeaf(leaf, { focus: true });
-      return;
+    try {
+      if (this.getSettings().openInObsidian || !Platform.isDesktopApp) {
+        const leaf = this.app.workspace.getLeaf(true);
+        await leaf.openFile(file);
+        this.app.workspace.setActiveLeaf(leaf, { focus: true });
+      } else {
+        await this.openCsvInBrowser(file);
+      }
+    } catch (error) {
+      await this.reportOpenFailure(file, error);
     }
-
-    await this.openCsvInBrowser(file);
   }
 
   async openCsvInLeaf(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
     if (!Platform.isDesktopApp) {
       await this.openCsvInWasmViewer(file, leaf);
-      return;
-    }
-
-    const fullPath = this.filesystem.getFullPath(file);
-    if (!fullPath) {
-      this.processService.showLeafErrorText(leaf, "csvzall can only open files from a local filesystem vault.");
       return;
     }
 
@@ -54,12 +48,17 @@ export class CsvService {
       view.file === file && file.path === path;
     if (!isCurrent()) return;
     const mayContinue = this.reflection ? this.processService.viewerContinuation(leaf) : () => true;
+    let launchingHelper = false;
     try {
+      const fullPath = this.filesystem.getFullPath(file);
+      if (!fullPath) throw new Error("csvzall can only open files from a local filesystem vault.");
       if (this.reflection) {
         await this.reflection.prepareViewer(file.path);
         if (!isCurrent() || !mayContinue()) return;
       }
+      launchingHelper = true;
       const server = await this.processService.startViewer(fullPath, leaf);
+      launchingHelper = false;
       if (isCurrent() && !server.stopping && leaf.view instanceof CsvzallTableView) {
         leaf.view.showViewer(file.basename, server.url);
         this.processService.bindLeafToServer(leaf, server);
@@ -71,14 +70,12 @@ export class CsvService {
     } catch (error) {
       if (error instanceof ViewerStartupCancelledError || !isCurrent()) return;
       const message = error instanceof Error ? error.message : String(error);
-      if (leaf.view instanceof CsvzallTableView && isMissingExecutableError(message)) {
+      if (launchingHelper && leaf.view instanceof CsvzallTableView && (hasErrorCode(error, "ENOENT") || hasErrorCode(error, "ENOTDIR"))) {
         leaf.view.showMissingCsvzall(message);
       } else {
         this.processService.showLeafErrorText(leaf, message);
       }
-      new Notice(`csvzall failed to open CSV: ${message}`);
-      await this.eventLog.record("error", `Failed to open CSV ${file.path}`, message);
-      console.error("csvzall failed to open CSV", error);
+      await this.reportOpenFailure(file, error);
     }
   }
 
@@ -96,29 +93,18 @@ export class CsvService {
   }
 
   private async openCsvInBrowser(file: TFile): Promise<void> {
-    if (!Platform.isDesktopApp) {
-      const leaf = this.app.workspace.getLeaf(true);
-      await leaf.openFile(file);
-      this.app.workspace.setActiveLeaf(leaf, { focus: true });
-      return;
-    }
-
     const fullPath = this.filesystem.getFullPath(file);
-    if (!fullPath) {
-      new Notice("csvzall can only open files from a local filesystem vault.");
-      return;
-    }
+    if (!fullPath) throw new Error("csvzall can only open files from a local filesystem vault.");
+    if (this.reflection) await this.reflection.prepareViewer(file.path);
+    const server = await this.processService.startViewer(fullPath);
+    window.open(server.url, "_blank", "noopener");
+  }
 
-    try {
-      if (this.reflection) await this.reflection.prepareViewer(file.path);
-      const server = await this.processService.startViewer(fullPath);
-      window.open(server.url, "_blank", "noopener");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      new Notice(`csvzall failed to open CSV: ${message}`);
-      await this.eventLog.record("error", `Failed to open CSV ${file.path}`, message);
-      console.error("csvzall failed to open CSV", error);
-    }
+  private async reportOpenFailure(file: TFile, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    new Notice(`csvzall failed to open CSV: ${message}`);
+    await this.eventLog.record("error", `Failed to open CSV ${file.path}`, message);
+    console.error("csvzall failed to open CSV", error);
   }
 
   private async openCsvInWasmViewer(file: TFile, leaf: WorkspaceLeaf): Promise<void> {

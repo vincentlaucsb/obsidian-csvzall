@@ -342,15 +342,33 @@ async function device(initial: string | null = config(), clock = 1000, data: Jso
   const store = new PluginDataStore({ load: async () => structuredClone(disk), save: async value => { disk = structuredClone(value); } });
   await store.initialize();
   const errors: unknown[] = [];
-  const reflection = new ExportReflection({ adapter, store, localDirectory: ".obsidian/plugins/csvzall/export-sync-local",
+  const options = { adapter, store, localDirectory: ".obsidian/plugins/csvzall/export-sync-local",
     folders: () => { scans.folders++; return [...directories].filter(path => !path.startsWith(".")); }, report: error => errors.push(error), changed: () => { changes++; }, now: () => now,
-    directFolders, deferDiscovery, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } });
+    directFolders, deferDiscovery, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } } satisfies ConstructorParameters<typeof ExportReflection>[0];
+  const reflection = new ExportReflection(options);
   await reflection.initialize();
   return { files, times, adapter, store, reflection, errors, directories, references, scan, scans,
+    async restartReflection() { const restarted = new ExportReflection(options); await restarted.initialize(); return restarted; },
     get data() { return structuredClone(disk); }, set data(value: JsonObject) { disk = structuredClone(value); },
     edit(text: string, time: number) { files.set(path, text); times.set(path, time); now = time; },
     get writes() { return writes; }, get changes() { return changes; } };
 }
+
+test("the journal retains completed config moves for ordered note rebasing after reload", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  await a.reflection.renamed("Data", "Moved", true);
+  await a.reflection.renamed("Moved", "Final", true);
+  const restarted = await a.restartReflection();
+  await restarted.reconcile();
+  const first = restarted.nextNoteRename()!;
+  assert.equal(first.to, "Moved");
+  await restarted.reconcile();
+  await restarted.finishNoteRename(first);
+  const second = restarted.nextNoteRename()!;
+  assert.equal(second.to, "Final");
+  await restarted.finishNoteRename(second);
+  assert.equal((await a.restartReflection()).hasNoteRenames, false);
+});
 
 test('hidden SQL pause changes notify consumers even when the CLI file needs no write', async () => {
   const a = await device(null);
@@ -560,6 +578,55 @@ test("folder renames preserve unobserved CLI edits, publish tombstones and rebas
   assert.equal(JSON.parse(a.files.get(next)!).charts[0].options.label, "offline-edit-before-rename");
   const b = await device(null, 9000, a.data); b.directories.add("Moved"); b.directories.add("Project");
   await b.reflection.reconcile(); assert.equal(b.files.has(old), false); assert.ok(b.files.has(next));
+});
+
+test("a destination flickering into view during rename keeps the source revisions until retry", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const old = "Project/.csvzall/charts.json", next = "Moved/.csvzall/charts.json";
+  const content = { custom: { keep: true }, charts: [{ id: "one", input: "data.csv", type: "bar" }] };
+  a.directories.add("Project"); a.files.set(old, JSON.stringify(content));
+  await a.reflection.reconcile();
+  a.directories.delete("Project"); a.directories.add("Moved"); a.files.delete(old);
+  const exists = a.adapter.exists, read = a.adapter.read;
+  let probes = 0;
+  a.adapter.exists = async file => file === next ? ++probes > 1 : exists(file);
+  a.adapter.read = async file => {
+    if (file === next) throw Object.assign(new Error("Destination disappeared"), { code: "ENOENT" });
+    return await read(file);
+  };
+  await assert.rejects(a.reflection.renamed("Project", "Moved"), /appeared while handling rename/);
+  assert.ok(a.reflection.pending);
+  assert.equal([...readRevisions(a.data).values()].some(entry => entry.path === old && entry.value === null), false);
+  a.adapter.exists = exists; a.adapter.read = read;
+  await a.reflection.reconcile();
+  assert.deepEqual(JSON.parse(a.files.get(next)!), content);
+  assert.equal(a.files.has(old), false);
+});
+
+test("rename retries import late destination-only charts and metadata before retiring the source", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const old = "Project/.csvzall/charts.json", next = "Moved/.csvzall/charts.json";
+  const original = { id: "one", input: "data.csv", type: "bar" };
+  const extra = { id: "two", input: "other.csv", type: "bar" };
+  a.directories.add("Project"); a.files.set(old, JSON.stringify({ charts: [original] }));
+  await a.reflection.reconcile();
+  a.directories.delete("Project"); a.directories.add("Moved"); a.files.delete(old);
+  const exists = a.adapter.exists;
+  let probes = 0;
+  a.adapter.exists = async file => {
+    if (file === next && ++probes === 2) {
+      a.files.set(next, JSON.stringify({ charts: [original, extra], added: { keep: true } }));
+      a.times.set(next, 2000);
+    }
+    return await exists(file);
+  };
+  await assert.rejects(a.reflection.renamed("Project", "Moved"), /appeared while handling rename/);
+  assert.deepEqual(JSON.parse(a.files.get(next)!).charts, [original, extra]);
+  await a.reflection.reconcile();
+  const moved = JSON.parse(a.files.get(next)!);
+  assert.deepEqual(moved.added, { keep: true });
+  assert.deepEqual(moved.charts.map((entry: { id: string }) => entry.id).sort(), ["one", "two"]);
+  assert.equal(a.files.has(old), false);
 });
 
 test("a materialization error blocks only its scope and preserves unrelated generation", async () => {

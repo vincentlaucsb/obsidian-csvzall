@@ -42,11 +42,17 @@ export class CsvzallSettingTab extends PluginSettingTab {
     this.update();
   }
 
+  private async persistSettings(): Promise<void> {
+    try { await this.services.saveSettings(); }
+    catch (error) { new Notice(`Could not save csvzall settings: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
   private async useBundledHelper(): Promise<void> {
     if (this.installing) return;
     this.installing = true;
     this.refreshSettings();
     try { await this.services.installer.installDesktopCsvzall(); }
+    catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
     finally {
       this.installing = false;
       this.refreshSettings();
@@ -92,7 +98,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
                 }
                 nextSettings.csvzallPath = nextPath;
                 nextSettings.csvzallExecutableMode = "custom";
-                await this.services.saveSettings();
+                await this.persistSettings();
               }),
           );
         },
@@ -120,7 +126,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
               .setValue(settings.openInObsidian)
               .onChange(async (value) => {
                 this.services.getSettings().openInObsidian = value;
-                await this.services.saveSettings();
+                await this.persistSettings();
               }),
           );
         },
@@ -151,7 +157,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
                 const parsed = Number.parseInt(value, 10);
                 this.services.getSettings().startupTimeoutMs =
                   Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.startupTimeoutMs;
-                await this.services.saveSettings();
+                await this.persistSettings();
               }),
           );
         },
@@ -188,8 +194,9 @@ export class CsvzallSettingTab extends PluginSettingTab {
               .setButtonText("Clear")
               .setDisabled(settings.eventLog.length === 0)
               .onClick(async () => {
-                await this.services.eventLog.clear();
-                this.refreshSettings();
+                try { await this.services.eventLog.clear(); }
+                catch (error) { new Notice(`Could not clear the csvzall log: ${error instanceof Error ? error.message : String(error)}`); }
+                finally { this.refreshSettings(); }
               }),
           );
           this.renderLog(setting.descEl);

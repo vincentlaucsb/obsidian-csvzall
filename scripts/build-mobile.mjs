@@ -22,7 +22,7 @@ const generatedAssetsPath = resolve(mobileSrcDir, "wasmViewerAssets.generated.ts
 const distDir = resolve(repoRoot, ".mobile-dist");
 const sourceSnapshotFiles = [
   "mobile-src/main.ts",
-  "mobile-src/WasmAssetInstaller.ts",
+  "mobile-src/WasmViewerSession.ts",
   "mobile-src/EmbeddedViewerDocument.ts",
   "mobile-src/manifest.json",
   "src/csv/csvFiles.ts",

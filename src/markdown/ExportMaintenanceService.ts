@@ -29,6 +29,7 @@ export class ExportMaintenanceService {
   private readonly exportListeners = new Set<() => void>();
   private readonly deletingSources = new Set<string>();
   private readonly incompleteNotes = new Set<string>();
+  private sourceRenameWork?: Promise<void>;
   private discovery: VaultExportDiscovery | null = null;
   private discoveryRevision = -1;
   private readonly discoveredNotes = new Map<string, TFile>();
@@ -67,9 +68,20 @@ export class ExportMaintenanceService {
     this.discovery = null; this.referencesComplete = false;
     this.discoveredNotes.clear(); this.discoveredReferences.clear(); this.cachedReferences = null;
     await this.withWrite(async () => {
-      await this.reflection?.renamed(oldPath, path);
-      await this.renameSource(oldPath, path);
+      if (!this.reflection) { await this.renameSource(oldPath, path); return; }
+      await this.reflection.renamed(oldPath, path, true);
+      await this.finishNextSourceRename();
     });
+  }
+
+  private async finishNextSourceRename(): Promise<void> {
+    if (this.sourceRenameWork) return this.sourceRenameWork;
+    const reflection = this.reflection;
+    const move = reflection?.nextNoteRename();
+    if (this.signal.aborted || !reflection || !move) return;
+    this.sourceRenameWork = this.renameSource(move.from, move.to)
+      .then(() => reflection.finishNoteRename(move)).finally(() => { this.sourceRenameWork = undefined; });
+    await this.sourceRenameWork;
   }
 
   async migrationReferences(): Promise<ReferenceScan> {
@@ -196,7 +208,7 @@ export class ExportMaintenanceService {
   private async renameSource(oldPath: string, path: string): Promise<void> {
     this.refresh.sourceChanged(oldPath);
     const files = this.app.vault.getMarkdownFiles();
-    for (const file of files) for (const table of findManagedTables(await this.notes.textFor(file))) {
+    for (const file of files) for (const table of await this.readTablesForRename(file)) {
       if (!table.fence) continue;
       try {
         const noteMoved = file.path === path || file.path.startsWith(`${path}/`);
@@ -215,7 +227,7 @@ export class ExportMaintenanceService {
     for (const file of files) {
       if (file.path !== path && !file.path.startsWith(`${path}/`)) continue;
       const previousPath = oldPath + file.path.slice(path.length);
-      for (const table of findManagedTables(await this.notes.textFor(file))) {
+      for (const table of await this.readTablesForRename(file)) {
         if (table.recipe || table.fence) continue;
         try {
           const previous = this.refresh.bindingsFor(file)?.find(binding => binding.recipe.id === table.id) ?? await this.resolveDefinition(previousPath, table.id);
@@ -237,6 +249,14 @@ export class ExportMaintenanceService {
     }
   }
 
+  private async readTablesForRename(file: TFile): Promise<ManagedTable[]> {
+    try { return findManagedTables(await this.notes.textFor(file)); }
+    catch (error) {
+      if (this.app.vault.getAbstractFileByPath(file.path) === file) await this.report(file, error);
+      return [];
+    }
+  }
+
   async listExports(folders: string[]): Promise<SavedExport[]> {
     await this.pruneDeadExports(folders);
     return this.definitions.list(folders);
@@ -250,6 +270,12 @@ export class ExportMaintenanceService {
   pruneDeadExports(folders?: string[]): Promise<void> {
     const work = this.pruning.catch(() => {}).then(async () => {
       if (this.signal.aborted || this.pendingWrites) return;
+      // Reflection can finish a deferred config move on a later poll. Resume
+      // its note rewrite before treating old references as dead.
+      if (this.reflection?.hasNoteRenames) {
+        await this.withWrite(() => this.finishNextSourceRename());
+        if (this.reflection.hasNoteRenames) return;
+      }
       for (const path of this.incompleteNotes) {
         if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return;
         this.incompleteNotes.delete(path);
