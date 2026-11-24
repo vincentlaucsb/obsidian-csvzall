@@ -52,6 +52,13 @@
     "typescript-eslint": "8.70.0"
   },
   "dependencies": {
+    "@codemirror/commands": "6.8.1",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6",
+    "@lezer/highlight": "1.2.5",
+    "@lezer/json": "1.0.1",
     "commonmark": "^0.31.2",
     "obsidian": "1.13.1"
   },

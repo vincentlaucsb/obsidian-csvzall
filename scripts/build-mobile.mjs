@@ -1,4 +1,5 @@
 import esbuild from "esbuild";
+import { jsonEditorNotices } from "./json-editor-notices.mjs";
 import { runTypeSafetyChecks } from "./lint.mjs";
 import { mobileDemoFiles } from "./setup-mobile-demo-vault.mjs";
 import {
@@ -29,6 +30,8 @@ const sourceSnapshotFiles = [
   "src/utils/paths.ts",
   "src/obsidian/pluginPaths.ts",
   "src/views/CsvzallTableView.ts",
+  "src/views/JsonFileView.ts",
+  "src/views/jsonDocument.ts",
   "src/views/UnsavedChangesModal.ts",
   "src/views/viewTypes.ts",
   "src/views/viewerTheme.ts",
@@ -152,6 +155,7 @@ Obsidian users find the plugin and helps me gauge demand for continued support.
 - Opens \`.csv\` files in an Obsidian pane on desktop and mobile.
 - Loads the bundled WASM viewer without installing a desktop helper binary.
 - Supports basic CSV editing and saving back to the vault file.
+- Edits JSON with syntax highlighting and displays compact files with indentation while preserving their compact format on save.
 - Includes an Obsidian-style mobile toolbar button for opening navigation.
 
 ## Requirements
@@ -391,7 +395,7 @@ async function buildMobileBundle() {
 
   await esbuild.build({
     banner: {
-      js: banner,
+      js: `${banner}\n/*!\n${jsonEditorNotices}\n*/`,
     },
     entryPoints: [resolve(mobileSrcDir, "main.ts")],
     bundle: true,

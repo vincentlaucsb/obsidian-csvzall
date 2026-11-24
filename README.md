@@ -19,6 +19,7 @@ For mobile devices, install
 ## What It Does
 
 - Opens `.csv` and `.tsv` files in an editable table view inside Obsidian.
+- Opens JSON with syntax highlighting. Compact JSON expands for reading and saves compactly after edits.
 - Adds command palette and context-menu actions to create and open CSV/TSV files and configure, refresh, or delete exports.
 - Generates exports that update automatically when the source file changes:
   - Bar, line, and heatmap charts.

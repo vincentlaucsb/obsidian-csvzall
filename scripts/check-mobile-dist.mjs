@@ -27,6 +27,8 @@ const requiredFiles = [
   "src/utils/paths.ts",
   "src/obsidian/pluginPaths.ts",
   "src/views/CsvzallTableView.ts",
+  "src/views/JsonFileView.ts",
+  "src/views/jsonDocument.ts",
   "src/views/UnsavedChangesModal.ts",
   "src/views/viewTypes.ts",
   "src/viewerHelpers.ts",
@@ -103,6 +105,7 @@ for (const pattern of bannedPatterns) {
 
 for (const marker of [
   "csvzall-mobile-embedded-wasm-viewer-v1",
+  "JSON editor",
   "csvzall-wasm-viewer",
   "wasm-viewer/index.html",
   "csvzall-mobile-view",

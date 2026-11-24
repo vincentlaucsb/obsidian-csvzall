@@ -31,7 +31,7 @@ function fixture(isMobileApp) {
   }
   const module = { exports: {} };
   runInNewContext(compiled, { module, exports: module.exports, console, require(name) {
-    if (name === "obsidian") return { Plugin, TFile, TFolder, Platform: { isMobileApp }, Notice: class { constructor(message) { notices.push(message); } } };
+    if (name === "obsidian") return { Plugin, TFile, TFolder, FileView: class {}, Platform: { isMobileApp }, Notice: class { constructor(message) { notices.push(message); } } };
     if (name.endsWith("CsvzallTableView.js")) return { CsvzallTableView: TableView };
     if (name.endsWith("WasmViewerSession.js")) return {
       embeddedWasmViewerUrl() { return "resource://bundled-viewer/index.html"; },
@@ -61,6 +61,8 @@ for (const mobile of [false, true]) test(`bundled plugin registers and opens the
   assert.equal(f.views[0][0], "csvzall-mobile-view");
   assert.deepEqual(Array.from(f.extensions[0][0]), ["csv", "tsv"]);
   assert.equal(f.extensions[0][1], "csvzall-mobile-view");
+  assert.deepEqual(Array.from(f.extensions[1][0]), ["json"]);
+  assert.equal(f.extensions[1][1], "csvzall-mobile-json");
   assert.equal(f.commands.length, 2);
   assert.equal(f.menus.length, 1);
   const file = new f.TFile("Tasks.csv");
@@ -116,7 +118,7 @@ test("the bundled viewer loads when the plugin filesystem is unavailable", async
   Object.defineProperty(f.plugin.app.vault, "adapter", { get() { throw new Error("Plugin filesystem is unavailable"); } });
   await f.plugin.onload();
   await f.plugin.openCsvInLeaf(new f.TFile("Tasks.csv"), f.leaf);
-  assert.equal(f.views.length, 1);
+  assert.equal(f.views.length, 2);
   assert.equal(f.leaf.view.error, undefined);
   assert.equal(f.leaf.view.shown[1], "resource://bundled-viewer/index.html");
 });

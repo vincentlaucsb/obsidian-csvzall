@@ -1,4 +1,5 @@
 import { Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import { registerJsonView } from "./views/JsonFileView.js";
 import { ChartService } from "./charts/ChartService.js";
 import { registerChartCommands } from "./commands/registerChartCommands.js";
 import { registerCsvCommands } from "./commands/registerCsvCommands.js";
@@ -57,6 +58,7 @@ export default class CsvzallPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
     this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL);
+    registerJsonView(this);
     this.registerView(VIEW_TYPE_CSVZALL_EXPORTS, (leaf) => new CsvzallExportsView(leaf, this.exportSettings));
     this.addSettingTab(new CsvzallSettingTab(this, {
       getSettings: () => this.settings,
