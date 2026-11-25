@@ -24,8 +24,15 @@ export function buildIdentity(root = repositoryRoot) {
       !commitPattern.test(config.sourceCommit) || !/^\d+\.\d+\.\d+$/.test(config.version)) throw new Error("Invalid native helper source pin.");
   if (![config.tools.cmake, config.tools.ninja, config.tools.python, config.tools.esbuild].every(version => /^\d+\.\d+(?:\.\d+)?$/.test(version))) throw new Error("Native build tools must be pinned.");
   if (Object.keys(config.targets).sort().join() !== Object.keys(bundledTargets).sort().join()) throw new Error("Expected all three native helper targets.");
+  const { packages } = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
+  const esbuildIntegrity = {};
   for (const [target, settings] of Object.entries(config.targets)) {
     if (`${settings.platform}-${settings.arch}` !== target || typeof settings.runner !== "string") throw new Error(`Invalid helper target ${target}.`);
+    const binary = packages[`node_modules/@esbuild/${target}`];
+    if (binary?.version !== config.tools.esbuild || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(binary.integrity)) {
+      throw new Error(`package-lock.json must pin @esbuild/${target} at ${config.tools.esbuild} with a SHA-512 integrity hash.`);
+    }
+    esbuildIntegrity[target] = binary.integrity;
   }
   for (const dependency of Object.values(config.dependencies)) {
     if (!commitPattern.test(dependency.commit) || !/^[\w.-]+\/[\w.-]+$/.test(dependency.repository) ||
@@ -43,7 +50,7 @@ export function buildIdentity(root = repositoryRoot) {
     }
   }
   const recipes = Object.fromEntries(recipeFiles.map(file => [file, sha256(readFileSync(join(root, file), "utf8").replace(/\r\n/g, "\n"))]));
-  return { config, key: sha256(JSON.stringify(canonical({ config, recipes }))) };
+  return { config, key: sha256(JSON.stringify(canonical({ config, recipes, esbuildIntegrity }))) };
 }
 
 export function assertPreparedManifest(directory = join(repositoryRoot, "native-binaries"), identity = buildIdentity()) {

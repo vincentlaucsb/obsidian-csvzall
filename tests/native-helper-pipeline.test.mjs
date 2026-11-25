@@ -13,7 +13,7 @@ const json = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2)
 function fixture(t) {
   const root = mkdtempSync(join(parent, "native-pipeline-"));
   t.after(() => { assert.equal(dirname(root), parent); rmSync(root, { recursive: true, force: true }); });
-  for (const file of ["native-binaries/build.json", ...recipeFiles]) {
+  for (const file of ["native-binaries/build.json", "package-lock.json", ...recipeFiles]) {
     mkdirSync(dirname(join(root, file)), { recursive: true });
     copyFileSync(join(repositoryRoot, file), join(root, file));
   }
@@ -101,6 +101,30 @@ test("helper reuse survives plugin-only edits but invalidates source, dependenci
     assert.notEqual(buildIdentity(root).key, initial.key, recipe);
     assert.equal(releasePlan(root).reuse, false);
     writeFileSync(path, original);
+  }
+});
+
+test("helper reuse follows the locked esbuild binaries for the three build targets", t => {
+  const root = fixture(t), initial = buildIdentity(root);
+  collectHelpers(results(root, initial), join(root, "native-binaries"), initial);
+  const path = join(root, "package-lock.json");
+  const lock = JSON.parse(readFileSync(path, "utf8"));
+  lock.packages["node_modules/commonmark"].version = "99.0.0";
+  json(path, lock);
+  assert.equal(releasePlan(root).reuse, true);
+
+  for (const target of Object.keys(bundledTargets)) {
+    const name = `node_modules/@esbuild/${target}`;
+    const original = lock.packages[name];
+    lock.packages[name] = { ...original, integrity: "sha512-" + Buffer.alloc(64).toString("base64") };
+    json(path, lock);
+    assert.equal(releasePlan(root).reuse, false, target);
+    for (const invalid of [undefined, { ...original, version: "0.0.1" }, { ...original, integrity: "" }]) {
+      lock.packages[name] = invalid;
+      json(path, lock);
+      assert.throws(() => releasePlan(root), /package-lock.json must pin/);
+    }
+    lock.packages[name] = original;
   }
 });
 

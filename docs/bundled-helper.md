@@ -19,7 +19,7 @@ build identity remain independent of this JavaScript payload representation.
 ## Source and build identity
 
 `native-binaries/build.json` pins the csvzall source commit and version, every
-compiled dependency's commit, CMake/Python/Ninja versions, target runner labels,
+compiled dependency's commit, CMake/Python/Ninja/esbuild versions, target runner labels,
 and CMake configuration. Windows x64, macOS arm64, and Linux x64 are supported.
 The macOS recipe targets macOS 13.3 or later. Linux uses GCC 14; Windows uses
 Visual Studio 2022. The build verifies all three upstream source version markers.
@@ -31,8 +31,9 @@ NEW so older dependency projects, including SQLiteCpp and SQLite, also use IPO.
 These settings are part of the build identity and require a newly prepared
 helper snapshot before release.
 
-The build identity hashes that complete configuration and the native workflow,
-build, packaging, and verification scripts. It excludes plugin-only changes.
+The build identity hashes that configuration, the native workflow and recipe scripts,
+and the SHA-512 integrity pins for each target's esbuild binary in `package-lock.json`.
+Plugin-only dependency updates keep the existing helper cache.
 The dependency checkouts are explicit, and CMake's FetchContent network fallback
 is disabled. The native recipe passes the host esbuild executable installed by
 `npm ci` to CMake and checks its version against the build pin. Obsidian builds disable PostgreSQL, keychain, and compressed input;
