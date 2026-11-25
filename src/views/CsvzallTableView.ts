@@ -1,9 +1,11 @@
-import { FileView, Notice, Platform, setIcon, TFile, type OpenViewState, type ViewState, type WorkspaceLeaf } from "obsidian";
+import { FileView, Notice, Platform, setIcon, TFile, type OpenViewState, type ViewState, type Workspace, type WorkspaceLeaf } from "obsidian";
 import { ViewerFrameSession } from "./ViewerFrameSession.js";
 import { UnsavedChangesModal } from "./UnsavedChangesModal.js";
 import { VIEW_TYPE_CSVZALL } from "./viewTypes.js";
+import type { AutosaveMode } from "../settings/autosave.js";
 
 export interface CsvzallTableViewOwner {
+  settings: { autosaveMode: AutosaveMode };
   handleLeafClosed(leaf: WorkspaceLeaf): void;
   openCsvInLeaf(file: TFile, leaf: WorkspaceLeaf): Promise<void>;
   installCsvzallFromView(file: TFile, leaf: WorkspaceLeaf): Promise<boolean>;
@@ -16,6 +18,12 @@ type ProtectedLeaf = WorkspaceLeaf & {
   openFile: (file: TFile, openState?: OpenViewState) => Promise<void>;
   setViewState: (viewState: ViewState, eState?: unknown) => Promise<void>;
 };
+
+export function updateViewerAutosave(workspace: Workspace, viewType: string): void {
+  for (const leaf of workspace.getLeavesOfType(viewType)) {
+    if (leaf.view instanceof CsvzallTableView) leaf.view.updateAutosave();
+  }
+}
 
 export class CsvzallTableView extends FileView {
   private titleText = "csvzall";
@@ -66,13 +74,14 @@ export class CsvzallTableView extends FileView {
   }
 
   async onOpen(): Promise<void> {
-    if (this.viewType === "csvzall-json") {
-      this.registerEvent(this.app.vault.on("modify", file => {
-        if (file === this.file) this.frame?.contentWindow?.postMessage({
+    this.registerEvent(this.app.vault.on("modify", file => {
+      if (file !== this.file) return;
+      if (this.viewType === "csvzall-json") {
+        this.frame?.contentWindow?.postMessage({
           source: "obsidian-csvzall", type: "json-file-modified", version: 1,
         }, "*");
-      }));
-    }
+      } else this.session?.fileModified();
+    }));
     this.patchLeafNavigation();
     this.render();
   }
@@ -245,7 +254,9 @@ export class CsvzallTableView extends FileView {
     const insertQuery = this.owner.insertQueryIntoNote?.bind(this.owner);
     this.session = new ViewerFrameSession(frame, {
       app: this.app,
+      file,
       wasmFile,
+      autosaveMode: () => this.owner.settings.autosaveMode,
       sourceIsCurrent: () => this.file === file && (!!wasmFile || file?.path === this.desktopSourcePath),
       isDirty: () => this.dirty,
       setDirty: dirty => this.setDirty(dirty),
@@ -257,6 +268,8 @@ export class CsvzallTableView extends FileView {
     });
     this.session.open(containerEl, this.url);
   }
+
+  updateAutosave(): void { this.session?.updateAutosave(); }
 
   private renderMobileToolbar(containerEl: HTMLElement): void {
     if (!Platform.isMobileApp) {

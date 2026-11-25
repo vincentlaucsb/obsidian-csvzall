@@ -27,6 +27,19 @@ only after a successful clean response. WASM advertises
 edits. The Obsidian confirmation uses the standard title and `mod-cta` Save
 button, preserving the user's theme and accent.
 
+Hosted CSV and TSV panes receive the AutoSave policy through the version 1
+`csv-autosave-ready` handshake. A `csv-file-modified` event identifies a
+change to the open file. Native checks the indexed source. Lite receives a
+byte snapshot with a revision that its next save must echo. A successful
+save advances the revision. Both the switch and the Save button use this
+path. Lite checks UTF-8 content inside Obsidian's atomic text operation.
+For other encodings it orders binary writes across panes and compares the
+original bytes immediately before calling the vault binary writer.
+
+When the file changes during editing, the recovery action creates a sibling
+JSON file containing local editing operations. The viewer keeps the edits
+open until the user chooses to discard them and reload.
+
 ## Prerequisites
 
 Install this repository's dependencies with `npm ci`. In the csvzall checkout,

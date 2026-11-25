@@ -153,6 +153,7 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - Upstream `src/viewer_wasm/web/src/host-bridge.js` `HOST_CAPABILITIES` and `scripts/wasm-viewer-contract.mjs` `requiredHostCapabilities`: versioned viewer capabilities, including compact layout, shared shell, editing, and host save protocols. Packaging requires the corresponding source implementation.
 - `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
 - `src/views/ViewerFrameSession.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
+- `src/views/ViewerFrameSession.ts` and the upstream viewer use version 1 of `csv-autosave-ready`, `csv-autosave-settings`, `csv-file-modified`, and `csv-recovery-request` / `csv-recovery-result`. Lite advertises `csvzall-host-csv-autosave-v1` and includes the session's source revision in open, reload, and save messages.
 - `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.
 - `src/views/ViewerFrameSession.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
 

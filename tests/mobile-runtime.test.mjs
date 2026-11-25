@@ -23,6 +23,9 @@ function fixture(isMobileApp) {
   }
   const leaf = { view: new TableView(), async setViewState(state) { opened.push(state); } };
   class Plugin {
+    async loadData() { return this.data ?? null; }
+    async saveData(value) { this.data = value; }
+    addSettingTab(tab) { this.tab = tab; }
     registerView(...args) { views.push(args); }
     registerExtensions(...args) { extensions.push(args); }
     addRibbonIcon() {}
@@ -31,8 +34,8 @@ function fixture(isMobileApp) {
   }
   const module = { exports: {} };
   runInNewContext(compiled, { module, exports: module.exports, console, require(name) {
-    if (name === "obsidian") return { Plugin, TFile, TFolder, FileView: class {}, Platform: { isMobileApp }, Notice: class { constructor(message) { notices.push(message); } } };
-    if (name.endsWith("CsvzallTableView.js")) return { CsvzallTableView: TableView };
+    if (name === "obsidian") return { Plugin, TFile, TFolder, PluginSettingTab: class {}, FileView: class {}, Platform: { isMobileApp }, Notice: class { constructor(message) { notices.push(message); } } };
+    if (name.endsWith("CsvzallTableView.js")) return { CsvzallTableView: TableView, updateViewerAutosave() {} };
     if (name.endsWith("WasmViewerSession.js")) return {
       embeddedWasmViewerUrl() { return "resource://bundled-viewer/index.html"; },
       releaseEmbeddedWasmViewer() { releases++; },
@@ -77,6 +80,19 @@ for (const mobile of [false, true]) test(`bundled plugin registers and opens the
   assert.equal(f.opened[0].state.file, "Tasks.csv");
   f.plugin.onunload();
   assert.equal(f.releases(), 1);
+});
+
+test("Lite loads and saves all three AutoSave modes and retains unrelated plugin data", async () => {
+  const f = fixture(true);
+  f.plugin.data = { custom: 42, autosaveMode: "old-value" };
+  await f.plugin.onload();
+  assert.equal(f.plugin.settings.autosaveMode, "off");
+  for (const mode of ["hidden", "on", "off"]) {
+    await f.plugin.setAutosaveMode(mode);
+    assert.equal(f.plugin.settings.autosaveMode, mode);
+    assert.equal(f.plugin.data.autosaveMode, mode);
+    assert.equal(f.plugin.data.custom, 42);
+  }
 });
 
 test("desktop New CSV keeps its folder, avoids filename collisions, and opens the bundled view", async () => {

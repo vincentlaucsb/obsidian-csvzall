@@ -33,7 +33,7 @@ function fixture(isMobileApp = false) {
   }
   const exports: any = {};
   const module = {exports};
-  runInNewContext(compiled, {module, exports, ArrayBuffer, Uint8Array, AbortController,
+  runInNewContext(compiled, {module, exports, ArrayBuffer, Uint8Array, TextDecoder, AbortController, crypto,
     window: {setTimeout, clearTimeout, requestAnimationFrame: () => 1, cancelAnimationFrame() {},
       addEventListener(type: string, listener: (event: unknown) => void) { if (type === "message") listeners.add(listener); },
       removeEventListener(type: string, listener: (event: unknown) => void) { if (type === "message") listeners.delete(listener); }},
@@ -42,11 +42,14 @@ function fixture(isMobileApp = false) {
       Modal: class {}, setIcon() {}, Platform: {isMobileApp, isDesktopApp: !isMobileApp},
       Notice: class {constructor(message: string) {notices.push(message);}},
     })});
-  const owner = {handleLeafClosed() {}, async openCsvInLeaf() {}, async installCsvzallFromView() {return false;}};
+  const owner = {settings: {autosaveMode: "off"}, handleLeafClosed() {}, async openCsvInLeaf() {}, async installCsvzallFromView() {return false;}};
   const view = new module.exports.CsvzallTableView({}, owner);
   const file = {path: "a.csv", name: "a.csv", basename: "a", extension: "csv"};
+  let disk = "";
   const vault = {
-    readBinary: async () => new ArrayBuffer(0),
+    getAbstractFileByPath: (path: string) => path === file.path ? file : null,
+    readBinary: async () => new TextEncoder().encode(disk).buffer as ArrayBuffer,
+    process: async (_file: unknown, update: (disk: string) => string) => { disk = update(disk); return disk; },
     modifyBinary: async (_file: unknown, _buffer: ArrayBuffer) => {},
   };
   view.app = {vault};
@@ -58,7 +61,12 @@ function fixture(isMobileApp = false) {
   renders = 0;
   const message = (event: unknown) => { for (const listen of listeners) listen(event); };
   const send = (data: unknown, from = view.frame) => message({source: from.contentWindow, data});
-  return {view, file, frame, messages, notices, owner, vault, mount, message, send,
+  async function ready() {
+    send({source: "csvzall-wasm-viewer", type: "ready"});
+    await view.saveQueue;
+  }
+  return {view, file, frame, messages, notices, owner, vault, mount, message, send, ready,
+    setDisk: (text: string) => { disk = text; }, disk: () => disk,
     install: () => installClick(), renders: () => renders};
 }
 function nextTurn() { return new Promise<void>(resolve => setImmediate(resolve)); }
@@ -113,9 +121,10 @@ test('failed saves prevent insertion and closing the frame aborts an open destin
 
 test("failed WASM save keeps the editor and unsaved edits available", async () => {
   const f = fixture();
+  await f.ready(); f.messages.length = 0;
   f.view.dirty = true;
-  f.vault.modifyBinary = async () => {throw new Error("disk full");};
-  f.send({source: "csvzall-wasm-viewer", type: "save-file", buffer: new ArrayBuffer(1), requestId: 7});
+  f.vault.process = async () => {throw new Error("disk full");};
+  f.send({source: "csvzall-wasm-viewer", type: "save-file", buffer: new ArrayBuffer(1), revision: 1, requestId: 7});
   await f.view.saveQueue;
   assert.equal(f.view.frame, f.frame);
   assert.equal(f.view.dirty, true);
@@ -127,8 +136,9 @@ test("failed WASM save keeps the editor and unsaved edits available", async () =
 
 test("save completion acknowledges without clearing newer dirty edits", async () => {
   const f = fixture(); const write = deferred<void>();
-  f.vault.modifyBinary = () => write.promise;
-  f.send({source: "csvzall-wasm-viewer", type: "save-file", buffer: new ArrayBuffer(1), requestId: 8});
+  await f.ready(); f.messages.length = 0;
+  f.vault.process = async (_file, update) => { const next = update(""); await write.promise; return next; };
+  f.send({source: "csvzall-wasm-viewer", type: "save-file", buffer: new ArrayBuffer(1), revision: 1, requestId: 8});
   await Promise.resolve();
   f.view.dirty = true;
   write.resolve(); await f.view.saveQueue;
@@ -138,27 +148,32 @@ test("save completion acknowledges without clearing newer dirty edits", async ()
 
 test("a replacement frame waits for an in-flight WASM write and only receives its own acknowledgment", async () => {
   const f = fixture();
+  await f.ready(); f.messages.length = 0;
   const first = deferred<void>();
   const writes: number[] = [];
-  f.vault.modifyBinary = async (file, buffer) => {
+  f.vault.process = async (file, update) => {
     assert.equal(file, f.file);
-    const value = new Uint8Array(buffer)[0]!;
+    const output = update(f.disk());
+    const value = output.charCodeAt(0);
     writes.push(value);
     if (value === 1) await first.promise;
+    f.setDisk(output); return output;
   };
   const save = (value: number) => f.send({source: "csvzall-wasm-viewer", type: "save-file",
-    buffer: Uint8Array.of(value).buffer, requestId: value});
+    buffer: Uint8Array.of(value).buffer, revision: 1, requestId: value});
   save(1);
   await nextTurn();
   save(2); // Waiting on the old frame when it is disposed.
   f.mount();
-  save(3);
+  const ready = f.ready();
   await nextTurn();
   assert.deepEqual(writes, [1]);
   first.resolve();
+  await ready;
+  save(3);
   await f.view.saveQueue;
   assert.deepEqual(writes, [1, 3]);
-  assert.deepEqual(f.messages.map(message => message.requestId), [3]);
+  assert.deepEqual(f.messages.filter(message => message.type === "save-result").map(message => message.requestId), [3]);
 });
 
 test("replacing a frame rejects its pending host save and ignores its late reply", async () => {
@@ -182,6 +197,7 @@ test("late WASM load failure cannot replace a newer viewer", async () => {
   f.vault.readBinary = () => read.promise;
   f.mount();
   f.send({source: "csvzall-wasm-viewer", type: "ready"});
+  await nextTurn();
   f.view.showViewer("replacement", "http://localhost/");
   read.reject(new Error("late read failed")); await nextTurn();
   assert.equal(f.renders(), 2);
@@ -193,9 +209,92 @@ test("late WASM read success cannot post an old file to a replacement frame", as
   f.vault.readBinary = () => read.promise;
   f.mount();
   f.send({source: "csvzall-wasm-viewer", type: "ready"});
+  await nextTurn();
   f.view.showViewer("replacement", "http://localhost/");
   read.resolve(new ArrayBuffer(1)); await nextTurn();
   assert.equal(f.messages.length, 0);
+});
+
+test("Lite rejects a concurrent change at the vault write, reloads its bytes and ignores self writes", async () => {
+  const f = fixture();
+  const original = "\uFEFFid\tname\r\n1\tFirst\r\n";
+  const external = original.replace("First", "Other");
+  const edited = original.replace("First", "Local");
+  f.setDisk(original);
+  await f.ready();
+  const save = (revision: number) => f.send({source: "csvzall-wasm-viewer", type: "save-file",
+    buffer: new TextEncoder().encode(edited).buffer, revision, requestId: 6});
+  const process = f.vault.process;
+  f.vault.process = async (file, update) => { f.setDisk(external); return process(file, update); };
+  save(1);
+  await nextTurn();
+  assert.equal(f.disk(), external);
+  assert.equal(f.messages.find(m => m.type === "save-result").conflict, true);
+  assert.equal(f.messages.at(-1).type, "csv-file-modified");
+  assert.equal(f.messages.at(-1).revision, 2);
+  assert.equal(new TextDecoder("utf-8", {ignoreBOM: true}).decode(f.messages.at(-1).buffer), external);
+  f.vault.process = process;
+  save(1);
+  await nextTurn();
+  assert.equal(f.disk(), external);
+  save(2);
+  await nextTurn();
+  assert.equal(f.disk(), edited);
+  assert.equal(f.messages.at(-1).revision, 3);
+  f.view.session.fileModified();
+  await f.view.saveQueue;
+  assert.equal(f.messages.at(-1).type, "save-result");
+});
+
+test("the ready handshake and global settings changes deliver the AutoSave policy to each viewer", () => {
+  for (const source of ["csvzall-viewer", "csvzall-wasm-viewer"]) {
+    const f = fixture();
+    if (source === "csvzall-viewer") f.view.showViewer("a", "http://localhost/");
+    f.send({source, type: "csv-autosave-ready", version: 1});
+    for (const mode of ["off", "on", "hidden"]) {
+      f.owner.settings.autosaveMode = mode;
+      f.view.updateAutosave();
+      assert.equal(f.messages.at(-1).type, "csv-autosave-settings");
+      assert.equal(f.messages.at(-1).enabled, mode === "on");
+      assert.equal(f.messages.at(-1).visible, mode !== "hidden");
+    }
+  }
+});
+
+test("Lite compares original bytes before a non-UTF-8 save and preserves the output encoding", async () => {
+  const f = fixture();
+  let disk = Uint8Array.of(0x61, 0x0a, 0xe9, 0x0a);
+  f.vault.readBinary = async () => disk.slice().buffer;
+  f.vault.modifyBinary = async (_file, buffer) => { disk = new Uint8Array(buffer); };
+  await f.ready();
+  const save = (revision: number) => f.send({ source: "csvzall-wasm-viewer", type: "save-file",
+    buffer: Uint8Array.of(0x61, 0x0a, 0xe8, 0x0a).buffer, requestId: 1, revision });
+  disk[2] = 0xea;
+  save(1);
+  await nextTurn();
+  assert.equal(disk[2], 0xea);
+  assert.equal(f.messages.find(m => m.type === "save-result").conflict, true);
+  save(2);
+  await nextTurn();
+  assert.deepEqual([...disk], [0x61, 0x0a, 0xe8, 0x0a]);
+  assert.equal(f.messages.at(-1).success, true);
+});
+
+test("recovery creates a separate file and acknowledges the path without clearing local edits", async () => {
+  const f = fixture();
+  let persisted = "";
+  Object.assign(f.vault, {create: async (path: string, value: string) => {
+    persisted = value; return {path};
+  }});
+  f.view.dirty = true;
+  f.send({source: "csvzall-wasm-viewer", type: "csv-autosave-ready", version: 1});
+  f.send({source: "csvzall-wasm-viewer", type: "csv-recovery-request", version: 1, requestId: 7, edits: "[]"});
+  await nextTurn();
+  assert.equal(persisted, "[]");
+  assert.equal(f.messages.at(-1).type, "csv-recovery-result");
+  assert.equal(f.messages.at(-1).requestId, 7);
+  assert.match(f.messages.at(-1).path, /^a\.csv\.edits-.+\.json$/);
+  assert.equal(f.view.dirty, true);
 });
 
 test("WASM open messages carry versioned mobile UI policy without changing CSV bytes", async () => {

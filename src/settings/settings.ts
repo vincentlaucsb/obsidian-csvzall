@@ -1,4 +1,5 @@
 import validateObject, { isString, optional } from "../utils/validateObject.js";
+import { autosaveMode, type AutosaveMode } from "./autosave.js";
 
 export const MAX_EVENT_LOG_ENTRIES = 100;
 
@@ -16,6 +17,7 @@ export interface CsvzallPluginSettings {
   installedCsvzallAssetName: string;
   csvzallLastUpdateCheckAt: string;
   openInObsidian: boolean;
+  autosaveMode: AutosaveMode;
   exportSyntax: 'comment' | 'code';
   startupTimeoutMs: number;
   eventLog: CsvzallEventLogEntry[];
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   installedCsvzallAssetName: "",
   csvzallLastUpdateCheckAt: "",
   openInObsidian: true,
+  autosaveMode: "off",
   exportSyntax: 'comment',
   startupTimeoutMs: 10000,
   eventLog: [],
@@ -52,6 +55,7 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
   return {
     ...DEFAULT_SETTINGS,
     csvzallExecutableMode: mode,
+    autosaveMode: autosaveMode(candidate.autosaveMode),
     csvzallPath: typeof candidate.csvzallPath === "string" && candidate.csvzallPath.trim() ?
       candidate.csvzallPath : DEFAULT_SETTINGS.csvzallPath,
     openInObsidian: typeof candidate.openInObsidian === "boolean" ?

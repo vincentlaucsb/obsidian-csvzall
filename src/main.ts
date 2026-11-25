@@ -14,7 +14,8 @@ import {
   DEFAULT_SETTINGS,
   type CsvzallPluginSettings,
 } from "./settings/settings.js";
-import { CsvzallTableView } from "./views/CsvzallTableView.js";
+import { CsvzallTableView, updateViewerAutosave } from "./views/CsvzallTableView.js";
+import type { AutosaveMode } from "./settings/autosave.js";
 import { VIEW_TYPE_CSVZALL, VIEW_TYPE_CSVZALL_EXPORTS } from "./views/viewTypes.js";
 import { CsvzallExportsView, openExportsView } from "./views/ExportsView.js";
 import { registerExportCommands } from "./commands/registerExportCommands.js";
@@ -47,9 +48,11 @@ export default class CsvzallPlugin extends Plugin {
   private reflection!: ExportReflection;
   private readonly reflectionErrors = new SessionErrors();
   private exportsReady = false;
+  private appliedAutosave: AutosaveMode = "off";
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.appliedAutosave = this.settings.autosaveMode;
     this.createServices();
     await this.reflection.initialize();
     await this.installerService.ensureBundledCsvzall();
@@ -109,11 +112,19 @@ export default class CsvzallPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.dataStore.saveSettings(this.settings);
+    this.applyAutosave();
+  }
+
+  private applyAutosave(): void {
+    if (this.appliedAutosave === this.settings.autosaveMode) return;
+    this.appliedAutosave = this.settings.autosaveMode;
+    updateViewerAutosave(this.app.workspace, VIEW_TYPE_CSVZALL);
   }
 
   async onExternalSettingsChange(): Promise<void> {
     try {
       await this.dataStore.externalSettings(this.settings);
+      this.applyAutosave();
       await this.reflection.reconcile();
     } catch (error) { this.reportReflectionError(error); }
   }

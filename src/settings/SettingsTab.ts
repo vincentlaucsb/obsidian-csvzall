@@ -5,6 +5,7 @@ import type { InstallerService } from "../installer/InstallerService.js";
 import type { AgentIntegrationService } from "../agents/AgentIntegrationService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
+import { autosaveSetting } from "./autosave.js";
 import type { ExportSettingsService } from "./ExportSettingsService.js";
 import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledPayloads.generated.js";
 import { loadExports } from "./exportList.js";
@@ -76,6 +77,10 @@ export class CsvzallSettingTab extends PluginSettingTab {
     const usesBundled = settings.csvzallExecutableMode === "bundled";
     const csvzallInstallDesc = `csvzall ${BUNDLED_CSVZALL_VERSION} is included with this plugin and updates with it. Restore its files or switch back from a custom executable without downloading anything.`;
     return [
+      autosaveSetting(settings.autosaveMode, async mode => {
+        this.services.getSettings().autosaveMode = mode;
+        await this.persistSettings();
+      }),
       {
         name: "Custom executable path",
         desc: "Leave empty to use the bundled helper. Set an absolute path or a command on PATH to manage csvzall independently.",

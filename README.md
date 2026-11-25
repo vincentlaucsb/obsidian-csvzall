@@ -19,6 +19,8 @@ For mobile devices, install
 ## What It Does
 
 - Opens `.csv` and `.tsv` files in an editable table view inside Obsidian.
+- Refreshes the table when the file changes elsewhere and shows when those changes loaded. If you have edits in progress, the viewer keeps them open.
+- Turn on **AutoSave** in a pane to save after editing. Plugin settings let you start with it on, start with it off, or hide the switch.
 - Opens JSON in the native csvzall editor on desktop and a helper-free editor in Lite, both with syntax highlighting. Compact JSON expands for reading and saves compactly after edits.
 - Adds command palette and context-menu actions to create and open CSV/TSV files and configure, refresh, or delete exports.
 - Generates exports that update automatically when the source file changes:
