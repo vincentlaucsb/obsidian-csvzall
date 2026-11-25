@@ -231,3 +231,36 @@
   max-width: 100%;
   height: auto;
 }
+
+.csvzall-json-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.csvzall-json-view .topbar,
+.csvzall-json-view .edit-toolbar,
+.csvzall-json-view .edit-toolbar button {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.csvzall-json-view .topbar {
+  flex: 0 0 auto;
+  gap: var(--size-4-2);
+  padding-block: var(--size-4-1);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.csvzall-json-view .file-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csvzall-json-view > .cm-editor {
+  flex: 1;
+  min-height: 0;
+}

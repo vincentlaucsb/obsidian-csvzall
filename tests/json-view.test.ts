@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
-import { EditorState } from "@codemirror/state";
+import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { ViewUpdate } from "@codemirror/view";
 
 const requireModule = createRequire(import.meta.url);
@@ -16,7 +16,7 @@ function fixture() {
   let disk = '{"n":1}';
   const writes: string[] = [], copies: string[] = [], notices: string[] = [];
   const recovery = { value: "", select() {} };
-  let save!: () => void, modify!: (file: unknown) => void;
+  let modify!: (file: unknown) => void;
   let atWrite = async () => {};
   let editor!: TestEditor;
   // A real EditorState drives the text and undo history without mounting DOM.
@@ -25,6 +25,14 @@ function fixture() {
     constructor(public options: { state: EditorState }) { editor = this; }
     get state() { return this.options.state; }
     setState(state: EditorState) { this.options.state = state; }
+    dispatch(spec: TransactionSpec) {
+      const transaction = this.state.update(spec);
+      this.setState(transaction.state);
+      for (const listener of this.state.facet(cm.EditorView.updateListener)) {
+        listener({ docChanged: transaction.docChanged, state: this.state } as ViewUpdate);
+      }
+    }
+    focus() {}
     destroy() {}
   }
   Object.assign(TestEditor, { lineWrapping: cm.EditorView.lineWrapping, contentAttributes: cm.EditorView.contentAttributes,
@@ -37,16 +45,19 @@ function fixture() {
     create: async (_path: string, text: string) => { copies.push(text); },
     on: (_event: string, callback: typeof modify) => { modify = callback; },
   };
+  const ownerDocument = { createElement: () => Object.assign(new EventTarget(), {
+    append() {}, replaceChildren() {}, createSpan() { return {}; },
+  }) };
   class FileView {
     app = { vault };
     file = file;
-    addAction(_icon: string, _title: string, callback: typeof save) { save = callback; }
+    contentEl = { ownerDocument, addClass() {}, append() {} };
     registerEvent() {}
   }
   const module = { exports: {} as any };
   runInNewContext(bundle, { module, exports: module.exports, crypto: { randomUUID: () => "test" },
     console: { warn() {}, error() {} }, require: (name: string) => {
-      if (name === "obsidian") return { FileView, Notice: class { constructor(text: string) { notices.push(text); } },
+      if (name === "obsidian") return { FileView, setIcon() {}, Notice: class { constructor(text: string) { notices.push(text); } },
         Modal: class { titleEl = { setText() {} }; contentEl = { createEl() { return recovery; } }; open() {} } };
       if (name === "@codemirror/view") return { ...cm, EditorView: TestEditor };
       return requireModule(name);
@@ -57,13 +68,11 @@ function fixture() {
   function edit(before: string, after: string) {
     const from = editor.state.doc.toString().indexOf(before);
     assert.ok(from >= 0);
-    const transaction = editor.state.update({ changes: { from, to: from + before.length, insert: after } });
-    editor.setState(transaction.state);
-    for (const listener of editor.state.facet(cm.EditorView.updateListener)) {
-      listener({ docChanged: true, state: editor.state } as ViewUpdate);
-    }
+    editor.dispatch({ changes: { from, to: from + before.length, insert: after } });
   }
-  return { view, file, edit, save, writes, copies, notices, vault, recovery, text: () => editor.state.doc.toString(),
+  const save = () => view.toolbar.save.dispatchEvent(new Event("click"));
+  const reset = () => view.toolbar.reset.dispatchEvent(new Event("click"));
+  return { view, file, edit, save, reset, writes, copies, notices, vault, recovery, text: () => editor.state.doc.toString(),
     open: async () => { await view.onOpen(); await view.onLoadFile(file); },
     external: (text: string) => { disk = text; modify(file); },
     atWrite: (callback: () => Promise<void>) => { atWrite = callback; },
@@ -78,6 +87,29 @@ test("open, edit and revert produce zero writes; clean panes follow external cha
   assert.match(f.text(), /"n": 3/);
   await f.view.onUnloadFile(f.file);
   assert.deepEqual(f.writes, []);
+});
+
+test("toolbar reset returns to the last save and reads newer vault edits without a write", async () => {
+  const f = fixture(); await f.open();
+  const { save, reset, filename } = f.view.toolbar;
+  assert.equal(filename.textContent, f.file.name);
+  assert.ok(save.disabled && reset.disabled);
+  let resume!: () => void;
+  const blockedRead = new Promise<void>(resolve => { resume = resolve; });
+  const read = f.vault.read;
+  f.vault.read = async () => { await blockedRead; return read(); };
+  f.external('{"n":1}'); await f.settle();
+  f.edit("1", "2");
+  assert.ok(!save.disabled && !reset.disabled);
+  f.save();
+  assert.ok(save.disabled && reset.disabled, "save queued behind a refresh");
+  f.reset(); resume(); await f.settle();
+  f.edit("2", "3"); f.reset(); await f.settle();
+  assert.match(f.text(), /"n": 2/);
+  f.edit("2", "4"); f.external('{"other":5}'); f.reset(); await f.settle();
+  assert.match(f.text(), /"other": 5/);
+  assert.ok(save.disabled && reset.disabled);
+  assert.deepEqual(f.writes, ['{"n":2}']);
 });
 
 test("edits made during an explicit save are flushed on close", async () => {

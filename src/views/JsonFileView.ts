@@ -5,7 +5,8 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { json } from "@codemirror/lang-json";
 import { tags } from "@lezer/highlight";
-import { FileView, Modal, Notice, type Plugin, type TFile, type WorkspaceLeaf } from "obsidian";
+import { FileView, Modal, Notice, setIcon, type Plugin, type TFile, type WorkspaceLeaf } from "obsidian";
+import { createEditorToolbar } from "./editorToolbar.mjs";
 import { JsonDocument } from "./jsonDocument.mjs";
 
 const highlighting = HighlightStyle.define([
@@ -22,22 +23,49 @@ interface OpenJson {
   editor: EditorView;
   saved: Text;
   refreshNeeded: boolean;
+  pendingSaves: number;
 }
 
 class JsonFileView extends FileView {
   private current: OpenJson | null = null;
   private pending: Promise<void> = Promise.resolve();
   private loadGeneration = 0;
+  private readonly toolbar: ReturnType<typeof createEditorToolbar>;
 
   constructor(leaf: WorkspaceLeaf, private readonly type: string) {
     super(leaf);
-    this.addAction("save", "Save JSON", () => this.requestSave());
+    this.toolbar = createEditorToolbar(this.contentEl.ownerDocument, (button, icon, label) => {
+      button.replaceChildren();
+      setIcon(button.createSpan({ attr: { "aria-hidden": "true" } }), icon === "restore" ? "rotate-ccw" : "save");
+      button.createSpan({ text: label });
+    }, "span");
+    this.contentEl.addClass("csvzall-json-view");
+    this.contentEl.append(this.toolbar.header);
+    this.toolbar.save.addEventListener("click", () => this.requestSave());
+    this.toolbar.reset.addEventListener("click", () => {
+      const current = this.current;
+      if (!current || this.toolbar.reset.disabled) return;
+      current.refreshNeeded = true;
+      current.editor.dispatch({ changes: { from: 0, to: current.editor.state.doc.length, insert: current.saved } });
+      current.editor.focus();
+    });
   }
 
   getViewType(): string { return this.type; }
   getIcon(): string { return "braces"; }
   getDisplayText(): string { return this.file?.name ?? "JSON"; }
   canAcceptExtension(extension: string): boolean { return extension.toLowerCase() === "json"; }
+
+  onRename(file: TFile): Promise<void> {
+    if (this.current?.file === file) this.toolbar.filename.textContent = file.name;
+    return super.onRename(file);
+  }
+
+  private updateActions(): void {
+    const current = this.current;
+    const disabled = !current || current.pendingSaves > 0 || current.editor.dom.inert || current.editor.state.doc.eq(current.saved);
+    this.toolbar.reset.disabled = this.toolbar.save.disabled = disabled;
+  }
 
   protected async onOpen(): Promise<void> {
     this.registerEvent(this.app.vault.on("modify", file => {
@@ -65,6 +93,7 @@ class JsonFileView extends FileView {
         EditorView.contentAttributes.of({ "aria-label": "JSON editor", spellcheck: "false" }),
         EditorView.updateListener.of(update => {
           const current = this.current;
+          if (update.docChanged) this.updateActions();
           if (current?.refreshNeeded && update.docChanged && update.state.doc.eq(current.saved)) {
             void this.enqueue(() => this.refresh(current)).catch(reportError);
           }
@@ -81,7 +110,9 @@ class JsonFileView extends FileView {
       const format = new JsonDocument(source);
       const state = this.state(format);
       const editor = new EditorView({ state, parent: this.contentEl });
-      this.current = { file, source, format, editor, saved: state.doc, refreshNeeded: false };
+      this.current = { file, source, format, editor, saved: state.doc, refreshNeeded: false, pendingSaves: 0 };
+      this.toolbar.filename.textContent = file.name;
+      this.updateActions();
     });
   }
 
@@ -97,11 +128,18 @@ class JsonFileView extends FileView {
     const state = this.state(format);
     current.editor.setState(state);
     Object.assign(current, { source, format, saved: state.doc });
+    this.updateActions();
   }
 
   private requestSave(): void {
     const current = this.current;
-    if (current) void this.enqueue(() => this.saveDocument(current)).catch(reportError);
+    if (!current) return;
+    current.pendingSaves++;
+    this.updateActions();
+    void this.enqueue(() => this.saveDocument(current)).finally(() => {
+      current.pendingSaves--;
+      this.updateActions();
+    }).catch(reportError);
   }
 
   private async saveDocument(current: OpenJson): Promise<void> {
@@ -123,6 +161,7 @@ class JsonFileView extends FileView {
     const current = this.current;
     if (!current || file !== current.file) return;
     current.editor.dom.inert = true;
+    this.updateActions();
     try {
       await this.enqueue(() => this.saveDocument(current));
     } catch (error) {

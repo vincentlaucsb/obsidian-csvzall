@@ -34,6 +34,8 @@ const sourceSnapshotFiles = [
   "src/views/ViewerFrameSession.ts",
   "src/views/viewerDocumentation.ts",
   "src/views/JsonFileView.ts",
+  "src/views/editorToolbar.mjs",
+  "src/views/editorToolbar.d.mts",
   "src/views/registerJsonExtension.ts",
   "src/views/jsonDocument.mjs",
   "src/views/jsonDocument.d.mts",
