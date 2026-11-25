@@ -1,6 +1,6 @@
 # Viewer theme synchronization
 
-The plugin sends a versioned `postMessage` to each CSV iframe:
+The plugin sends a versioned `postMessage` to each CSV or JSON viewer iframe:
 
 ```js
 { source: "obsidian-csvzall", type: "theme", version: 1,
@@ -9,6 +9,7 @@ The plugin sends a versioned `postMessage` to each CSV iframe:
 
 The allowlist in `src/views/viewerTheme.ts` contains the supported Obsidian
 variables. Values are read from the view's computed style in its own window.
+Both editors use Obsidian’s `--font-preferred-size` for document content, including the mobile accessibility text scale, and fall back to `--font-text-size`. CSV cells use the text font and JSON code uses the monospace font. The toolbar, status text and spacing use Obsidian’s UI sizes. Relative lengths are resolved in the host before crossing the iframe boundary. Lite’s in-process JSON editor consumes the host variables directly.
 Updates follow Obsidian's `css-change` event and changes to the document/body
 theme classes or inline variables. Notifications are coalesced to one animation
 frame and unchanged values are suppressed. Loading/reloading an iframe or its

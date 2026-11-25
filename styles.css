@@ -322,3 +322,8 @@ body.is-mobile .csvzall-json-view .autosave-control:not([hidden]) {
   flex: 1;
   min-height: 0;
 }
+
+.csvzall-json-view .cm-scroller {
+  font-size: var(--font-preferred-size, var(--font-text-size));
+  font-family: var(--font-monospace);
+}
