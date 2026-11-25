@@ -80,6 +80,9 @@ if (!stylesheetBundle) {
 if (!stylesheetBundle.includes("--csvzall-shared-shell-v1")) {
   fail("packaged viewer is missing the shared upstream shell stylesheet");
 }
+if (!stylesheetBundle.includes("--csvzall-content-size") || !stylesheetBundle.includes("--font-preferred-size")) {
+  fail("packaged viewer is missing the shared editor typography");
+}
 for (const feature of ["/api/sql-query", "heatmap-chart-form", "SQLite query", "chart-dirty-dialog"]) {
   if (indexBundle.includes(feature)) fail(`Lite must not bundle optional native feature: ${feature}`);
 }

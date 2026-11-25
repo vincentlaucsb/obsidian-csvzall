@@ -6,11 +6,11 @@ test("theme snapshots include only supported, computed, nonempty variables", () 
   const message = viewerThemeMessage({ getPropertyValue: name => name === "--text-normal" ? " rgb(1, 2, 3) " : "" }, true, assert.fail);
   assert.deepEqual(message, { source: "obsidian-csvzall", type: "theme", version: 1, mode: "dark", variables: { "--text-normal": "rgb(1, 2, 3)" } });
   assert.equal(viewerThemeMessage({ getPropertyValue: () => "" }, false, assert.fail).mode, "light");
-  const sizes: Record<string, string> = { "--font-text-size": "1.25rem", "--size-4-2": "8px" };
+  const sizes: Record<string, string> = { "--font-text-size": "16px", "--font-preferred-size": "calc(16px * 1.5)", "--size-4-2": "8px" };
   assert.deepEqual(viewerThemeMessage({ getPropertyValue: name => sizes[name] ?? "" }, false, value => {
-    assert.equal(value, "1.25rem");
-    return "20px";
-  }).variables, { "--font-text-size": "20px", "--size-4-2": "8px" });
+    assert.equal(value, "calc(16px * 1.5)");
+    return "24px";
+  }).variables, { "--font-text-size": "16px", "--font-preferred-size": "24px", "--size-4-2": "8px" });
 });
 
 test("theme sync coalesces changes, resends on readiness/reload, uses the view window, and disposes", () => {

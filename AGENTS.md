@@ -82,9 +82,8 @@ global preflight checks for unrelated operations.
 
 ## Viewer theme design
 
-- Keep shared CSV and JSON typography, spacing and palette defaults in upstream `src/viewer/modules/viewer-theme.css`. Use Obsidian’s text size for grid cells and JSON code, its monospace font for code, and its UI sizes and spacing for shared controls. Lite’s in-process JSON editor inherits the same Obsidian variables directly.
+- Keep shared CSV and JSON typography, spacing and palette defaults in upstream `src/viewer/modules/viewer-theme.css`. Use Obsidian’s preferred text size, including its accessibility scale, for grid cells and JSON code. Use its monospace font for code and its UI sizes and spacing for shared controls. Lite’s in-process JSON editor inherits the same Obsidian variables directly.
 - Send resolved host lengths through the existing theme bridge and keep its sender and receiver allowlists aligned. Check actual cell and code text at the same size in standalone and hosted viewers, and verify that changing the host text size preserves focus and unsaved edits.
-
 - Matching the active Obsidian theme is intentional product behavior for embedded desktop and mobile CSV viewers. Use the host's resolved colors, accent, interface font, and light/dark mode, including live theme changes, rather than choosing the OS palette independently.
 - Keep synchronization in the versioned iframe `postMessage` bridge. Do not persist theme snapshots in the vault or require a CLI restart, CSV reload, or grid recreation for theme changes. Preserve active edits and focus.
 - Keep standalone csvzall usable without Obsidian: without a host theme message, the viewer retains its system-aware appearance. Maintain this fallback in the shared upstream receiver and packaged WASM assets.
