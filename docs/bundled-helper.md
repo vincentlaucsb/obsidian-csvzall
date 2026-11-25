@@ -46,7 +46,8 @@ is not required to ship a new plugin helper; its source commit must be published
 1. Commit the desired `build.json` pins and set the intended desktop plugin
    version in its normal metadata files. Keep the helper's version consistent
    with the three version markers at the pinned upstream source commit.
-2. Run **Release** manually on that branch with operation **prepare** and the
+2. For an existing feature PR, the **helpers** operation produces the verified three-platform snapshot as a workflow artifact for import on that PR.
+   For a release preparation PR, run **Release** manually on that branch with operation **prepare** and the
    intended plugin version as **tag**. This calls `build-obsidian-helpers.yml`.
 3. If the committed helper manifest has the same build identity, every archive
    checksum is verified and all three native jobs are skipped. Otherwise each

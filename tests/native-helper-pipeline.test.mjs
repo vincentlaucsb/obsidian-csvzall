@@ -186,7 +186,7 @@ test("publication verifies the frozen snapshot and preparation owns exact-key bu
   const workflow = readFileSync(".github/workflows/release.yml", "utf8");
   const native = readFileSync(".github/workflows/build-obsidian-helpers.yml", "utf8");
   const publication = workflow.slice(workflow.indexOf("\n  release:"));
-  assert.match(workflow, /options: \[prepare, publish\]/);
+  assert.match(workflow, /options: \[prepare, helpers, publish\]/);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/build-obsidian-helpers.yml/);
   assert.match(publication, /native-helper-contract.mjs verify/);
   assert.doesNotMatch(publication, /build-native-helper|git push|native-helper-contract.mjs install/);

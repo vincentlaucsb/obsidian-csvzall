@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "vincentlaucsb/csvzall",
-  "sourceCommit": "32bba033b18e1e631530586702fd2ab8b4abaed9",
+  "sourceCommit": "51a11d71dbfe128bc38bd8d950f72d3088562cf0",
   "version": "0.10.0",
   "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12" },
   "cmakeOptions": {

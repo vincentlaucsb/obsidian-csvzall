@@ -9,7 +9,7 @@ on:
       operation:
         description: Prepare verified binaries in a release PR, or publish an existing tag
         type: choice
-        options: [prepare, publish]
+        options: [prepare, helpers, publish]
         default: prepare
         required: true
       tag:
@@ -26,12 +26,13 @@ concurrency:
 
 jobs:
   prepare-helpers:
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && (inputs.operation == 'prepare' || inputs.operation == 'helpers')
     uses: ./.github/workflows/build-obsidian-helpers.yml
     with:
       tag: ${{ inputs.tag }}
 
   prepare:
+    if: inputs.operation == 'prepare'
     needs: prepare-helpers
     runs-on: ubuntu-24.04
     permissions:
