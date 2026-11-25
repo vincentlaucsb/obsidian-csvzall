@@ -1,3 +1,5 @@
+import validateObject, { isString, optional } from "../utils/validateObject.js";
+
 export const MAX_EVENT_LOG_ENTRIES = 100;
 
 export interface CsvzallEventLogEntry {
@@ -18,6 +20,13 @@ export interface CsvzallPluginSettings {
   startupTimeoutMs: number;
   eventLog: CsvzallEventLogEntry[];
 }
+
+const isEventLogEntry = validateObject<CsvzallEventLogEntry>({
+  timestamp: isString,
+  level: value => value === "info" || value === "error",
+  message: isString,
+  detail: optional(isString),
+});
 
 export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   csvzallPath: "csvzall",
@@ -61,9 +70,7 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
       candidate.csvzallLastUpdateCheckAt :
       DEFAULT_SETTINGS.csvzallLastUpdateCheckAt,
     eventLog: Array.isArray(candidate.eventLog) ? candidate.eventLog
-      .filter((entry): entry is CsvzallEventLogEntry => !!entry && typeof entry === "object" &&
-        typeof entry.timestamp === "string" && (entry.level === "info" || entry.level === "error") &&
-        typeof entry.message === "string" && (entry.detail === undefined || typeof entry.detail === "string"))
+      .filter(isEventLogEntry)
       .slice(0, MAX_EVENT_LOG_ENTRIES) : [],
   };
 }

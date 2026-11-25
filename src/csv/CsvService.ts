@@ -6,6 +6,7 @@ import type { CsvzallPluginSettings } from "../settings/settings.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
 import { isCsv, nextCsvPath } from "./csvFiles.js";
 import type { ExportReflection } from "../exports/ExportReflection.js";
+import type { CsvzallServerHandle } from "../types.js";
 import { hasErrorCode } from "../utils/errors.js";
 
 export class CsvService {
@@ -47,28 +48,24 @@ export class CsvService {
     const isCurrent = () => leaf.view === view && view instanceof CsvzallTableView &&
       view.file === file && file.path === path;
     if (!isCurrent()) return;
-    const mayContinue = this.reflection ? this.processService.viewerContinuation(leaf) : () => true;
+    let mayContinue = () => true;
     let launchingHelper = false;
     try {
       const fullPath = this.filesystem.getFullPath(file);
       if (!fullPath) throw new Error("csvzall can only open files from a local filesystem vault.");
-      if (this.reflection && !path.toLowerCase().endsWith(".json")) {
-        await this.reflection.prepareViewer(file.path);
-        if (!isCurrent() || !mayContinue()) return;
-      }
       launchingHelper = true;
-      const server = await this.processService.startViewer(fullPath, leaf);
+      const startup = this.processService.startViewer(fullPath, leaf);
+      // startViewer takes ownership of a new generation for this leaf.
+      if (this.reflection) mayContinue = this.processService.viewerContinuation(leaf);
+      const server = await (path.toLowerCase().endsWith(".json") ? startup : this.waitForCharts(path, startup));
       launchingHelper = false;
-      if (isCurrent() && !server.stopping && leaf.view instanceof CsvzallTableView) {
+      if (mayContinue() && isCurrent() && !server.process.stopped && leaf.view instanceof CsvzallTableView) {
         leaf.view.showViewer(file.basename, server.url);
-        this.processService.bindLeafToServer(leaf, server);
         return;
       }
-      server.stopping = true;
-      server.process.kill();
-      this.processService.sessions.detachHandle(server);
+      server.process.stop();
     } catch (error) {
-      if (error instanceof ViewerStartupCancelledError || !isCurrent()) return;
+      if (error instanceof ViewerStartupCancelledError || !mayContinue() || !isCurrent()) return;
       const message = error instanceof Error ? error.message : String(error);
       if (launchingHelper && leaf.view instanceof CsvzallTableView && (hasErrorCode(error, "ENOENT") || hasErrorCode(error, "ENOTDIR"))) {
         leaf.view.showMissingCsvzall(message);
@@ -95,9 +92,21 @@ export class CsvService {
   private async openCsvInBrowser(file: TFile): Promise<void> {
     const fullPath = this.filesystem.getFullPath(file);
     if (!fullPath) throw new Error("csvzall can only open files from a local filesystem vault.");
-    if (this.reflection) await this.reflection.prepareViewer(file.path);
-    const server = await this.processService.startViewer(fullPath);
-    window.open(server.url, "_blank", "noopener");
+    const server = await this.waitForCharts(file.path, this.processService.startViewer(fullPath));
+    if (!server.process.stopped) window.open(server.url, "_blank", "noopener");
+  }
+
+  private async waitForCharts(path: string, startup: Promise<CsvzallServerHandle>): Promise<CsvzallServerHandle> {
+    if (!this.reflection) return startup;
+    // Native startup indexes the CSV. Chart configuration is first read by a
+    // viewer request, so wait for both before exposing the URL.
+    const charts = this.reflection.prepareViewer(path).catch(async (error: unknown) => {
+      const server = await startup.catch(() => null);
+      server?.process.stop();
+      throw new Error(`Could not prepare charts for ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    const [server] = await Promise.all([startup, charts]);
+    return server;
   }
 
   private async reportOpenFailure(file: TFile, error: unknown): Promise<void> {

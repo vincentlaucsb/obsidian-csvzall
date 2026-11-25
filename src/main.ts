@@ -179,8 +179,6 @@ export default class CsvzallPlugin extends Plugin {
       () => this.settings,
       this.eventLog,
       () => this.installerService.getExecutablePath(),
-      // Each caller prepares its own chart/SQL scope before executing a command.
-      () => Promise.resolve(),
     );
     this.csvService = new CsvService(
       this.app,

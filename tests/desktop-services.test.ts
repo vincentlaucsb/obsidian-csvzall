@@ -15,8 +15,10 @@ class FakeView {
   file: unknown;
   displayed: string[] = [];
   missingHelper = "";
+  error = "";
   showViewer(_title: string, url: string) { this.displayed.push(url); }
   showMissingCsvzall(message: string) { this.missingHelper = message; }
+  showError(message: string) { this.error = message; }
 }
 
 async function loadService(entry: string, spawn?: () => unknown, notices: string[] = []): Promise<any> {
@@ -78,18 +80,15 @@ test("opening JSON routes its vault path to the helper and skips CSV chart prepa
   const file = { path: "Notes/preferences.JSON", basename: "preferences" };
   const view = new FakeView(), leaf = { view };
   view.file = file;
-  const server = { url: "http://127.0.0.1:1234/?token=test", stopping: false };
-  let bound = false;
+  const server = { url: "http://127.0.0.1:1234/?token=test", process: { stopped: false } };
   const service = new CsvService({}, () => ({}), {}, { getFullPath: () => "/vault/" + file.path }, {
     viewerContinuation: () => () => true,
     startViewer: async (path: string, target: unknown) => {
       assert.equal(path, "/vault/" + file.path); assert.equal(target, leaf);
       return server;
     },
-    bindLeafToServer: () => { bound = true; },
   }, { prepareViewer: () => { throw new Error("JSON must not access CSV configuration"); } });
   await service.openCsvInLeaf(file, leaf);
-  assert.equal(bound, true);
   assert.deepEqual(view.displayed, [server.url]);
 });
 
@@ -103,7 +102,10 @@ test("only the helper launch failure offers reinstall when a path disappears", a
     const service = new CsvService({}, () => ({}), { record: async () => {} }, { getFullPath: () => "a.csv" }, {
       viewerContinuation: () => () => true,
       showLeafErrorText: (_leaf: unknown, message: string) => { fileError = message; },
-      startViewer: () => { throw phase === "helper" ? missing : new Error("input file not found"); },
+      startViewer: async () => {
+        if (phase === "configuration") return { process: { stop() {} } };
+        throw phase === "helper" ? missing : new Error("input file not found");
+      },
     }, { prepareViewer: async () => { if (phase === "configuration") throw missing; } });
     await service.openCsvInLeaf(file, { view });
     assert.equal(Boolean(view.missingHelper), phase === "helper");
@@ -190,6 +192,42 @@ test("Obsidian startup accepts split acknowledgment and rejects truncated exits"
   }
 });
 
+test("a mode acknowledgment and a URL on separate lines cannot start a viewer", async () => {
+  const child = childProcess();
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {});
+  const startup = service.startViewer("data.csv");
+  child.stdout.emit("data", Buffer.from('{"obsidianMode":{"version":1,"chartAutomation":"host"}}\n{"url":"http://127.0.0.1:1234/?token=test"}\n'));
+  await assert.rejects(startup, /does not support Obsidian mode/);
+  assert.equal(child.killed, true);
+});
+
+test("an exit immediately after readiness belongs to the running viewer", async () => {
+  const child = childProcess(), view = new FakeView();
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {});
+  const startup = service.startViewer("data.csv", { view });
+  child.stdout.emit("data", Buffer.from('{"url":"http://127.0.0.1:1234/?token=test","obsidianMode":{"version":1,"chartAutomation":"host"}}'));
+  child.stdout.emit("data", Buffer.from("x".repeat(70000)));
+  child.stderr.emit("data", Buffer.from("running viewer failed"));
+  child.emit("exit", 1, null);
+  const server = await startup;
+  assert.equal(server.process.stopped, true);
+  assert.equal(child.killed, false);
+  assert.match(view.error, /running viewer failed/);
+  assert.equal(service.sessions.list().length, 0);
+});
+
+test("oversized incomplete startup output stops the helper", async () => {
+  const child = childProcess();
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {});
+  const startup = service.startViewer("data.csv");
+  child.stdout.emit("data", Buffer.from("x".repeat(70000)));
+  await assert.rejects(startup, /startup record is too long/);
+  assert.equal(child.killed, true);
+});
+
 test("background failures stay suppressed but a manual retry has visible feedback", async () => {
   const notices: string[] = [];
   const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", undefined, notices);
@@ -205,7 +243,7 @@ test("background failures stay suppressed but a manual retry has visible feedbac
 test("closing a leaf during capability probing prevents a later viewer spawn", async () => {
   let spawns = 0, finish: ((help: string) => void) | undefined;
   const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => { spawns++; return childProcess(); });
-  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall" }), {}, undefined, async () => {});
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", csvzallExecutableMode: "custom" }), {});
   service.captureCommand = () => new Promise<string>(resolve => { finish = resolve; });
   const leaf = {};
   const pending = service.startViewer("data.csv", leaf);
@@ -223,11 +261,26 @@ test("scope validation runs after command preflight and before any process spawn
   assert.equal(spawns, 0);
 });
 
-test("viewer launch and its real capability probe do not repeat export preflight", async () => {
+test("the bundled viewer launches once and requires the host automation acknowledgment", async () => {
+  for (const supported of [true, false]) {
+    const child = childProcess();
+    const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => child);
+    const service = new CsvzallProcessService(() => ({ csvzallExecutableMode: "bundled", csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {});
+    service.captureCommand = () => { throw new Error("Unexpected capability probe"); };
+    const startup = service.startViewer("data.csv");
+    const url = "http://127.0.0.1:1234/?token=test";
+    child.stdout.emit("data", Buffer.from(JSON.stringify({url, obsidianMode: supported ? {version: 1, chartAutomation: "host"} : undefined}) + "\n"));
+    if (supported) assert.equal((await startup).url, url);
+    else await assert.rejects(startup, /does not support Obsidian mode/);
+    service.unload();
+  }
+});
+
+test("custom viewer launch and its real capability probe do not repeat export preflight", async () => {
   const children = [childProcess(), childProcess()];
   let starts = 0, preflights = 0;
   const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => children[starts++]!);
-  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {}, undefined,
+  const service = new CsvzallProcessService(() => ({ csvzallExecutableMode: "custom", csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {}, undefined,
     async () => { preflights++; throw new Error("Unrelated export discovery must not block a viewer"); });
   const pending = service.startViewer("data.csv");
   while (starts < 1) await Promise.resolve();
@@ -287,9 +340,9 @@ test("closing a leaf cancels its startup without cancelling another leaf", async
   const other = service.startViewer("b.csv", {});
   service.handleLeafClosed(first);
   await assert.rejects(pending, ViewerStartupCancelledError);
-  children[1]!.stdout.emit("data", Buffer.from('{"url":"http://127.0.0.1:1234/?token=secret"}\n'));
+  children[1]!.stdout.emit("data", Buffer.from('{"url":"http://127.0.0.1:1234/?token=secret","obsidianMode":{"version":1,"chartAutomation":"host"}}\n'));
   const handle = await other;
-  assert.equal(handle.stopping, false);
+  assert.equal(handle.process.stopped, false);
   assert.equal(children[0]!.killed, true);
   assert.equal(children[1]!.killed, false);
   service.unload();
@@ -303,11 +356,9 @@ test("a late startup cannot display an earlier CSV in a reused view", async () =
   view.file = file;
   const leaf = { view };
   const child = childProcess();
-  const handle = { process: child, stopping: false, url: "old" };
-  let detached = false;
+  const handle = { process: { stop: () => child.kill() }, url: "old" };
   const service = new CsvService({}, () => ({}), {}, { getFullPath: () => "a.csv" }, {
     startViewer: () => new Promise((resolve) => { ready = resolve; }),
-    sessions: { detachHandle: () => { detached = true; } },
   });
   const pending = service.openCsvInLeaf(file, leaf);
   view.file = { path: "b.csv", basename: "b" };
@@ -315,25 +366,49 @@ test("a late startup cannot display an earlier CSV in a reused view", async () =
   await pending;
   assert.deepEqual(view.displayed, []);
   assert.equal(child.killed, true);
-  assert.equal(detached, true);
 });
 
 test("direct chart preparation cannot revive a closed or reused CSV pane", async () => {
-  for (const reused of [false, true]) {
+  for (const state of ["current", "closed", "reused"]) {
     const { CsvService } = await loadService("src/csv/CsvService.ts");
     const view = new FakeView(), file = { path: "A/data.csv", basename: "data" }, leaf = { view };
     view.file = file;
     let complete!: () => void, generation = 0, starts = 0;
+    const child = childProcess();
     const service = new CsvService({}, () => ({}), {}, { getFullPath: () => "A/data.csv" }, {
       viewerContinuation: () => { const token = generation; return () => generation === token; },
-      startViewer: () => { starts++; throw new Error("An obsolete pane must not start"); },
+      startViewer: async () => { starts++; return { process: { stop: () => child.kill() }, url: "ready" }; },
     }, { prepareViewer: () => new Promise<void>(resolve => { complete = resolve; }) });
     const pending = service.openCsvInLeaf(file, leaf);
-    generation++;
-    if (reused) view.file = { path: "B/data.csv", basename: "data" };
+    assert.equal(starts, 1);
+    await Promise.resolve();
+    assert.deepEqual(view.displayed, []);
+    if (state !== "current") generation++;
+    if (state === "reused") view.file = { path: "B/data.csv", basename: "data" };
     complete(); await pending;
-    assert.equal(starts, 0); assert.deepEqual(view.displayed, []);
+    assert.equal(child.killed, state !== "current");
+    assert.deepEqual(view.displayed, state === "current" ? ["ready"] : []);
   }
+});
+
+test("a late preparation failure cannot replace a reopened pane for the same CSV", async () => {
+  const { CsvService } = await loadService("src/csv/CsvService.ts");
+  const view = new FakeView(), file = { path: "a.csv", basename: "a" }, leaf = { view };
+  view.file = file;
+  let reject!: (error: Error) => void, ready!: (handle: unknown) => void, current = true;
+  const child = childProcess();
+  const service = new CsvService({}, () => ({}), {}, { getFullPath: () => file.path }, {
+    viewerContinuation: () => () => current,
+    startViewer: () => new Promise(resolve => { ready = resolve; }),
+    showLeafErrorText: () => assert.fail("The error belongs to the previous open"),
+  }, { prepareViewer: () => new Promise<void>((_, fail) => { reject = fail; }) });
+  const pending = service.openCsvInLeaf(file, leaf);
+  current = false;
+  reject(new Error("Old preparation failed"));
+  await Promise.resolve();
+  ready({ process: { stop: () => child.kill() } });
+  await pending;
+  assert.equal(child.killed, true);
 });
 
 
@@ -356,6 +431,24 @@ test("chart service reload observes hidden configuration edits and deletions", a
   assert.equal(service.allChartKeys().length, 0);
 });
 
+
+test("a missing remembered chart config is quiet and other read errors still surface", async () => {
+  const notices: string[] = [];
+  const { ChartService } = await loadService("src/charts/ChartService.ts", undefined, notices);
+  let code = "ENOENT";
+  const service = new ChartService({ vault: { adapter: { read: async (path: string) => {
+    if (path.startsWith("Old/")) throw Object.assign(new Error(code), { code });
+    return '{"charts":[{"id":"live","input":"data.csv"}]}';
+  } } } }, { record: async () => {} }, {}, {}, {
+    knownConfigPaths: () => ["Old/.csvzall/charts.json", ".csvzall/charts.json"], assertReady: () => {},
+  });
+  await service.reloadChartConfig();
+  assert.equal(service.allChartKeys().length, 1);
+  assert.equal(notices.length, 0);
+  code = "EACCES";
+  await service.reloadChartConfig();
+  assert.match(notices[0]!, /EACCES/);
+});
 
 test("chart execution prepares only its source scope and honors a pause arriving before execution", async () => {
   const { ChartService } = await loadService("src/charts/ChartService.ts");

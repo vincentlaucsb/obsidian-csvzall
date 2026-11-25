@@ -4,6 +4,7 @@ import { randomUUID, createHash } from "crypto";
 import { execFile } from "child_process";
 import { SKILL_PATHS, csvzallSkill } from "./skill.js";
 import { hasErrorCode } from "../utils/errors.js";
+import validateObject, { isBoolean, isRecord, isString, literal } from "../utils/validateObject.js";
 
 export interface AgentHelper {
   executablePath: string;
@@ -27,10 +28,15 @@ interface Options {
   prepare(repair: boolean): Promise<AgentHelper>;
 }
 
+const hasInstallationFields = validateObject({ version: literal(1), enabled: isBoolean, files: isRecord });
+const isHelperLocator = validateObject({
+  executable: (value): value is string => isString(value) && value.startsWith("csvzall-bin/"),
+  executableSha256: isString,
+});
+
 function record(value: unknown): Installation {
   if (!value || typeof value !== "object") return { version: 1, enabled: false, files: {} };
-  if (!("version" in value) || value.version !== 1 || !("enabled" in value) || typeof value.enabled !== "boolean" ||
-      !("files" in value) || !value.files || typeof value.files !== "object" || Array.isArray(value.files)) {
+  if (!hasInstallationFields(value)) {
     throw new Error("Invalid agent integration record. Existing files have been preserved.");
   }
   const files: Record<string, string> = {};
@@ -256,8 +262,7 @@ export class AgentIntegration {
     const text = await this.read(this.locator);
     if (!state.enabled || !text || text !== state.files[this.locator]) throw new Error("Enable or repair agent integration on this device first.");
     const value: unknown = JSON.parse(text);
-    if (!value || typeof value !== "object" || !("executable" in value) || typeof value.executable !== "string" || !value.executable.startsWith("csvzall-bin/") ||
-        !("executableSha256" in value) || typeof value.executableSha256 !== "string") throw new Error("Invalid helper locator.");
+    if (!isHelperLocator(value)) throw new Error("Invalid helper locator.");
     const executable = await this.requireHelperFile(value.executable);
     if (createHash("sha256").update(await readFile(executable)).digest("hex") !== value.executableSha256) throw new Error("Bundled agent helper changed. Enable or repair it first.");
     return await new Promise<string>((accept, reject) => {

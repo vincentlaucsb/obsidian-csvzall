@@ -10,42 +10,19 @@ import type { CsvzallServerHandle } from "../types.js";
 import { CsvzallTableView } from "../views/CsvzallTableView.js";
 import { SessionErrors } from "../logging/SessionErrors.js";
 import {
-  extractViewerUrl,
-  isAllowedViewerUrl,
   formatProcessFailure,
   stripOuterQuotes,
   ViewerSessionRegistry,
 } from "../viewerHelpers.js";
 
-function startupUrl(line: string, jsonEditor: boolean, terminated: boolean): string | undefined {
-  let record: unknown;
-  try {
-    record = JSON.parse(line);
-  } catch {
-    if (!terminated) return undefined;
-    // Older helpers may print a plain viewer URL without a mode acknowledgment.
-  }
-  if (record && typeof record === "object" && "url" in record &&
-      typeof record.url === "string" && isAllowedViewerUrl(record.url)) {
-    const mode = "obsidianMode" in record && record.obsidianMode;
-    if (mode && typeof mode === "object" && "version" in mode && mode.version === 1 &&
-        "chartAutomation" in mode && mode.chartAutomation === "host" &&
-        (!jsonEditor || ("viewer" in record && record.viewer === "json"))) return record.url;
-  } else if (!extractViewerUrl(line)) {
-    return undefined;
-  }
-  throw new Error(jsonEditor
-    ? "This helper did not start a JSON editor. Update the custom executable or use the bundled helper."
-    : "This helper does not support Obsidian mode. Update the custom executable or use the bundled helper.");
-}
+import { CsvzallProcess, ViewerStartupCancelledError } from "./CsvzallProcess.js";
 
-export class ViewerStartupCancelledError extends Error {}
+export { ViewerStartupCancelledError };
 
 export class CsvzallProcessService {
-  readonly sessions = new ViewerSessionRegistry<WorkspaceLeaf, CsvzallServerHandle>();
+  private readonly sessions = new ViewerSessionRegistry<WorkspaceLeaf, CsvzallProcess>();
   private unloading = false;
   private readonly pending = new Set<() => void>();
-  private readonly leafPending = new Map<WorkspaceLeaf, () => void>();
   private readonly errors = new SessionErrors();
   private readonly modeSupport = new Set<string>();
   private readonly leafGeneration = new WeakMap<WorkspaceLeaf, number>();
@@ -65,17 +42,12 @@ export class CsvzallProcessService {
 
   handleLeafClosed(leaf: WorkspaceLeaf): void {
     this.leafGeneration.set(leaf, (this.leafGeneration.get(leaf) ?? 0) + 1);
-    this.leafPending.get(leaf)?.();
     this.sessions.closeLeaf(leaf);
   }
 
   viewerContinuation(leaf: WorkspaceLeaf): () => boolean {
     const generation = this.leafGeneration.get(leaf);
     return () => !this.unloading && this.leafGeneration.get(leaf) === generation;
-  }
-
-  bindLeafToServer(leaf: WorkspaceLeaf, handle: CsvzallServerHandle): void {
-    this.sessions.bindLeaf(leaf, handle);
   }
 
   showLeafErrorText(leaf: WorkspaceLeaf | null | undefined, message: string): void {
@@ -171,151 +143,32 @@ export class CsvzallProcessService {
 
   async startViewer(filePath: string, leaf?: WorkspaceLeaf): Promise<CsvzallServerHandle> {
     if (leaf) this.handleLeafClosed(leaf);
-    const generation = leaf ? this.leafGeneration.get(leaf) : undefined;
-    // CsvService prepares the CSV's chart scope before calling this method.
-    // Launching a viewer must not repeat global SQL discovery.
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
-    if (leaf && this.leafGeneration.get(leaf) !== generation) throw new ViewerStartupCancelledError("Viewer startup cancelled");
-    const executable = stripOuterQuotes(this.executablePath?.() ?? this.getSettings().csvzallPath);
-    if (this.beforeCommand) {
-      const identity = isAbsolute(executable) ? `${executable}:${statSync(executable).mtimeMs}` : executable;
-      if (!this.modeSupport.has(identity)) {
-        const help = await this.captureCommand(["view", "--help"], isAbsolute(executable) ? dirname(executable) : ".");
-        if (!help.includes("--obsidian")) throw new Error("This helper does not support Obsidian mode. Update the custom executable or use a helper built with --obsidian support.");
-        this.modeSupport.add(identity);
-      }
+    const settings = this.getSettings();
+    const executable = stripOuterQuotes(this.executablePath?.() ?? settings.csvzallPath);
+    if (settings.csvzallExecutableMode === "custom") {
+      const mayContinue = leaf ? this.viewerContinuation(leaf) : () => !this.unloading;
+      await this.checkCustomViewer(executable);
+      if (!mayContinue()) throw new ViewerStartupCancelledError("Viewer startup cancelled");
     }
-    if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
-    if (leaf && this.leafGeneration.get(leaf) !== generation) throw new ViewerStartupCancelledError("Viewer startup cancelled");
-    const jsonEditor = filePath.toLowerCase().endsWith(".json");
-    const hosted = jsonEditor || Boolean(this.beforeCommand);
-    const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
-    if (hosted) args.push("--obsidian");
-    const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
-    const child = spawn(executable, args, {
-      cwd,
-      windowsHide: true,
+
+    const viewer = new CsvzallProcess(executable, filePath, settings.startupTimeoutMs, (process, error) => {
+      const owner = this.sessions.leafForHandle(process);
+      this.sessions.detachHandle(process);
+      if (error && owner) this.showLeafErrorText(owner, error.message);
     });
-
-    let stdout = "";
-    let stderr = "";
-
-    return await new Promise<CsvzallServerHandle>((resolve, reject) => {
-      let settled = false;
-      const cleanup = () => {
-        window.clearTimeout(timeout);
-        this.pending.delete(cancel);
-        if (leaf && this.leafPending.get(leaf) === cancel) this.leafPending.delete(leaf);
-      };
-      const fail = (error: Error) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        child.kill();
-        reject(error);
-      };
-      const cancel = () => fail(new ViewerStartupCancelledError("Viewer startup cancelled"));
-      const timeout = window.setTimeout(() => {
-        fail(new Error(`timed out waiting for csvzall after ${this.getSettings().startupTimeoutMs}ms`));
-      }, this.getSettings().startupTimeoutMs);
-      this.pending.add(cancel);
-      if (leaf) this.leafPending.set(leaf, cancel);
-
-      const finish = (url: string) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
-        const handle = {
-          filePath,
-          process: child,
-          url,
-          stopping: false,
-        };
-        this.sessions.add(handle);
-        if (leaf) this.sessions.bindLeaf(leaf, handle);
-        resolve(handle);
-      };
-
-      const decoder = new StringDecoder("utf8");
-      let pendingLine = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        const text = decoder.write(chunk);
-        stdout = (stdout + text).slice(-8000);
-        if (settled) return;
-        const lines = (pendingLine + text).split("\n");
-        pendingLine = lines.pop() ?? "";
-        try {
-          for (const line of [...lines, pendingLine]) {
-            if (line.length > 65536) throw new Error("Viewer startup record is too long.");
-          }
-          for (const line of lines) {
-            const url = hosted ? startupUrl(line, jsonEditor, true) : extractViewerUrl(line);
-            if (url) { finish(url); return; }
-          }
-          const url = hosted ? startupUrl(pendingLine, jsonEditor, false) : extractViewerUrl(pendingLine);
-          if (url) finish(url);
-        } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
-      });
-
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
-      });
-
-      child.on("error", (error: unknown) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
-        reject(error instanceof Error ? error : new Error(String(error)));
-      });
-
-      child.on("exit", (code, signal) => {
-        cleanup();
-        if (settled) {
-          const handle = this.sessions.list().find((candidate: CsvzallServerHandle) => candidate.process === child);
-          if (handle) {
-            if (!handle.stopping && !this.unloading) {
-              void this.showLeafError(
-                handle,
-                formatProcessFailure({
-                  executable,
-                  args,
-                  cwd,
-                  code,
-                  signal,
-                  stdout,
-                  stderr,
-                }),
-              );
-            }
-            handle.stopping = true;
-            this.sessions.detachHandle(handle);
-          }
-          return;
-        }
-        settled = true;
-        reject(
-          new Error(
-            formatProcessFailure({
-              executable,
-              args,
-              cwd,
-              code,
-              signal,
-              stdout,
-              stderr,
-            }),
-          ),
-        );
-      });
-    });
+    this.sessions.add(viewer);
+    if (leaf) this.sessions.bindLeaf(leaf, viewer);
+    return { filePath, process: viewer, url: await viewer.ready };
   }
 
-  private async showLeafError(handle: CsvzallServerHandle, message: string): Promise<void> {
-    const leaf = this.sessions.leafForHandle(handle);
-    this.showLeafErrorText(leaf, message);
+  private async checkCustomViewer(executable: string): Promise<void> {
+    const identity = isAbsolute(executable) ? `${executable}:${statSync(executable).mtimeMs}` : executable;
+    if (this.modeSupport.has(identity)) return;
+    const help = await this.captureCommand(["view", "--help"], isAbsolute(executable) ? dirname(executable) : ".");
+    if (!help.includes("--obsidian")) {
+      throw new Error("This helper does not support Obsidian mode. Update the custom executable or use a helper built with --obsidian support.");
+    }
+    this.modeSupport.add(identity);
   }
 }

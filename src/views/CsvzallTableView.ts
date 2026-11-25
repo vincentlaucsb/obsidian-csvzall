@@ -1,9 +1,7 @@
 import { FileView, Notice, Platform, setIcon, TFile, type OpenViewState, type ViewState, type WorkspaceLeaf } from "obsidian";
-import { csvzallDirtyStateFromMessageEvent } from "../viewerHelpers.js";
+import { ViewerFrameSession } from "./ViewerFrameSession.js";
 import { UnsavedChangesModal } from "./UnsavedChangesModal.js";
 import { VIEW_TYPE_CSVZALL } from "./viewTypes.js";
-import { synchronizeViewerTheme } from "./viewerTheme.js";
-import { openViewerDocumentation } from "./viewerDocumentation.js";
 
 export interface CsvzallTableViewOwner {
   handleLeafClosed(leaf: WorkspaceLeaf): void;
@@ -13,64 +11,11 @@ export interface CsvzallTableViewOwner {
   insertQueryIntoNote?(file: TFile, sql: string, cancelled: () => boolean, lifecycle?: AbortSignal): Promise<boolean>;
 }
 
-type WasmViewerMessage =
-  | { source: "csvzall-wasm-viewer"; type: "ready" }
-  | { source: "csvzall-wasm-viewer"; type: "dirty-state"; dirty: boolean }
-  | {
-    source: "csvzall-wasm-viewer";
-    type: "save-file";
-    buffer: ArrayBuffer;
-    byteOffset?: number;
-    byteLength?: number;
-    requestId?: number;
-  };
-
 type ProtectedLeaf = WorkspaceLeaf & {
   detach: () => void | Promise<void>;
   openFile: (file: TFile, openState?: OpenViewState) => Promise<void>;
   setViewState: (viewState: ViewState, eState?: unknown) => Promise<void>;
 };
-
-function wasmViewerMessageFromData(data: unknown): WasmViewerMessage | null {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
-
-  const candidate = data as Record<string, unknown>;
-  if (candidate.source !== "csvzall-wasm-viewer") {
-    return null;
-  }
-
-  if (candidate.type === "ready") {
-    return {
-      source: "csvzall-wasm-viewer",
-      type: "ready",
-    };
-  }
-
-  if (candidate.type === "dirty-state" && typeof candidate.dirty === "boolean") {
-    return {
-      source: "csvzall-wasm-viewer",
-      type: "dirty-state",
-      dirty: candidate.dirty,
-    };
-  }
-
-  if (candidate.type === "save-file" && candidate.buffer instanceof ArrayBuffer) {
-    const byteOffset = typeof candidate.byteOffset === "number" ? candidate.byteOffset : undefined;
-    const byteLength = typeof candidate.byteLength === "number" ? candidate.byteLength : undefined;
-    return {
-      source: "csvzall-wasm-viewer",
-      type: "save-file",
-      buffer: candidate.buffer,
-      byteOffset,
-      byteLength,
-      requestId: typeof candidate.requestId === "number" ? candidate.requestId : undefined,
-    };
-  }
-
-  return null;
-}
 
 export class CsvzallTableView extends FileView {
   private titleText = "csvzall";
@@ -80,15 +25,13 @@ export class CsvzallTableView extends FileView {
   private loading = false;
   private dirty = false;
   private wasmFile: TFile | null = null;
-  private wasmOpenPosted = false;
+  // Writes to the same file stay ordered when a render replaces its iframe.
   private saveQueue: Promise<void> = Promise.resolve();
   private desktopSourcePath = "";
   private renameWarning: HTMLElement | null = null;
   private renderGeneration = 0;
-  private frame: HTMLIFrameElement | null = null;
-  private themeCleanup: (() => void) | null = null;
-  private messageHandler: ((event: MessageEvent) => void) | null = null;
-  private mobileViewportCleanup: (() => void) | null = null;
+  private session: ViewerFrameSession | null = null;
+
   private originalDetach: ProtectedLeaf["detach"] | null = null;
   private patchedDetach: ProtectedLeaf["detach"] | null = null;
   private originalOpenFile: ProtectedLeaf["openFile"] | null = null;
@@ -96,12 +39,11 @@ export class CsvzallTableView extends FileView {
   private originalSetViewState: ProtectedLeaf["setViewState"] | null = null;
   private patchedSetViewState: ProtectedLeaf["setViewState"] | null = null;
   private pendingDiscardConfirmation: Promise<boolean> | null = null;
-  private nextSaveRequestId = 0;
-  private pendingSave: { requestId: number; resolve: () => void; reject: (error: Error) => void; timer: number } | null = null;
   private allowingProtectedLeafAction = false;
-  private exportRequest: number | null = null;
-  private exportLifecycle: AbortController | null = null;
-  private readonly completedExports = new Set<number>();
+
+  private get frame(): HTMLIFrameElement | null {
+    return this.session?.frame ?? null;
+  }
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -138,8 +80,8 @@ export class CsvzallTableView extends FileView {
   async onClose(): Promise<void> {
     this.renderGeneration++;
     this.setDirty(false);
-    this.removeMobileViewportHandler();
-    this.removeMessageListener();
+    this.session?.dispose();
+    this.session = null;
     this.restoreLeafNavigation();
     this.owner.handleLeafClosed(this.leaf);
   }
@@ -150,7 +92,6 @@ export class CsvzallTableView extends FileView {
     this.titleText = file.basename;
     this.url = "";
     this.wasmFile = null;
-    this.wasmOpenPosted = false;
     this.errorText = "";
     this.missingCsvzallText = "";
     this.loading = true;
@@ -163,7 +104,6 @@ export class CsvzallTableView extends FileView {
     this.setDirty(false);
     this.url = "";
     this.wasmFile = null;
-    this.wasmOpenPosted = false;
     this.errorText = "";
     this.missingCsvzallText = "";
     this.loading = false;
@@ -231,7 +171,6 @@ export class CsvzallTableView extends FileView {
     this.errorText = "";
     this.missingCsvzallText = "";
     this.wasmFile = null;
-    this.wasmOpenPosted = false;
     this.loading = false;
     this.render();
   }
@@ -241,7 +180,6 @@ export class CsvzallTableView extends FileView {
     this.titleText = title;
     this.url = url;
     this.wasmFile = file;
-    this.wasmOpenPosted = false;
     this.errorText = "";
     this.missingCsvzallText = "";
     this.loading = false;
@@ -254,7 +192,6 @@ export class CsvzallTableView extends FileView {
     this.missingCsvzallText = "";
     this.url = "";
     this.wasmFile = null;
-    this.wasmOpenPosted = false;
     this.loading = false;
     this.render();
   }
@@ -265,7 +202,6 @@ export class CsvzallTableView extends FileView {
     this.missingCsvzallText = message;
     this.url = "";
     this.wasmFile = null;
-    this.wasmOpenPosted = false;
     this.loading = false;
     this.render();
   }
@@ -273,8 +209,8 @@ export class CsvzallTableView extends FileView {
   private render(): void {
     this.renderGeneration++;
     const { containerEl } = this;
-    this.removeMobileViewportHandler();
-    this.removeMessageListener();
+    this.session?.dispose();
+    this.session = null;
     containerEl.empty();
     this.renameWarning = null;
     containerEl.addClass("csvzall-view-container");
@@ -293,13 +229,7 @@ export class CsvzallTableView extends FileView {
       return;
     }
 
-    if (!this.url) {
-      const state = containerEl.createDiv({ cls: "csvzall-view-state" });
-      state.createEl("p", {
-        text: this.loading ? "Starting csvzall viewer..." : "No csvzall viewer URL is active.",
-      });
-      return;
-    }
+    if (!this.url) return;
 
     this.renderMobileToolbar(containerEl);
 
@@ -310,58 +240,22 @@ export class CsvzallTableView extends FileView {
       },
     });
     frame.setAttr("title", this.titleText);
-    this.listenForDirtyState(frame);
-    this.installMobileViewportHandler(containerEl, frame);
-    frame.setAttr("src", this.url);
-    this.themeCleanup = synchronizeViewerTheme(containerEl, frame, this.app.workspace);
-  }
-
-  private installMobileViewportHandler(containerEl: HTMLElement, frame: HTMLIFrameElement): void {
-    if (!Platform.isMobileApp) {
-      return;
-    }
-
-    const viewport = window.visualViewport;
-    let animationFrame = 0;
-    const update = (): void => {
-      if (animationFrame) {
-        window.cancelAnimationFrame(animationFrame);
-      }
-      animationFrame = window.requestAnimationFrame(() => {
-        animationFrame = 0;
-        const rect = containerEl.getBoundingClientRect();
-        const viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-        const visibleHeight = Math.max(240, Math.floor(viewportBottom - rect.top));
-        frame.contentWindow?.postMessage({
-          source: "obsidian-csvzall",
-          type: "viewport-resized",
-          height: visibleHeight,
-        }, "*");
-        try {
-          frame.contentWindow?.dispatchEvent(new Event("resize"));
-        } catch {
-          // Cross-origin resource URLs can reject direct event dispatch; postMessage still reaches the viewer.
-        }
-      });
-    };
-
-    viewport?.addEventListener("resize", update);
-    viewport?.addEventListener("scroll", update);
-    window.addEventListener("resize", update);
-    update();
-    this.mobileViewportCleanup = () => {
-      if (animationFrame) {
-        window.cancelAnimationFrame(animationFrame);
-      }
-      viewport?.removeEventListener("resize", update);
-      viewport?.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
-  }
-
-  private removeMobileViewportHandler(): void {
-    this.mobileViewportCleanup?.();
-    this.mobileViewportCleanup = null;
+    const file = this.file;
+    const wasmFile = this.wasmFile;
+    const insertQuery = this.owner.insertQueryIntoNote?.bind(this.owner);
+    this.session = new ViewerFrameSession(frame, {
+      app: this.app,
+      wasmFile,
+      sourceIsCurrent: () => this.file === file && (!!wasmFile || file?.path === this.desktopSourcePath),
+      isDirty: () => this.dirty,
+      setDirty: dirty => this.setDirty(dirty),
+      showError: message => this.showError(message),
+      enqueueWrite: write => { this.saveQueue = this.saveQueue.then(write, write); },
+      insertQuery: file && file.extension?.toLowerCase() !== "json" && !wasmFile && Platform.isDesktopApp && insertQuery
+        ? (sql, cancelled, signal) => insertQuery(file, sql, cancelled, signal)
+        : undefined,
+    });
+    this.session.open(containerEl, this.url);
   }
 
   private renderMobileToolbar(containerEl: HTMLElement): void {
@@ -514,214 +408,14 @@ export class CsvzallTableView extends FileView {
   }
 
   private async saveBeforeLeaving(): Promise<void> {
-    const frame = this.frame;
-    if (!frame?.contentWindow) throw new Error("The file viewer is unavailable. Your edits have not been discarded.");
-    if (!this.wasmFile && this.file?.path !== this.desktopSourcePath) throw new Error("Restore the file's original path before saving, or discard the edits.");
-    if (this.pendingSave) throw new Error("A save is already in progress.");
-    await new Promise<void>((resolve, reject) => {
-      const requestId = ++this.nextSaveRequestId;
-      const timer = window.setTimeout(() => {
-        this.pendingSave = null;
-        reject(new Error("The viewer did not confirm the save. Your edits are still open; update the csvzall helper if needed and retry."));
-      }, 60000);
-      this.pendingSave = { requestId, resolve, reject, timer };
-      try {
-        frame.contentWindow!.postMessage({ source: "obsidian-csvzall", type: "save-request", version: 1, requestId }, "*");
-      } catch (error) {
-        this.finishPendingSave(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
-  }
-
-  private finishPendingSave(error?: Error): void {
-    const pending = this.pendingSave;
-    if (!pending) return;
-    this.pendingSave = null;
-    window.clearTimeout(pending.timer);
-    if (error) pending.reject(error);
-    else pending.resolve();
-  }
-
-  private handleSaveResponse(data: unknown): boolean {
-    if (!data || typeof data !== "object") return false;
-    const reply = data as { source?: unknown; type?: unknown; version?: unknown; requestId?: unknown; success?: unknown; dirty?: unknown; error?: unknown };
-    if ((reply.source !== "csvzall-viewer" && reply.source !== "csvzall-wasm-viewer") || reply.type !== "save-response" || reply.version !== 1) return false;
-    if (!this.pendingSave || reply.requestId !== this.pendingSave.requestId || typeof reply.success !== "boolean" || typeof reply.dirty !== "boolean") return true;
-    if (!reply.success) this.finishPendingSave(new Error(typeof reply.error === "string" ? reply.error : "Could not save the file. Your edits are still open."));
-    else if (reply.dirty) {
-      this.setDirty(true);
-      this.finishPendingSave(new Error("New edits arrived while saving. Save again before leaving."));
-    } else {
-      this.setDirty(false);
-      this.finishPendingSave();
-    }
-    return true;
-  }
-
-  private listenForDirtyState(frame: HTMLIFrameElement): void {
-    this.frame = frame;
-    this.messageHandler = (event) => {
-      if (event.source !== this.frame?.contentWindow) {
-        return;
-      }
-      if (this.handleSaveResponse(event.data)) return;
-      if (this.handleExportMessage(event.data, frame)) return;
-      if (openViewerDocumentation(event, this.frame?.contentWindow ?? null)) return;
-      if (this.handleWasmViewerMessage(event)) {
-        return;
-      }
-      const dirty = csvzallDirtyStateFromMessageEvent(event, this.frame?.contentWindow ?? null);
-      if (dirty === null) {
-        return;
-      }
-      this.setDirty(dirty);
-    };
-    window.addEventListener("message", this.messageHandler);
-  }
-
-  private handleExportMessage(data: unknown, frame: HTMLIFrameElement): boolean {
-    if (!data || typeof data !== 'object') return false;
-    const message = data as { source?: unknown; type?: unknown; version?: unknown; requestId?: unknown; sql?: unknown; save?: unknown };
-    if (message.source !== 'csvzall-viewer' || message.version !== 1) return false;
-    const enabled = !!this.owner.insertQueryIntoNote && this.file?.extension?.toLowerCase() !== "json" && !this.wasmFile && Platform.isDesktopApp;
-    if (message.type === 'note-export-ready') {
-      frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'note-export-capabilities', version: 1, enabled }, '*');
-      return true;
-    }
-    if (message.type !== 'insert-query' || typeof message.requestId !== 'number' || !Number.isSafeInteger(message.requestId) || message.requestId < 1 ||
-      typeof message.sql !== 'string' || !message.sql.trim() || message.sql.length > 1024 * 1024 || typeof message.save !== 'boolean') return false;
-    const requestId = message.requestId, sql = message.sql, save = message.save;
-    if (this.exportRequest !== null || this.completedExports.has(requestId)) return true;
-    const generation = this.renderGeneration, file = this.file;
-    const cancelled = () => this.frame !== frame || this.renderGeneration !== generation || this.file !== file || this.file?.path !== this.desktopSourcePath;
-    this.exportRequest = requestId;
-    const lifecycle = new AbortController(); this.exportLifecycle = lifecycle;
-    const run = async () => {
-      if (!enabled || !file || !this.owner.insertQueryIntoNote) throw new Error('Note exports are unavailable in this viewer.');
-      if (this.dirty) {
-        if (!save) throw new Error('Save the CSV before inserting its query into a note.');
-        await this.saveBeforeLeaving();
-      }
-      if (cancelled()) return false;
-      return this.owner.insertQueryIntoNote(file, sql, cancelled, lifecycle.signal);
-    };
-    void run().then(success => {
-      if (!cancelled()) frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'insert-query-response', version: 1, requestId, success }, '*');
-    }, (error: unknown) => {
-      if (!cancelled()) frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'insert-query-response', version: 1, requestId,
-        success: false, error: error instanceof Error ? error.message : String(error) }, '*');
-    }).finally(() => {
-      if (!cancelled()) {
-        if (this.exportRequest === requestId) this.exportRequest = null;
-        if (this.exportLifecycle === lifecycle) this.exportLifecycle = null;
-        this.completedExports.add(requestId);
-      }
-    });
-    return true;
-  }
-
-  private removeMessageListener(): void {
-    this.exportLifecycle?.abort(); this.exportLifecycle = null;
-    this.exportRequest = null; this.completedExports.clear();
-    this.finishPendingSave(new Error("The file viewer closed before saving completed."));
-    this.themeCleanup?.();
-    this.themeCleanup = null;
-    if (this.messageHandler) {
-      window.removeEventListener("message", this.messageHandler);
-      this.messageHandler = null;
-    }
-    this.frame = null;
+    if (!this.session) throw new Error("The file viewer is unavailable. Your edits have not been discarded.");
+    await this.session.requestSave();
   }
 
   private setDirty(dirty: boolean): void {
     this.dirty = dirty;
   }
 
-  private async postWasmFileToFrame(frame: HTMLIFrameElement): Promise<void> {
-    if (this.wasmOpenPosted || !this.wasmFile || frame !== this.frame || !frame.contentWindow) {
-      return;
-    }
-
-    this.wasmOpenPosted = true;
-    const file = this.wasmFile;
-    try {
-      const buffer = await this.app.vault.readBinary(file);
-      if (frame !== this.frame || file !== this.wasmFile) return;
-      frame.contentWindow.postMessage({
-        source: "obsidian-csvzall",
-        type: "open-file",
-        name: file.name,
-        buffer,
-        hostUi: { version: 1, mobile: Platform.isMobileApp },
-      }, "*", [buffer]);
-    } catch (error) {
-      if (frame !== this.frame || file !== this.wasmFile) return;
-      const message = error instanceof Error ? error.message : String(error);
-      this.showError(`Failed to load CSV for the WASM viewer: ${message}`);
-    }
-  }
-
-  private handleWasmViewerMessage(event: MessageEvent): boolean {
-    const data = wasmViewerMessageFromData(event.data);
-    if (!data) {
-      return false;
-    }
-
-    if (data.type === "ready") {
-      if (this.frame) {
-        void this.postWasmFileToFrame(this.frame);
-      }
-      return true;
-    }
-
-    if (data.type === "dirty-state") {
-      this.setDirty(data.dirty);
-      return true;
-    }
-
-    if (data.type === "save-file") {
-      this.setDirty(true);
-      const file = this.wasmFile;
-      const frame = this.frame;
-      this.saveQueue = this.saveQueue.then(() => this.saveWasmViewerFile(data, file, frame));
-      return true;
-    }
-
-    return false;
-  }
-
-  private async saveWasmViewerFile(data: {
-    buffer?: ArrayBuffer;
-    byteOffset?: number;
-    byteLength?: number;
-    requestId?: number;
-  }, file: TFile | null, frame: HTMLIFrameElement | null): Promise<void> {
-    if (!file || !frame || file !== this.wasmFile || frame !== this.frame || !(data.buffer instanceof ArrayBuffer)) {
-      return;
-    }
-
-    const reply = (success: boolean, error?: string): void => {
-      if (frame !== this.frame || file !== this.wasmFile) return;
-      frame.contentWindow?.postMessage({source: "obsidian-csvzall", type: "save-result", requestId: data.requestId, success, error}, "*");
-    };
-    try {
-      const byteOffset = typeof data.byteOffset === "number" ? data.byteOffset : 0;
-      const byteLength = typeof data.byteLength === "number" ? data.byteLength : data.buffer.byteLength - byteOffset;
-      const bytes = new Uint8Array(data.buffer, byteOffset, byteLength);
-      const output = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ?
-        bytes.buffer :
-        bytes.slice().buffer;
-      await this.app.vault.modifyBinary(file, output);
-      reply(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      reply(false, message);
-      if (frame === this.frame && file === this.wasmFile) {
-        this.setDirty(true);
-        new Notice(`Failed to save CSV: ${message}. Your edits are still open; retry saving.`);
-      }
-    }
-  }
 
   private renderMissingCsvzall(): void {
     const state = this.containerEl.createDiv({ cls: "csvzall-view-state" });

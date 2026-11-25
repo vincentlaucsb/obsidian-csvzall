@@ -1,4 +1,9 @@
 import type { Workspace } from "obsidian";
+import validateObject, { literal } from "../utils/validateObject.js";
+
+const isThemeReady = validateObject({
+  source: literal("csvzall-viewer"), type: literal("theme-ready"), version: literal(1),
+});
 
 export const viewerThemeVariables = [
   "--background-primary", "--background-secondary", "--background-modifier-hover",
@@ -42,11 +47,7 @@ export function synchronizeViewerTheme(container: HTMLElement, frame: HTMLIFrame
   };
   const onLoad = (): void => send(true);
   const onMessage = (event: MessageEvent): void => {
-    if (event.source !== frame.contentWindow) return;
-    const data: unknown = event.data;
-    if (!data || typeof data !== "object") return;
-    const message = data as Record<string, unknown>;
-    if (message.source === "csvzall-viewer" && message.type === "theme-ready" && message.version === 1) send(true);
+    if (event.source === frame.contentWindow && isThemeReady(event.data)) send(true);
   };
   const cssChanged = workspace.on("css-change", schedule);
   const observer = new MutationObserver(schedule);

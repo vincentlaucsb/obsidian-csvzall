@@ -25,8 +25,11 @@ const requiredFiles = [
   "mobile-src/manifest.json",
   "src/csv/csvFiles.ts",
   "src/utils/paths.ts",
+  "src/utils/validateObject.ts",
   "src/obsidian/pluginPaths.ts",
   "src/views/CsvzallTableView.ts",
+  "src/views/ViewerFrameSession.ts",
+  "src/views/viewerDocumentation.ts",
   "src/views/JsonFileView.ts",
   "src/views/registerJsonExtension.ts",
   "src/views/jsonDocument.mjs",
@@ -55,6 +58,7 @@ const releaseWorkflow = readFileSync(join(distDir, ".github/workflows/release.ym
 const mobileSource = readFileSync(join(distDir, "mobile-src/main.ts"), "utf8");
 const csvSource = readFileSync(join(distDir, "src/csv/csvFiles.ts"), "utf8");
 const tableViewSource = readFileSync(join(distDir, "src/views/CsvzallTableView.ts"), "utf8");
+const frameSource = readFileSync(join(distDir, "src/views/ViewerFrameSession.ts"), "utf8");
 
 if (manifest.id !== "csvzall-mobile") {
   fail(`unexpected manifest id: ${manifest.id}`);
@@ -85,7 +89,7 @@ for (const marker of [
 if (!csvSource.includes("nextCsvPath") || !csvSource.includes("Untitled.csv")) {
   fail("shared CSV source snapshot is missing filename allocation");
 }
-if (!tableViewSource.includes("showWasmViewer") || !tableViewSource.includes("wasmViewerMessageFromData")) {
+if (!tableViewSource.includes("showWasmViewer") || !frameSource.includes("wasmViewerMessageFromData")) {
   fail("mobile source snapshot is missing the WASM viewer bridge implementation");
 }
 if (mobileSource.includes("Platform.isMobileApp")) {

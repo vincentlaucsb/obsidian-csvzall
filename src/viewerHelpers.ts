@@ -1,3 +1,5 @@
+import validateObject, { isBoolean, isString, literal } from "./utils/validateObject.js";
+
 type ProcessFailureContext = {
   executable: string;
   args: string[];
@@ -20,11 +22,7 @@ type MessageLike = {
 };
 
 type SessionHandle = {
-  stopping: boolean;
-  process: {
-    killed: boolean;
-    kill(): unknown;
-  };
+  stop(): void;
 };
 
 export function isAllowedViewerUrl(value: string): boolean {
@@ -82,6 +80,10 @@ export function formatProcessFailure({ executable, args, cwd, code, signal, stdo
   return parts.join("\n\n");
 }
 
+export const hasViewerUrl = validateObject({
+  url: (value): value is string => isString(value) && isAllowedViewerUrl(value),
+});
+
 export function extractViewerUrl(output: string): string | null {
   for (const line of output.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -90,8 +92,8 @@ export function extractViewerUrl(output: string): string | null {
     }
 
     try {
-      const parsed = JSON.parse(trimmed) as { url?: unknown };
-      if (typeof parsed.url === "string" && isAllowedViewerUrl(parsed.url)) {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (hasViewerUrl(parsed)) {
         return parsed.url;
       }
     } catch {
@@ -107,18 +109,11 @@ export function extractViewerUrl(output: string): string | null {
   return null;
 }
 
-export function isCsvzallDirtyStateMessage(value: unknown): value is DirtyStateMessage {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "source" in value &&
-      value.source === "csvzall-viewer" &&
-      "type" in value &&
-      value.type === "dirty-state" &&
-      "dirty" in value &&
-      typeof value.dirty === "boolean",
-  );
-}
+export const isCsvzallDirtyStateMessage = validateObject<DirtyStateMessage>({
+  source: literal("csvzall-viewer"),
+  type: literal("dirty-state"),
+  dirty: isBoolean,
+});
 
 export function csvzallDirtyStateFromMessageEvent(event: MessageLike, sourceWindow: unknown): boolean | null {
   if (!sourceWindow || event.source !== sourceWindow || !isCsvzallDirtyStateMessage(event.data)) {
@@ -164,9 +159,8 @@ export class ViewerSessionRegistry<TLeaf = unknown, THandle extends SessionHandl
 
   bindLeaf(leaf: TLeaf, handle: THandle): void {
     const existing = this.leafHandles.get(leaf);
-    if (existing && existing !== handle && !existing.process.killed) {
-      existing.stopping = true;
-      existing.process.kill();
+    if (existing && existing !== handle) {
+      existing.stop();
       this.detachHandle(existing);
     }
     this.leafHandles.set(leaf, handle);
@@ -180,17 +174,13 @@ export class ViewerSessionRegistry<TLeaf = unknown, THandle extends SessionHandl
 
     this.leafHandles.delete(leaf);
     this.handles = this.handles.filter((candidate) => candidate !== handle);
-    if (!handle.process.killed) {
-      handle.stopping = true;
-      handle.process.kill();
-    }
+    handle.stop();
     return handle;
   }
 
   shutdownAll(): void {
     for (const handle of this.handles) {
-      handle.stopping = true;
-      handle.process.kill();
+      handle.stop();
     }
     this.clear();
   }
