@@ -1,9 +1,10 @@
 import { randomUUID } from "crypto";
-import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "fs/promises";
+import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from "fs/promises";
 import { join } from "path";
 import { sha256Hex } from "./archive.js";
 import { decodeHelperPayload } from "./helperPayload.mjs";
 import { BUNDLED_CSVZALL_ASSETS, BUNDLED_CSVZALL_VERSION, BUNDLED_CSVZALL_SHARED } from "./bundledPayloads.generated.js";
+import { hasErrorCode } from "../utils/errors.js";
 
 export { BUNDLED_CSVZALL_VERSION };
 
@@ -38,6 +39,7 @@ export async function installBundledCsvzall({
   if (!/^\d+\.\d+\.\d+$/.test(version) || !/^[a-f0-9]{64}$/.test(asset.sha256) ||
       !/^[a-f0-9]{64}$/.test(asset.executableSha256) ||
       !/^[a-z0-9]+$/.test(platform) || !/^[a-z0-9]+$/.test(arch)) throw new Error("Invalid bundled csvzall metadata.");
+  if (!(await stat(pluginDir)).isDirectory()) throw new Error(`Expected a plugin directory: ${pluginDir}`);
   let bytes: Buffer;
   try {
     bytes = decodeHelperPayload(asset.brotliBase64, BUNDLED_CSVZALL_SHARED.sharedBrotliBase64);
@@ -50,7 +52,7 @@ export async function installBundledCsvzall({
   const installDir = join(pluginDir, "csvzall-bin", version, `${platform}-${arch}-${asset.sha256.slice(0, 16)}`);
   const files = new Map([[executableName, bytes]]);
   for (const directory of [join(pluginDir, "csvzall-bin"), join(pluginDir, "csvzall-bin", version), installDir]) {
-    await mkdir(directory, { recursive: true });
+    await mkdir(directory).catch((error: unknown) => { if (!hasErrorCode(error, "EEXIST")) throw error; });
     const entry = await lstat(directory);
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error(`Expected an ordinary directory: ${directory}`);
   }
@@ -58,8 +60,8 @@ export async function installBundledCsvzall({
   for (const [name, contents] of files) {
     if (!name || name === "." || name === ".." || /[/\\]/.test(name)) throw new Error("Invalid bundled filename.");
     const destination = join(installDir, name);
-    const existing = await lstat(destination).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
+    const existing = await lstat(destination).catch((error: unknown) => {
+      if (!hasErrorCode(error, "ENOENT")) throw error;
       return undefined;
     });
     if (existing && (!existing.isFile() || existing.isSymbolicLink())) throw new Error(`Expected a regular file: ${destination}`);

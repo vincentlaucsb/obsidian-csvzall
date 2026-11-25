@@ -20,13 +20,29 @@ const requiredFiles = [
   ".github/workflows/release.yml",
   ".github/workflows/validate.yml",
   "mobile-src/main.ts",
-  "mobile-src/WasmAssetInstaller.ts",
+  "mobile-src/LiteSettingsTab.ts",
+  "src/settings/autosave.ts",
+  "src/settings/jsonViewer.ts",
+  "src/views/WasmCsvSource.ts",
+  "src/obsidian/settingsModal.ts",
+  "mobile-src/WasmViewerSession.ts",
   "mobile-src/EmbeddedViewerDocument.ts",
   "mobile-src/manifest.json",
   "src/csv/csvFiles.ts",
   "src/utils/paths.ts",
+  "src/utils/validateObject.ts",
   "src/obsidian/pluginPaths.ts",
   "src/views/CsvzallTableView.ts",
+  "src/views/ViewerFrameSession.ts",
+  "src/views/viewerDocumentation.ts",
+  "src/views/JsonFileView.ts",
+  "src/views/autosave.mjs",
+  "src/views/autosave.d.mts",
+  "src/views/editorToolbar.mjs",
+  "src/views/editorToolbar.d.mts",
+  "src/views/registerJsonExtension.ts",
+  "src/views/jsonDocument.mjs",
+  "src/views/jsonDocument.d.mts",
   "src/views/UnsavedChangesModal.ts",
   "src/views/viewTypes.ts",
   "src/viewerHelpers.ts",
@@ -51,6 +67,7 @@ const releaseWorkflow = readFileSync(join(distDir, ".github/workflows/release.ym
 const mobileSource = readFileSync(join(distDir, "mobile-src/main.ts"), "utf8");
 const csvSource = readFileSync(join(distDir, "src/csv/csvFiles.ts"), "utf8");
 const tableViewSource = readFileSync(join(distDir, "src/views/CsvzallTableView.ts"), "utf8");
+const frameSource = readFileSync(join(distDir, "src/views/ViewerFrameSession.ts"), "utf8");
 
 if (manifest.id !== "csvzall-mobile") {
   fail(`unexpected manifest id: ${manifest.id}`);
@@ -81,7 +98,7 @@ for (const marker of [
 if (!csvSource.includes("nextCsvPath") || !csvSource.includes("Untitled.csv")) {
   fail("shared CSV source snapshot is missing filename allocation");
 }
-if (!tableViewSource.includes("showWasmViewer") || !tableViewSource.includes("wasmViewerMessageFromData")) {
+if (!tableViewSource.includes("showWasmViewer") || !frameSource.includes("wasmViewerMessageFromData")) {
   fail("mobile source snapshot is missing the WASM viewer bridge implementation");
 }
 if (mobileSource.includes("Platform.isMobileApp")) {
@@ -103,6 +120,7 @@ for (const pattern of bannedPatterns) {
 
 for (const marker of [
   "csvzall-mobile-embedded-wasm-viewer-v1",
+  "JSON editor",
   "csvzall-wasm-viewer",
   "wasm-viewer/index.html",
   "csvzall-mobile-view",

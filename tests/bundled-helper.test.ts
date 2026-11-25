@@ -39,6 +39,14 @@ test("bundled platform selection never silently substitutes another architecture
   }
 });
 
+test("bundled preparation leaves a missing host plugin directory absent", async t => {
+  const root = await mkdtemp(join(tmpdir(), "csvzall-missing-install-root-"));
+  cleanup(t, () => rm(root, { recursive: true, force: true }));
+  const pluginDir = join(root, "profile", "plugins", "csvzall");
+  await assert.rejects(installBundledCsvzall({ pluginDir }), { code: "ENOENT" });
+  await assert.rejects(stat(join(root, "profile")), { code: "ENOENT" });
+});
+
 for (const [target, asset] of Object.entries(BUNDLED_CSVZALL_ASSETS)) {
   test(`pinned ${target} executable extracts offline, survives reload, and repairs damaged files`, async t => {
     const pluginDir = await mkdtemp(join(tmpdir(), "csvzall-bundled-"));

@@ -3,6 +3,7 @@ import { parseChartDefinitions } from "../charts/ChartDefinitions.js";
 import { parseExportDefinitions } from "../markdown/ExportDefinitions.js";
 import { configRoot } from "./paths.js";
 import { isCanonicalVaultPath, resolveVaultRelativePath } from "../utils/paths.js";
+import validateObject, { arrayOf, isRecord, optional } from "../utils/validateObject.js";
 
 export const REVISION_PREFIX = "csvzallExportRevision:";
 export const SYNC_SCHEMA = 2;
@@ -23,9 +24,7 @@ export interface Revision {
   relocationValue?: JsonObject;
 }
 
-export function object(value: unknown): value is JsonObject {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
+export const object: (value: unknown) => value is JsonObject = isRecord;
 
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -45,25 +44,51 @@ export function configPath(path: string): boolean {
 export function identity(value: Pick<Revision, "path" | "id">): string { return JSON.stringify([value.path, value.id]); }
 export function revisionKey(value: Revision): string { return REVISION_PREFIX + digest(value); }
 
+const isConfigPath = (value: unknown): value is string => typeof value === "string" && configPath(value);
+const isNonnegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const isDeleteReason = (value: unknown): value is DeleteReason =>
+  value === "explicit" || value === "entry-removed" || value === "stale-sql" || value === "relocated";
+
+const isSupportedSyncSchema = validateObject({
+  version: value => value === 1 || value === SYNC_SCHEMA,
+});
+
+const isExportIdentity = validateObject<ExportIdentity>({
+  path: isConfigPath,
+  id: (value): value is string => typeof value === "string" && value.startsWith("entry:"),
+});
+
+type RelocationHistory = Pick<Revision, "relocatedFrom" | "relocatedTo" | "relocationValue">;
+
+const hasRevisionFields = validateObject<Omit<Revision, keyof RelocationHistory>>({
+  version: value => value === 1,
+  path: isConfigPath,
+  id: value => typeof value === "string",
+  clockMs: isNonnegativeInteger,
+  counter: isNonnegativeInteger,
+  origin: (value): value is string => typeof value === "string" && value.length > 0,
+  value: value => value === null || object(value),
+  reason: optional(isDeleteReason),
+});
+
+const hasRelocationHistory = validateObject<RelocationHistory>({
+  relocatedFrom: optional(isExportIdentity),
+  relocatedTo: optional(arrayOf(isExportIdentity)),
+  relocationValue: optional(object),
+});
+
 export function readRevisions(data: JsonObject): Map<string, Revision> {
   const result = new Map<string, Revision>();
-  if (data.csvzallExportSync !== undefined && (!object(data.csvzallExportSync) || typeof data.csvzallExportSync.version !== "number" || ![1, SYNC_SCHEMA].includes(data.csvzallExportSync.version))) {
+  if (data.csvzallExportSync !== undefined && !isSupportedSyncSchema(data.csvzallExportSync)) {
     throw new Error("Unsupported export Sync schema. Update the plugin before editing exports.");
   }
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key, revision] of Object.entries(data)) {
     if (!key.startsWith(REVISION_PREFIX)) continue;
-    if (!object(value) || value.version !== 1 || typeof value.path !== "string" || !configPath(value.path) ||
-      typeof value.id !== "string" || typeof value.origin !== "string" || !value.origin ||
-      !Number.isSafeInteger(value.clockMs) || Number(value.clockMs) < 0 || !Number.isSafeInteger(value.counter) || Number(value.counter) < 0 ||
-      !(value.value === null || object(value.value)) ||
-      (value.reason !== undefined && !["explicit", "entry-removed", "stale-sql", "relocated"].includes(String(value.reason)))) {
+    if (!hasRevisionFields(revision)) {
       throw new Error("Invalid reflected export revision. The previous configurations have been kept.");
     }
-    const revision = value as unknown as Revision;
-    const validIdentity = (item: unknown): item is ExportIdentity => object(item) && typeof item.path === "string" && configPath(item.path) && typeof item.id === "string" && item.id.startsWith("entry:");
-    if ((revision.relocatedFrom !== undefined && !validIdentity(revision.relocatedFrom)) ||
-        (revision.relocatedTo !== undefined && (!Array.isArray(revision.relocatedTo) || !revision.relocatedTo.every(validIdentity))) ||
-        (revision.relocationValue !== undefined && !object(revision.relocationValue))) throw new Error("Invalid export relocation history.");
+    if (!hasRelocationHistory(revision)) throw new Error("Invalid export relocation history.");
     if (revision.id !== "document" && !revision.id.startsWith("entry:")) throw new Error("Invalid export identity.");
     if (revision.value && revision.id.startsWith("entry:") && revision.value.id !== revision.id.slice(6)) throw new Error("Export identity does not match its definition.");
     if (key !== revisionKey(revision)) throw new Error("Export revision checksum does not match its content.");

@@ -235,7 +235,7 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /csvzall-viewer/);
   assert.match(bundle, /dirty-state/);
   assert.match(bundle, /Unsaved changes/);
-  assert.match(bundle, /This CSV has unsaved changes\./);
+  assert.match(bundle, /This file has unsaved changes\./);
   assert.match(bundle, /Discard changes/);
   assert.match(bundle, /openFile/);
   assert.match(bundle, /setViewState/);
@@ -246,14 +246,14 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /csvzall-mobile-toolbar/);
   assert.match(bundle, /panel-left/);
   assert.match(bundle, /viewport-resized/);
-  assert.doesNotMatch(bundle, /import\(["'](?:node:)?(?:child_process|path|fs(?:\/promises)?|https|crypto|zlib|electron|timers)["']\)/);
+  assert.doesNotMatch(bundle, /import\(["'](?:node:)?(?:child_process|string_decoder|path|fs(?:\/promises)?|https|crypto|zlib|electron|timers)["']\)/);
   assert.match(bundle, /require\(["']fs\/promises["']\)/);
   assert.doesNotMatch(installerServiceSource, /import\(/);
   assert.doesNotMatch(bundle, /csvzall-mobile-view-height/);
   // Loading may resend the theme, but must not reinstall mobile viewport shims.
-  const viewSource = readFileSync("src/views/CsvzallTableView.ts", "utf8");
-  const viewportHandler = viewSource.slice(viewSource.indexOf("private installMobileViewportHandler"), viewSource.indexOf("private removeMobileViewportHandler"));
-  assert.doesNotMatch(viewportHandler, /addEventListener\("load"/);
+  const sessionSource = readFileSync("src/views/ViewerFrameSession.ts", "utf8");
+  assert.match(sessionSource, /viewport-resized/);
+  assert.doesNotMatch(sessionSource, /addEventListener\("load"/);
 });
 
 test("settings normalize missing managed csvzall asset name", () => {
@@ -529,24 +529,16 @@ test("installer verifies with a release checksum asset when no digest is present
 test("ViewerSessionRegistry closes leaf-bound processes and unload kills remaining", () => {
   type TestHandle = {
     name: string;
-    stopping: boolean;
-    process: {
-      killed: boolean;
-      kill(): void;
-    };
+    stops: number;
+    stop(): void;
   };
 
   const registry = new ViewerSessionRegistry<{ id: string }, TestHandle>();
 
   const makeHandle = (name: string): TestHandle => ({
     name,
-    stopping: false,
-    process: {
-      killed: false,
-      kill() {
-        this.killed = true;
-      },
-    },
+    stops: 0,
+    stop() { this.stops++; },
   });
 
   const leafA = { id: "A" };
@@ -560,13 +552,12 @@ test("ViewerSessionRegistry closes leaf-bound processes and unload kills remaini
   registry.bindLeaf(leafB, handleB);
 
   registry.closeLeaf(leafA);
-  assert.equal(handleA.stopping, true);
-  assert.equal(handleA.process.killed, true);
+  assert.equal(handleA.stops, 1);
   assert.equal(registry.leafForHandle(handleA), null);
 
   registry.shutdownAll();
-  assert.equal(handleB.stopping, true);
-  assert.equal(handleB.process.killed, true);
+  assert.equal(handleB.stops, 1);
+  assert.equal(handleA.stops, 1);
   assert.equal(registry.list().length, 0);
 });
 

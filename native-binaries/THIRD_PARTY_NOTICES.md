@@ -2,6 +2,10 @@
 
 License notices for libraries included in the bundled csvzall Obsidian helpers. SQLite is in the public domain.
 
+## CodeMirror JSON editor
+
+The native JSON editor embeds CodeMirror, its Lezer JSON grammar, and their browser dependencies. Each bundled package’s copyright and license text is included at the top of the helper’s `/assets/modules/codemirror-json.mjs` asset. The upstream vendoring recipe lives in `vendor/codemirror-json/`.
+
 ## csv-parser
 
 MIT License

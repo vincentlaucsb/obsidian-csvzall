@@ -1,23 +1,31 @@
 import { Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { registerJsonView, updateJsonAutosave } from "../src/views/JsonFileView.js";
 import { CSV_EXTENSIONS, isCsv, nextCsvPath } from "../src/csv/csvFiles.js";
 import { parentVaultPath } from "../src/utils/paths.js";
-import { CsvzallTableView } from "../src/views/CsvzallTableView.js";
+import { CsvzallTableView, updateViewerAutosave } from "../src/views/CsvzallTableView.js";
+import { autosaveMode, type AutosaveMode } from "../src/settings/autosave.js";
+import { isRecord } from "../src/utils/validateObject.js";
+import { LiteSettingsTab } from "./LiteSettingsTab.js";
+import { defaultJsonViewer } from "../src/settings/jsonViewer.js";
+import { openPluginSettings } from "../src/obsidian/settingsModal.js";
 import {
   embeddedWasmViewerUrl,
-  ensureEmbeddedWasmViewerAssets,
   releaseEmbeddedWasmViewer,
-} from "./WasmAssetInstaller.js";
+} from "./WasmViewerSession.js";
 
 const VIEW_TYPE_CSVZALL_MOBILE = "csvzall-mobile-view";
 const DEFAULT_CSV_TEXT = "column\n";
 
 export default class CsvzallMobilePlugin extends Plugin {
   private assetError = "";
+  settings: { autosaveMode: AutosaveMode; defaultJsonViewer: boolean } = { autosaveMode: "off", defaultJsonViewer: true };
+  private settingsWrite = Promise.resolve();
 
   async onload(): Promise<void> {
+    await this.onExternalSettingsChange();
+    this.addSettingTab(new LiteSettingsTab(this));
     try {
-      await ensureEmbeddedWasmViewerAssets(this.app, this.manifest);
-      embeddedWasmViewerUrl(this.app, this.manifest);
+      embeddedWasmViewerUrl();
     } catch (error) {
       this.assetError = error instanceof Error ? error.message : String(error);
       console.error("csvzall Lite failed to install bundled WASM viewer assets", error);
@@ -28,9 +36,39 @@ export default class CsvzallMobilePlugin extends Plugin {
       (leaf) => new CsvzallTableView(leaf, this, VIEW_TYPE_CSVZALL_MOBILE),
     );
     this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL_MOBILE);
+    registerJsonView(this, this.settings.defaultJsonViewer, () => this.settings.autosaveMode);
     this.addRibbonIcon("table", "New CSV", () => void this.createCsvInActiveFolder());
     this.registerCsvCommands();
     this.registerCsvFileMenu();
+  }
+
+  async onExternalSettingsChange(): Promise<void> {
+    try {
+      const data: unknown = await this.loadData();
+      this.settings.defaultJsonViewer = defaultJsonViewer(isRecord(data) ? data.defaultJsonViewer : undefined);
+      this.applyAutosave(autosaveMode(isRecord(data) ? data.autosaveMode : undefined));
+    } catch (error) {
+      new Notice(`Could not read csvzall Lite settings: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private applyAutosave(mode: AutosaveMode): void {
+    if (this.settings.autosaveMode === mode) return;
+    this.settings.autosaveMode = mode;
+    updateViewerAutosave(this.app.workspace, VIEW_TYPE_CSVZALL_MOBILE);
+    updateJsonAutosave(this);
+  }
+
+  saveSettings(patch: Partial<CsvzallMobilePlugin["settings"]>): Promise<void> {
+    this.settingsWrite = this.settingsWrite.then(async () => {
+      const data: unknown = await this.loadData();
+      await this.saveData({ ...(isRecord(data) ? data : {}), ...patch });
+      if (patch.autosaveMode !== undefined) this.applyAutosave(patch.autosaveMode);
+      if (patch.defaultJsonViewer !== undefined) this.settings.defaultJsonViewer = patch.defaultJsonViewer;
+    }).catch((error: unknown) => {
+      new Notice(`Could not save csvzall Lite settings: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return this.settingsWrite;
   }
 
   handleLeafClosed(_leaf: WorkspaceLeaf): void {
@@ -50,7 +88,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       return;
     }
 
-    leaf.view.showWasmViewer(file.basename, embeddedWasmViewerUrl(this.app, this.manifest), file);
+    leaf.view.showWasmViewer(file.basename, embeddedWasmViewerUrl(), file);
   }
 
   async installCsvzallFromView(_file: TFile, _leaf: WorkspaceLeaf): Promise<boolean> {
@@ -59,10 +97,17 @@ export default class CsvzallMobilePlugin extends Plugin {
   }
 
   openCsvzallSettings(): void {
-    new Notice("csvzall Lite does not have desktop helper settings.");
+    openPluginSettings(this.app, this.manifest.id);
   }
 
   private async openCsv(file: TFile): Promise<void> {
+    try { await this.openCsvView(file); }
+    catch (error) {
+      new Notice(`csvzall Lite failed to open CSV: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async openCsvView(file: TFile): Promise<void> {
     const leaf = this.app.workspace.getLeaf(true);
     await leaf.setViewState({
       type: VIEW_TYPE_CSVZALL_MOBILE,
@@ -76,7 +121,7 @@ export default class CsvzallMobilePlugin extends Plugin {
     try {
       const path = nextCsvPath(folder.path, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
-      await this.openCsv(file);
+      await this.openCsvView(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`csvzall Lite failed to create CSV: ${message}`);
@@ -90,7 +135,7 @@ export default class CsvzallMobilePlugin extends Plugin {
     try {
       const path = nextCsvPath(folderPath, candidate => !!this.app.vault.getAbstractFileByPath(candidate));
       const file = await this.app.vault.create(path, DEFAULT_CSV_TEXT);
-      await this.openCsv(file);
+      await this.openCsvView(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`csvzall Lite failed to create CSV: ${message}`);

@@ -4,7 +4,7 @@ import { webcrypto } from "node:crypto";
 import type { DataAdapter } from "obsidian";
 import { ExportReflection } from "../src/exports/ExportReflection.js";
 import { PluginDataStore } from "../src/settings/PluginDataStore.js";
-import { canonical, readRevisions, winners, revisionKey, type JsonObject } from "../src/exports/revisions.js";
+import { canonical, digest, readRevisions, REVISION_PREFIX, winners, revisionKey, type JsonObject } from "../src/exports/revisions.js";
 import type { ExportReference } from "../src/exports/localFolders.js";
 
 if (!globalThis.crypto) Object.defineProperty(globalThis, "crypto", { value: webcrypto });
@@ -332,7 +332,10 @@ async function device(initial: string | null = config(), clock = 1000, data: Jso
   const adapter = {
     exists: async (path: string) => files.has(path) || directories.has(path),
     read: async (path: string) => { const text = files.get(path); if (text === undefined) throw new Error(`Missing ${path}`); return text; },
-    stat: async (path: string) => files.has(path) ? { type: "file", mtime: times.get(path) ?? now, ctime: 0, size: files.get(path)!.length } : null,
+    stat: async (path: string) => {
+      if (files.has(path)) return { type: "file", mtime: times.get(path) ?? now, ctime: 0, size: files.get(path)!.length };
+      return directories.has(path) ? { type: "folder", mtime: now, ctime: 0, size: 0 } : null;
+    },
     mkdir: async (path: string) => { directories.add(path); },
     write: async (path: string, text: string) => { writes++; files.set(path, text); times.set(path, now); },
     process: async (path: string, update: (text: string) => string) => { const text = update(files.get(path)!); files.set(path, text); times.set(path, now); return text; },
@@ -342,15 +345,144 @@ async function device(initial: string | null = config(), clock = 1000, data: Jso
   const store = new PluginDataStore({ load: async () => structuredClone(disk), save: async value => { disk = structuredClone(value); } });
   await store.initialize();
   const errors: unknown[] = [];
-  const reflection = new ExportReflection({ adapter, store, localDirectory: ".obsidian/plugins/csvzall/export-sync-local",
+  const options = { adapter, store, localDirectory: ".obsidian/plugins/csvzall/export-sync-local",
     folders: () => { scans.folders++; return [...directories].filter(path => !path.startsWith(".")); }, report: error => errors.push(error), changed: () => { changes++; }, now: () => now,
-    directFolders, deferDiscovery, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } });
+    directFolders, deferDiscovery, references: async () => { scans.notes++; if (scan.fail) throw new Error("Unreadable note"); return scan.complete ? references : { references, complete: false }; } } satisfies ConstructorParameters<typeof ExportReflection>[0];
+  const reflection = new ExportReflection(options);
   await reflection.initialize();
   return { files, times, adapter, store, reflection, errors, directories, references, scan, scans,
+    async restartReflection() { const restarted = new ExportReflection(options); await restarted.initialize(); return restarted; },
     get data() { return structuredClone(disk); }, set data(value: JsonObject) { disk = structuredClone(value); },
     edit(text: string, time: number) { files.set(path, text); times.set(path, time); now = time; },
     get writes() { return writes; }, get changes() { return changes; } };
 }
+
+test("three background misses retire an empty chart scope and later Sync edits can restore it", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const old = "Set Ledger/Exports/.csvzall/charts.json";
+  const owner = "Set Ledger/Exports";
+  const empty = '{"charts":[]}';
+  a.directories.add(owner);
+  a.files.set(old, empty);
+  await a.reflection.reconcile();
+  const original = [...readRevisions(a.data).values()].find(record => record.path === old)!;
+  const other = await device(null, 1000, a.data, true, [], true);
+  await other.reflection.reconcile();
+  assert.equal(other.reflection.pending, true, "the owner has not arrived on the other device");
+  a.files.delete(old);
+  a.directories.delete(owner);
+  await a.reflection.reconcile();
+  await a.reflection.reconcile();
+  await a.reflection.reconcileCharts(owner + "/data.csv");
+  assert.ok(a.reflection.knownConfigPaths().includes(old));
+  a.directories.add(owner);
+  await a.reflection.reconcileCharts(owner + "/data.csv");
+  assert.deepEqual(JSON.parse(a.files.get(old)!), { charts: [] });
+  a.files.delete(old);
+  a.directories.delete(owner);
+  await a.reflection.reconcile();
+  await a.reflection.reconcile();
+  assert.ok(a.reflection.knownConfigPaths().includes(old));
+  // The file reappears, then disappears between the existence check and read.
+  a.files.set(old, empty);
+  const read = a.adapter.read;
+  a.adapter.read = async path => {
+    if (path === old) {
+      a.files.delete(old);
+      throw Object.assign(new Error("Moved during read"), { code: "ENOENT" });
+    }
+    return read(path);
+  };
+  await a.reflection.reconcile();
+  a.adapter.read = read;
+  await a.reflection.reconcile();
+  await a.reflection.reconcile();
+  assert.ok(a.reflection.knownConfigPaths().includes(old));
+  await a.reflection.reconcile();
+  assert.equal(a.reflection.knownConfigPaths().includes(old), false);
+  other.data = a.data;
+  await other.reflection.reconcile();
+  assert.equal(other.reflection.pending, false, "the deletion clears the other device's pending restoration");
+  const restarted = await a.restartReflection();
+  assert.equal(restarted.knownConfigPaths().includes(old), false);
+  const stable = canonical(a.data);
+  await restarted.reconcile();
+  assert.equal(canonical(a.data), stable);
+  const later = { ...original, clockMs: original.clockMs + 1, value: { metadata: { custom: true }, order: [] } };
+  a.data = { ...a.data, [revisionKey(later)]: later };
+  a.directories.add(owner);
+  await restarted.reconcile();
+  assert.deepEqual(JSON.parse(a.files.get(old)!), { custom: true, charts: [] });
+  assert.deepEqual(a.errors, []);
+});
+
+test("a folder access error interrupts consecutive misses and preserves the empty chart config", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const old = "Old/" + path;
+  a.directories.add("Old");
+  a.files.set(old, '{"charts":[]}');
+  await a.reflection.reconcile();
+  a.files.delete(old);
+  a.directories.delete("Old");
+  await a.reflection.reconcile();
+  await a.reflection.reconcile();
+  const stat = a.adapter.stat;
+  const denied = Object.assign(new Error("Access denied"), { code: "EACCES" });
+  a.adapter.stat = async path => {
+    if (path === "Old") throw denied;
+    return stat(path);
+  };
+  await a.reflection.reconcile();
+  assert.ok(a.errors.includes(denied));
+  a.adapter.stat = stat;
+  await a.reflection.reconcile();
+  await a.reflection.reconcile();
+  assert.ok(a.reflection.knownConfigPaths().includes(old));
+  a.directories.add("Old");
+  await a.reflection.reconcile();
+  assert.deepEqual(JSON.parse(a.files.get(old)!), { charts: [] });
+});
+
+test("missing folders retain chart definitions and custom document metadata across repeated checks", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const originals = new Map([
+    ["Metadata", '{"charts":[],"custom":true}'],
+    ["Charts", '{"charts":[{"id":"one","type":"line","input":"data.csv"}]}'],
+  ]);
+  for (const [folder, content] of originals) {
+    a.directories.add(folder);
+    a.files.set(folder + "/" + path, content);
+  }
+  await a.reflection.reconcile();
+  for (const folder of originals.keys()) {
+    a.directories.delete(folder);
+    a.files.delete(folder + "/" + path);
+  }
+  const stable = canonical(a.data);
+  for (let poll = 0; poll < 4; poll++) await a.reflection.reconcile();
+  assert.equal(canonical(a.data), stable);
+  for (const folder of originals.keys()) a.directories.add(folder);
+  await a.reflection.reconcile();
+  for (const [folder, content] of originals) assert.deepEqual(JSON.parse(a.files.get(folder + "/" + path)!), JSON.parse(content));
+});
+
+test("the journal retains completed config moves for ordered note rebasing after reload", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  await a.reflection.renamed("Data", "Moved", true);
+  await a.reflection.renamed("Moved", "Final", true);
+  await a.reflection.rememberRewrittenBlock(a.reflection.nextNoteRename()!, "rebased-target");
+  const restarted = await a.restartReflection();
+  await restarted.reconcile();
+  const first = restarted.nextNoteRename()!;
+  assert.equal(first.to, "Moved");
+  assert.deepEqual(first.rewrittenBlocks, ["rebased-target"]);
+  await restarted.reconcile();
+  await restarted.finishNoteRename(first);
+  const second = restarted.nextNoteRename()!;
+  assert.equal(second.to, "Final");
+  await restarted.finishNoteRename(second);
+  assert.equal((await a.restartReflection()).hasNoteRenames, false);
+});
 
 test('hidden SQL pause changes notify consumers even when the CLI file needs no write', async () => {
   const a = await device(null);
@@ -530,6 +662,19 @@ test("settings saves preserve unknown fields, incoming exports, and independent 
   assert.ok(readRevisions(a.data).size);
 });
 
+test("a checksummed deletion revision requires a literal delete reason", () => {
+  const tombstone = {
+    version: 1, path, id: "entry:one", origin: "device-a", clockMs: 2000, counter: 0,
+    value: null, reason: "explicit", extra: { retained: true },
+  } as const;
+  const key = revisionKey(tombstone);
+  assert.equal(readRevisions({ [key]: tombstone }).get(key), tombstone);
+
+  const malformed = { ...tombstone, reason: ["explicit"] };
+  const matchingKey = REVISION_PREFIX + digest(malformed);
+  assert.throws(() => readRevisions({ [matchingKey]: malformed }), /Invalid reflected export revision/);
+});
+
 test("unsafe paths and tampered revisions cannot be materialized", async () => {
   const a = await device();
   const entries = [...readRevisions(a.data).values()];
@@ -560,6 +705,55 @@ test("folder renames preserve unobserved CLI edits, publish tombstones and rebas
   assert.equal(JSON.parse(a.files.get(next)!).charts[0].options.label, "offline-edit-before-rename");
   const b = await device(null, 9000, a.data); b.directories.add("Moved"); b.directories.add("Project");
   await b.reflection.reconcile(); assert.equal(b.files.has(old), false); assert.ok(b.files.has(next));
+});
+
+test("a destination flickering into view during rename keeps the source revisions until retry", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const old = "Project/.csvzall/charts.json", next = "Moved/.csvzall/charts.json";
+  const content = { custom: { keep: true }, charts: [{ id: "one", input: "data.csv", type: "bar" }] };
+  a.directories.add("Project"); a.files.set(old, JSON.stringify(content));
+  await a.reflection.reconcile();
+  a.directories.delete("Project"); a.directories.add("Moved"); a.files.delete(old);
+  const exists = a.adapter.exists, read = a.adapter.read;
+  let probes = 0;
+  a.adapter.exists = async file => file === next ? ++probes > 1 : exists(file);
+  a.adapter.read = async file => {
+    if (file === next) throw Object.assign(new Error("Destination disappeared"), { code: "ENOENT" });
+    return await read(file);
+  };
+  await assert.rejects(a.reflection.renamed("Project", "Moved"), /appeared while handling rename/);
+  assert.ok(a.reflection.pending);
+  assert.equal([...readRevisions(a.data).values()].some(entry => entry.path === old && entry.value === null), false);
+  a.adapter.exists = exists; a.adapter.read = read;
+  await a.reflection.reconcile();
+  assert.deepEqual(JSON.parse(a.files.get(next)!), content);
+  assert.equal(a.files.has(old), false);
+});
+
+test("rename retries import late destination-only charts and metadata before retiring the source", async () => {
+  const a = await device(null, 1000, {}, true, [], true);
+  const old = "Project/.csvzall/charts.json", next = "Moved/.csvzall/charts.json";
+  const original = { id: "one", input: "data.csv", type: "bar" };
+  const extra = { id: "two", input: "other.csv", type: "bar" };
+  a.directories.add("Project"); a.files.set(old, JSON.stringify({ charts: [original] }));
+  await a.reflection.reconcile();
+  a.directories.delete("Project"); a.directories.add("Moved"); a.files.delete(old);
+  const exists = a.adapter.exists;
+  let probes = 0;
+  a.adapter.exists = async file => {
+    if (file === next && ++probes === 2) {
+      a.files.set(next, JSON.stringify({ charts: [original, extra], added: { keep: true } }));
+      a.times.set(next, 2000);
+    }
+    return await exists(file);
+  };
+  await assert.rejects(a.reflection.renamed("Project", "Moved"), /appeared while handling rename/);
+  assert.deepEqual(JSON.parse(a.files.get(next)!).charts, [original, extra]);
+  await a.reflection.reconcile();
+  const moved = JSON.parse(a.files.get(next)!);
+  assert.deepEqual(moved.added, { keep: true });
+  assert.deepEqual(moved.charts.map((entry: { id: string }) => entry.id).sort(), ["one", "two"]);
+  assert.equal(a.files.has(old), false);
 });
 
 test("a materialization error blocks only its scope and preserves unrelated generation", async () => {
@@ -666,4 +860,24 @@ test("a revision observed in a racing second disk read is retained and republish
   await store.initialize();
   await store.patch({ openInObsidian: false });
   assert.deepEqual(disk[key], revision);
+});
+
+test("unchanged reflection takes one disk read and restores revisions dropped by Sync", async () => {
+  const a = await device();
+  const [key, revision] = [...readRevisions(a.data)][0]!;
+  let disk: JsonObject = { [key]: revision, csvzallExportSync: { version: 2 } };
+  let reads = 0, writes = 0;
+  const store = new PluginDataStore({
+    load: async () => { reads++; return structuredClone(disk); },
+    save: async value => { writes++; disk = structuredClone(value); },
+  });
+  await store.patch(structuredClone(disk));
+  assert.equal(reads, 1);
+  assert.equal(writes, 0);
+  delete disk[key];
+  await store.patch({ csvzallExportSync: { version: 2 } });
+  assert.deepEqual(disk[key], revision);
+  assert.equal(writes, 1);
+  disk[key] = { ...revision, origin: revision.origin + "-changed" };
+  await assert.rejects(store.patch({}), /checksum/);
 });

@@ -16,7 +16,7 @@ class File {
   constructor(public path: string) {}
 }
 
-async function startup(noteCount: number) {
+async function startup(noteCount: number, disappearingPaths = false) {
   const root = new Folder("");
   for (let i = 0; i < noteCount; i++) {
     const folder = new Folder(`notes-${i}`);
@@ -33,18 +33,27 @@ async function startup(noteCount: number) {
   const intervals = new Map<number, () => unknown>();
   let timerId = 0, noteReads = 0, globalScans = 0, adapterCalls = 0;
   let disk: unknown = null;
+  let saveUnavailable = disappearingPaths;
+  const journal = ".obsidian/plugins/csvzall/export-sync-local/state.json";
+  const missing = () => Object.assign(new Error("Path disappeared"), { code: "ENOENT" });
   const notices: string[] = [];
   const local = new Map<string, unknown>();
   const adapter = {
-    exists: async (path: string) => { adapterCalls++; return files.has(path); },
-    read: async (path: string) => { adapterCalls++; assert.ok(files.has(path), `missing ${path}`); return files.get(path)!; },
+    exists: async (path: string) => { adapterCalls++; return files.has(path) || disappearingPaths && path === journal; },
+    read: async (path: string) => {
+      adapterCalls++;
+      if (disappearingPaths && path === journal && !files.has(path)) throw missing();
+      assert.ok(files.has(path), `missing ${path}`);
+      return files.get(path)!;
+    },
     write: async (path: string, text: string) => { files.set(path, text); },
     mkdir: async (_path: string) => {},
     rename: async (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
     remove: async (path: string) => { files.delete(path); },
     process: async (path: string, change: (text: string) => string) => { files.set(path, change(files.get(path)!)); },
     list: async (_path: string) => { adapterCalls++; return { files: [], folders: [] }; },
-    stat: async (path: string) => files.has(path) ? { mtime: 1, size: files.get(path)!.length, type: "file" } : null,
+    stat: async (path: string) => files.has(path) || disappearingPaths && path === journal
+      ? { mtime: 1, size: files.get(path)?.length ?? 0, type: "file" } : null,
   };
   const app = {
     loadLocalStorage: (key: string) => local.get(key),
@@ -69,8 +78,9 @@ async function startup(noteCount: number) {
     commands: unknown[] = [];
     views: string[] = [];
     cleanup: Array<() => void> = [];
+    // Obsidian can suppress a write error and return null on the following read.
     async loadData() { return disk; }
-    async saveData(value: unknown) { disk = structuredClone(value); }
+    async saveData(value: unknown) { if (!saveUnavailable) disk = structuredClone(value); }
     register(callback: () => void) { this.cleanup.push(callback); }
     registerEvent(_event: unknown) {}
     registerInterval(_id: number) {}
@@ -107,9 +117,21 @@ async function startup(noteCount: number) {
   const plugin = new module.exports.default();
   await plugin.onload();
   const settle = async () => { for (let i = 0; i < 10; i++) await new Promise<void>(resolve => setImmediate(resolve)); };
-  return { plugin, timers, intervals, notices, settle, get noteReads() { return noteReads; },
+  return { plugin, timers, intervals, notices, settle, restorePluginData: () => { saveUnavailable = false; }, get noteReads() { return noteReads; },
     get globalScans() { return globalScans; }, get adapterCalls() { return adapterCalls; }, get disk() { return disk; } };
 }
+
+test("desktop registers its CSV view when plugin data and the optional journal disappear during startup", async () => {
+  const run = await startup(0, true);
+  try {
+    assert.ok(run.plugin.views.includes("csvzall-view"));
+    assert.equal(run.globalScans, 0);
+    assert.equal(run.disk, null);
+    run.restorePluginData();
+    await run.plugin.saveSettings();
+    assert.deepEqual(JSON.parse(JSON.stringify(run.disk)), {});
+  } finally { run.plugin.onunload(); for (const cleanup of run.plugin.cleanup) cleanup(); }
+});
 
 for (const noteCount of [0, 120]) {
   test(`actual plugin onload completes first install with ${noteCount} ordinary notes and no CSV`, async () => {

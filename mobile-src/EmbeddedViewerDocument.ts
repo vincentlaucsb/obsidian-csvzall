@@ -14,8 +14,8 @@ export function createEmbeddedViewerDocument(assets: readonly ViewerAsset[]): { 
   const index = assets.find(asset => asset.path === "wasm-viewer/index.html");
   if (!index) throw new Error("The bundled viewer is missing index.html.");
   let html = new TextDecoder().decode(assetBytes(index));
-  if (!html.includes('name="csvzall-embedded-assets"')) {
-    throw new Error("The bundled viewer requires an embedded build with an inline worker and WASM engine.");
+  if (!html.includes('name="csvzall-embedded-assets" content="v2"')) {
+    throw new Error("The bundled viewer requires an embedded build with a shared CSV worker script.");
   }
   const urls: string[] = [];
   const dispose = (): void => { for (const url of urls) URL.revokeObjectURL(url); urls.length = 0; };

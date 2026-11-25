@@ -7,7 +7,7 @@ import type { Setting } from "obsidian";
 import { addExportActions } from "../src/settings/exportActions.js";
 
 const compiled = buildSync({ entryPoints: ["src/settings/ExportModals.ts"], bundle: true, write: false,
-  platform: "node", format: "cjs", external: ["obsidian"] }).outputFiles[0]!.text;
+  platform: "node", format: "cjs", external: ["obsidian", "*/chart-form.mjs"] }).outputFiles[0]!.text;
 
 class Element {
   text = "";
@@ -17,6 +17,9 @@ class Element {
   createEl(_tag: string, options: { text?: string } = {}) {
     const child = new Element(); child.text = options.text ?? ""; this.children.push(child); return child;
   }
+  createDiv() { const child = new Element(); this.children.push(child); return child; }
+  querySelector() { return null; }
+  addClass() {}
   empty() { this.children = []; this.rows = []; }
 }
 class Button {
@@ -49,8 +52,10 @@ const file: FileExports = { source: "Data/sales.csv", missing: false, entries: [
 ] };
 
 function fixture() {
+  let formOptions: any;
   const opened: BaseModal[] = [], notices: string[] = [];
   class BaseModal {
+    modalEl = new Element();
     titleEl = new Element();
     contentEl = new Element();
     closed = false;
@@ -61,9 +66,11 @@ function fixture() {
     onClose() {}
   }
   const module = { exports: {} as any };
-  runInNewContext(compiled, { module, exports: module.exports, Error, require: () => ({ Modal: BaseModal, Setting: Row,
+  runInNewContext(compiled, { module, exports: module.exports, Error, require: (name: string) => name.endsWith("chart-form.mjs") ? {
+    createChartForm() {}, mountChartForm(_root: unknown, options: unknown) { formOptions = options; return { open: async () => {}, dispose() {} }; },
+  } : ({ Modal: BaseModal, Setting: Row,
     Notice: class { constructor(message: string) { notices.push(message); } } }) });
-  return { modals: module.exports, opened, notices };
+  return { modals: module.exports, opened, notices, get formOptions() { return formOptions; } };
 }
 
 test("export action callbacks preserve their receiver", async () => {
@@ -151,3 +158,20 @@ test(`failed ${label} deletion keeps the dialog open and permits retry`, async (
   assert.equal(picker.closed, true);
 });
 }
+
+
+test('chart SQL discovery uses a source query callback without generating a chart', async () => {
+  const f = fixture(), columns: Array<[string, string | undefined]> = [];
+  let generated = 0;
+  const entry = file.entries[0]!;
+  if (entry.kind !== 'chart') throw new Error('fixture');
+  const modal = new f.modals.ChartOptionsModal({}, entry.chart, {}, {
+    loadColumns: async (source: string, sql?: string) => { columns.push([source, sql]); return sql ? ['training_date', 'estimated_1rm'] : ['date', 'weight', 'reps']; },
+  }, { runCommand: async () => { ++generated; } }, 'vault', () => {});
+  modal.open();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const sql = 'SELECT date AS training_date, weight AS estimated_1rm FROM data';
+  assert.deepEqual(Array.from(await f.formOptions.loadQueryColumns(sql)), ['training_date', 'estimated_1rm']);
+  assert.deepEqual(columns, [[entry.chart.source, undefined], [entry.chart.source, sql]]);
+  assert.equal(generated, 0);
+});

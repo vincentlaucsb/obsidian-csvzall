@@ -1,12 +1,16 @@
 import { Notice, Platform } from "obsidian";
+import { lstat } from "fs/promises";
 import { installBundledCsvzall } from "./bundledInstall.js";
 import type { EventLog } from "../logging/EventLog.js";
 import type { ObsidianFilesystem } from "../obsidian/filesystem.js";
 import type { CsvzallPluginSettings } from "../settings/settings.js";
+import { hasErrorCode } from "../utils/errors.js";
 
 export class InstallerService {
   private pending?: Promise<boolean>;
   private preparedPath?: string;
+  private preparedBundled?: { pluginDir: string; result: Awaited<ReturnType<typeof installBundledCsvzall>> };
+  private preparingBundled?: Promise<Awaited<ReturnType<typeof installBundledCsvzall>>>;
 
   constructor(
     private readonly getSettings: () => CsvzallPluginSettings,
@@ -22,6 +26,30 @@ export class InstallerService {
 
   async installDesktopCsvzall(): Promise<boolean> {
     return await this.install(true);
+  }
+
+  /** Share completed preparation with agent setup without changing viewer settings. */
+  async prepareBundledHelper(repair = true): Promise<Awaited<ReturnType<typeof installBundledCsvzall>>> {
+    if (this.preparingBundled) return await this.preparingBundled;
+    const pluginDir = this.filesystem.getPluginDataDir();
+    if (!pluginDir) throw new Error("Could not resolve the plugin data directory.");
+    const cached = this.preparedBundled;
+    if (!repair && cached?.pluginDir === pluginDir) {
+      const info = await lstat(cached.result.executablePath).catch((error: unknown) => {
+        if (!hasErrorCode(error, "ENOENT")) throw error;
+      });
+      // Only full preparation is shared. Explicit repair may have started during the probe.
+      if (this.preparingBundled) return this.preparingBundled;
+      if (this.preparedBundled?.pluginDir === pluginDir && this.preparedBundled !== cached) return this.preparedBundled.result;
+      if (info?.isFile() && this.preparedBundled === cached) return cached.result;
+    }
+    this.preparedBundled = undefined;
+    this.preparingBundled = installBundledCsvzall({ pluginDir });
+    try {
+      const result = await this.preparingBundled;
+      this.preparedBundled = { pluginDir, result };
+      return result;
+    } finally { this.preparingBundled = undefined; }
   }
 
   getExecutablePath(): string {
@@ -45,9 +73,7 @@ export class InstallerService {
     const initialPath = this.getSettings().csvzallPath;
     this.preparedPath = undefined;
     try {
-      const pluginDir = this.filesystem.getPluginDataDir();
-      if (!pluginDir) throw new Error("Could not resolve the plugin data directory.");
-      const result = await installBundledCsvzall({ pluginDir });
+      const result = await this.prepareBundledHelper();
       const settings = this.getSettings();
       if (settings.csvzallPath !== initialPath || settings.csvzallExecutableMode !== initialMode) return false;
       const changed = result.changed || settings.csvzallPath !== result.executablePath ||

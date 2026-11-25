@@ -1,10 +1,9 @@
-import type { ChildProcessWithoutNullStreams } from "child_process";
+import type { CsvzallProcess } from "./process/CsvzallProcess.js";
 
 export interface CsvzallServerHandle {
   filePath: string;
-  process: ChildProcessWithoutNullStreams;
+  process: CsvzallProcess;
   url: string;
-  stopping: boolean;
 }
 
 export interface ConfiguredChart {

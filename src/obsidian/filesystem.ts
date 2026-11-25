@@ -1,5 +1,8 @@
 import { FileSystemAdapter, TFile, type App, type PluginManifest } from "obsidian";
+import { mkdir } from "fs/promises";
+import { join } from "path";
 import { pluginVaultDirectory } from "./pluginPaths.js";
+import { hasErrorCode } from "../utils/errors.js";
 
 export class ObsidianFilesystem {
   constructor(
@@ -39,5 +42,12 @@ export class ObsidianFilesystem {
     const directory = pluginVaultDirectory(this.app.vault.configDir, { id: this.manifest.id, dir: this.manifest.dir || undefined });
     const pluginPath = `${directory}/${relativePath}`;
     return this.app.vault.adapter.getResourcePath(pluginPath.replace(/\\/g, "/"));
+  }
+
+  async createPluginSubdirectory(name: string): Promise<void> {
+    const directory = this.getPluginDataDir();
+    if (!directory) throw new Error("Could not resolve the plugin directory.");
+    try { await mkdir(join(directory, name)); }
+    catch (error) { if (!hasErrorCode(error, "EEXIST")) throw error; }
   }
 }

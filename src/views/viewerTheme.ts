@@ -1,16 +1,34 @@
 import type { Workspace } from "obsidian";
+import validateObject, { literal } from "../utils/validateObject.js";
+
+const isThemeReady = validateObject({
+  source: literal("csvzall-viewer"), type: literal("theme-ready"), version: literal(1),
+});
 
 export const viewerThemeVariables = [
   "--background-primary", "--background-secondary", "--background-modifier-hover",
   "--background-modifier-border", "--text-normal", "--text-muted", "--text-faint",
   "--text-error", "--text-on-accent", "--interactive-accent", "--font-interface",
+  "--font-text", "--font-monospace",
 ] as const;
 
-export function viewerThemeMessage(style: Pick<CSSStyleDeclaration, "getPropertyValue">, dark: boolean) {
+const themeLengths = [
+  "--font-preferred-size", "--font-text-size", "--font-ui-medium", "--font-ui-smaller",
+  "--size-4-1", "--size-4-2", "--size-4-3", "--size-4-4", "--input-height",
+] as const;
+
+export function viewerThemeMessage(style: Pick<CSSStyleDeclaration, "getPropertyValue">, dark: boolean,
+  resolveLength: (value: string) => string) {
   const variables: Record<string, string> = {};
   for (const name of viewerThemeVariables) {
     const value = style.getPropertyValue(name).trim();
     if (value) variables[name] = value;
+  }
+  for (const name of themeLengths) {
+    const value = style.getPropertyValue(name).trim();
+    if (!value) continue;
+    const pixels = /^\d+(?:\.\d+)?px$/.test(value) ? value : resolveLength(value);
+    if (pixels) variables[name] = pixels;
   }
   return { source: "obsidian-csvzall", type: "theme", version: 1, mode: dark ? "dark" : "light", variables };
 }
@@ -23,10 +41,23 @@ export function synchronizeViewerTheme(container: HTMLElement, frame: HTMLIFrame
   let pending = 0;
   let previous = "";
   let disposed = false;
+  let lengthProbe: HTMLSpanElement | undefined;
+
+  // Themes can use em, rem and calc(). Resolve those lengths in the host window.
+  const resolveLength = (value: string): string => {
+    if (!lengthProbe) {
+      lengthProbe = doc.createElement("span");
+      lengthProbe.hidden = true;
+      container.appendChild(lengthProbe);
+    }
+    lengthProbe.style.removeProperty("font-size");
+    lengthProbe.style.fontSize = value;
+    return lengthProbe.style.fontSize ? win.getComputedStyle(lengthProbe).fontSize : "";
+  };
 
   const send = (force = false): void => {
     if (disposed || !frame.contentWindow) return;
-    const message = viewerThemeMessage(win.getComputedStyle(container), doc.body.classList.contains("theme-dark"));
+    const message = viewerThemeMessage(win.getComputedStyle(container), doc.body.classList.contains("theme-dark"), resolveLength);
     const serialized = JSON.stringify(message);
     if (!force && serialized === previous) return;
     // Resource URLs on mobile can have opaque origins. Desktop HTTP viewers can
@@ -42,11 +73,7 @@ export function synchronizeViewerTheme(container: HTMLElement, frame: HTMLIFrame
   };
   const onLoad = (): void => send(true);
   const onMessage = (event: MessageEvent): void => {
-    if (event.source !== frame.contentWindow) return;
-    const data: unknown = event.data;
-    if (!data || typeof data !== "object") return;
-    const message = data as Record<string, unknown>;
-    if (message.source === "csvzall-viewer" && message.type === "theme-ready" && message.version === 1) send(true);
+    if (event.source === frame.contentWindow && isThemeReady(event.data)) send(true);
   };
   const cssChanged = workspace.on("css-change", schedule);
   const observer = new MutationObserver(schedule);
@@ -59,6 +86,7 @@ export function synchronizeViewerTheme(container: HTMLElement, frame: HTMLIFrame
   return () => {
     disposed = true;
     observer.disconnect();
+    lengthProbe?.remove();
     workspace.offref(cssChanged);
     frame.removeEventListener("load", onLoad);
     win.removeEventListener("message", onMessage);

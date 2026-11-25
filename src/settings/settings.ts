@@ -1,3 +1,7 @@
+import validateObject, { isString, optional } from "../utils/validateObject.js";
+import { autosaveMode, type AutosaveMode } from "./autosave.js";
+import { defaultJsonViewer } from "./jsonViewer.js";
+
 export const MAX_EVENT_LOG_ENTRIES = 100;
 
 export interface CsvzallEventLogEntry {
@@ -14,10 +18,19 @@ export interface CsvzallPluginSettings {
   installedCsvzallAssetName: string;
   csvzallLastUpdateCheckAt: string;
   openInObsidian: boolean;
+  defaultJsonViewer: boolean;
+  autosaveMode: AutosaveMode;
   exportSyntax: 'comment' | 'code';
   startupTimeoutMs: number;
   eventLog: CsvzallEventLogEntry[];
 }
+
+const isEventLogEntry = validateObject<CsvzallEventLogEntry>({
+  timestamp: isString,
+  level: value => value === "info" || value === "error",
+  message: isString,
+  detail: optional(isString),
+});
 
 export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   csvzallPath: "csvzall",
@@ -26,6 +39,8 @@ export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   installedCsvzallAssetName: "",
   csvzallLastUpdateCheckAt: "",
   openInObsidian: true,
+  defaultJsonViewer: true,
+  autosaveMode: "off",
   exportSyntax: 'comment',
   startupTimeoutMs: 10000,
   eventLog: [],
@@ -43,6 +58,8 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
   return {
     ...DEFAULT_SETTINGS,
     csvzallExecutableMode: mode,
+    autosaveMode: autosaveMode(candidate.autosaveMode),
+    defaultJsonViewer: defaultJsonViewer(candidate.defaultJsonViewer),
     csvzallPath: typeof candidate.csvzallPath === "string" && candidate.csvzallPath.trim() ?
       candidate.csvzallPath : DEFAULT_SETTINGS.csvzallPath,
     openInObsidian: typeof candidate.openInObsidian === "boolean" ?
@@ -61,9 +78,7 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
       candidate.csvzallLastUpdateCheckAt :
       DEFAULT_SETTINGS.csvzallLastUpdateCheckAt,
     eventLog: Array.isArray(candidate.eventLog) ? candidate.eventLog
-      .filter((entry): entry is CsvzallEventLogEntry => !!entry && typeof entry === "object" &&
-        typeof entry.timestamp === "string" && (entry.level === "info" || entry.level === "error") &&
-        typeof entry.message === "string" && (entry.detail === undefined || typeof entry.detail === "string"))
+      .filter(isEventLogEntry)
       .slice(0, MAX_EVENT_LOG_ENTRIES) : [],
   };
 }

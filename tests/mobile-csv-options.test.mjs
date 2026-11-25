@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash, webcrypto } from "node:crypto";
 import { runInNewContext } from "node:vm";
-import ts from "typescript";
 
 // Exercise the worker and WASM bytes shipped inside the generated Community
 // plugin, rather than substituting the current upstream build or a mock engine.
@@ -13,23 +12,18 @@ function packagedWorker() {
     /path:"([^"]+)",encoding:"base64",content:"([^"]+)"/gu,
   ), ([, path, content]) => [path, Buffer.from(content, "base64")]));
   const metadata = JSON.parse(assets.get("wasm-viewer/csvzall-wasm-viewer.json").toString());
-  const viewer = Array.from(assets).find(([path]) => /^wasm-viewer\/assets\/.*\.js$/u.test(path))[1].toString();
+  const viewer = Array.from(assets).find(([path]) => /^wasm-viewer\/assets\/index-.*\.js$/u.test(path))[1].toString();
   assert.equal(createHash("sha256").update(viewer).digest("hex"), metadata.javascriptSha256);
   assert.equal(metadata.sourceDirty, false);
   assert.ok(viewer.includes("csvzall-csv-options-v1"));
   assert.ok(viewer.includes("csvzall-host-mobile-ui-v1"));
   assert.ok(viewer.includes('id="csv-options-header-warning"'));
   assert.ok(viewer.includes('aria-describedby="csv-options-header-help"'));
-  assert.ok(assets.get("wasm-viewer/index.html").toString().includes(".csv-header-warning"));
-  const source = ts.createSourceFile("viewer.js", viewer, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
-  let workerSource;
-  function findWorker(node) {
-    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
-      && node.text.includes("data:application/wasm;base64,")) workerSource = node.text;
-    if (!workerSource) ts.forEachChild(node, findWorker);
-  }
-  findWorker(source);
-  assert.ok(workerSource, "the packaged viewer must contain its compiled worker and WASM engine");
+  const html = assets.get("wasm-viewer/index.html").toString();
+  assert.ok(html.includes(".csv-header-warning"));
+  const [, workerPath] = html.match(/<link rel="csvzall-worker" href="\.\/([^"]+)"/u);
+  const workerSource = assets.get("wasm-viewer/" + workerPath).toString();
+  assert.equal(createHash("sha256").update(workerSource).digest("hex"), metadata.workerSha256);
   let receive;
   let id = 0;
   const pending = new Map();
@@ -57,7 +51,8 @@ function packagedWorker() {
     request, check,
     open: text => check("open", { name: "fixture.csv", buffer: new TextEncoder().encode(text).buffer }),
     async save() {
-      const saved = await check("save");
+      const saved = await check("prepareSave");
+      await check("finishSave", { saveId: saved.saveId, commit: true });
       return new TextDecoder("utf-8", { ignoreBOM: true }).decode(new Uint8Array(saved.buffer, saved.byteOffset, saved.byteLength));
     },
   };

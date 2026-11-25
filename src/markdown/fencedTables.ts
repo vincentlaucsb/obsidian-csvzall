@@ -2,8 +2,16 @@ import { createHash } from 'crypto';
 import { Parser } from 'commonmark';
 import type { ManagedTable, TableRecipe } from './managedTables.js';
 import { csvSqlReferences, relativeCsvSource, rebaseSqlSource, resolveCsvSource, nameSqlSource } from './sqlSources.js';
+import validateObject, { isString, literal } from '../utils/validateObject.js';
 
 export interface ExportFence { sql: string; code: string; snapshot: string; legacy?: { id: string; source: string } }
+
+const isFenceMetadata = validateObject({
+  version: literal(1),
+  id: (value): value is string => isString(value) && /^[\w-]+$/.test(value),
+  source: isString,
+  base: (value): value is string => isString(value) && /^[a-f0-9]{64}$/.test(value),
+});
 
 function cells(line: string): string[] | null {
   if (!line.includes('|')) return null;
@@ -79,10 +87,7 @@ export function findFencedTables(text: string): ManagedTable[] {
     let legacy: ExportFence['legacy'];
     if (metadata) {
       const value: unknown = JSON.parse(metadata[1]!);
-      if (!value || typeof value !== 'object' || !('version' in value) || value.version !== 1 ||
-        !('id' in value) || typeof value.id !== 'string' || !/^[\w-]+$/.test(value.id) ||
-        !('source' in value) || typeof value.source !== 'string' ||
-        !('base' in value) || typeof value.base !== 'string' || !/^[a-f0-9]{64}$/.test(value.base)) throw new Error('Invalid CSV export code block metadata.');
+      if (!isFenceMetadata(value)) throw new Error('Invalid CSV export code block metadata.');
       legacy = { id: value.id, source: value.source };
     }
     const sql = literal.slice(metadata?.[0].length ?? 0).trim();

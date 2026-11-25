@@ -98,7 +98,7 @@ export class MarkdownTableService {
   listExports(folders: string[]): Promise<SavedExport[]> { return this.maintenance.listExports(folders); }
   onExportsChanged(listener: () => void): () => void { return this.maintenance.onExportsChanged(listener); }
   pruneDeadExports(folders?: string[]): Promise<void> { return this.maintenance.pruneDeadExports(folders); }
-  loadColumns(source: string): Promise<string[]> { return this.renderer.loadColumns(source); }
+  loadColumns(source: string, sql?: string): Promise<string[]> { return this.renderer.loadColumns(source, sql); }
   configureExport(saved: SavedExport, onSaved: () => void): void { this.editing.configureExport(saved, onSaved); }
   openExportNote(saved: SavedExport): Promise<void> { return this.editing.openExportNote(saved); }
   openSource(file: TFile, table: ManagedTable): Promise<void> { return this.editing.openSource(file, table); }

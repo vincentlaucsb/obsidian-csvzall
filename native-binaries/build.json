@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "repository": "vincentlaucsb/csvzall",
-  "sourceCommit": "4a59756537c6fa86b5a1ce56aa8c36fc5b9b4f53",
-  "version": "0.10.0",
-  "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12" },
+  "sourceCommit": "e79ab195bdbff53f399a94a4e37464d181143a3c",
+  "version": "1.0.0",
+  "tools": { "cmake": "3.31.10", "ninja": "1.13.2", "python": "3.12", "esbuild": "0.25.12" },
   "cmakeOptions": {
     "CMAKE_BUILD_TYPE": "Release",
     "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "OFF",

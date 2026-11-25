@@ -1,6 +1,7 @@
 import { Parser } from 'commonmark';
 import { findFencedTables, type ExportFence } from './fencedTables.js';
 import { isCanonicalVaultPath } from '../utils/paths.js';
+import validateObject, { arrayOf, isString, literal } from '../utils/validateObject.js';
 
 export type ExportFormat = 'table' | 'value';
 export interface TableRecipe {
@@ -31,17 +32,22 @@ export function validateSource(source: string): string {
   return path;
 }
 
+const isLegacyRecipe = validateObject<Omit<TableRecipe, 'format'>>({
+  version: literal(1),
+  id: (value): value is string => isString(value) && /^[\w-]+$/.test(value),
+  source: isString,
+  sql: isString,
+  columns: arrayOf(isString),
+});
+
 function parseRecipe(encoded: string): TableRecipe {
   const value: unknown = JSON.parse(decodeURIComponent(encoded));
   if (!value || typeof value !== 'object') throw new Error('Invalid CSV table instructions.');
-  const recipe = value as Partial<TableRecipe>;
-  if (recipe.version !== 1 || typeof recipe.id !== 'string' || !/^[\w-]+$/.test(recipe.id) ||
-    typeof recipe.source !== 'string' || typeof recipe.sql !== 'string' ||
-    !Array.isArray(recipe.columns) || !recipe.columns.every((name: unknown) => typeof name === 'string')) {
+  if (!isLegacyRecipe(value)) {
     throw new Error('Invalid or unsupported CSV table instructions.');
   }
-  validateSource(recipe.source);
-  return { ...recipe as TableRecipe, format: 'table' };
+  validateSource(value.source);
+  return { ...value, format: 'table' };
 }
 
 export function managedTableText(recipe: Pick<TableRecipe, 'id' | 'format'>, markdown: string): string {

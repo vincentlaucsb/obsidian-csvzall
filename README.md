@@ -19,6 +19,10 @@ For mobile devices, install
 ## What It Does
 
 - Opens `.csv` and `.tsv` files in an editable table view inside Obsidian.
+- Refreshes the table when the file changes elsewhere and shows when those changes loaded. If you have edits in progress, the viewer keeps them open.
+- Turn on **AutoSave** in a CSV, TSV, or JSON pane to save after editing. Plugin settings let you start with it on, start with it off, or hide the switch.
+- Opens JSON in the native csvzall editor on desktop and a helper-free editor in Lite, both with syntax highlighting. Compact JSON expands for reading and saves compactly after edits.
+  To keep another viewer as your default, turn off **Use csvzall as the default JSON viewer** and reload Obsidian. Choose **Open in csvzall** from a JSON file’s menu whenever you want to use this editor.
 - Adds command palette and context-menu actions to create and open CSV/TSV files and configure, refresh, or delete exports.
 - Generates exports that update automatically when the source file changes:
   - Bar, line, and heatmap charts.
@@ -47,6 +51,11 @@ The included helper is verified with SHA-256 and extracted into the plugin's
 directory automatically. Update the plugin through Obsidian to receive helper
 updates. You can set a **Custom executable path** to use an independently managed
 helper, including a command on PATH. Choose **Use bundled helper** to switch back.
+
+To use CSV data with Obsidian Copilot, Claude Code, or Codex, choose **Enable or
+repair** under **Agent integration** in settings. This installs local skills
+that locate the bundled helper without adding csvzall to PATH. See the
+[agent setup guide](docs/agent-integration.md) for setup and tested compatibility.
 
 ## Privacy and Network Use
 

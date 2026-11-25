@@ -1,4 +1,5 @@
 import { Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import { registerJsonExtension } from "./views/registerJsonExtension.js";
 import { ChartService } from "./charts/ChartService.js";
 import { registerChartCommands } from "./commands/registerChartCommands.js";
 import { registerCsvCommands } from "./commands/registerCsvCommands.js";
@@ -13,7 +14,8 @@ import {
   DEFAULT_SETTINGS,
   type CsvzallPluginSettings,
 } from "./settings/settings.js";
-import { CsvzallTableView } from "./views/CsvzallTableView.js";
+import { CsvzallTableView, updateViewerAutosave } from "./views/CsvzallTableView.js";
+import type { AutosaveMode } from "./settings/autosave.js";
 import { VIEW_TYPE_CSVZALL, VIEW_TYPE_CSVZALL_EXPORTS } from "./views/viewTypes.js";
 import { CsvzallExportsView, openExportsView } from "./views/ExportsView.js";
 import { registerExportCommands } from "./commands/registerExportCommands.js";
@@ -27,6 +29,8 @@ import { MarkdownTableService } from "./markdown/MarkdownTableService.js";
 import { registerMarkdownCommands } from "./commands/registerMarkdownCommands.js";
 import { ExportSettingsService } from "./settings/ExportSettingsService.js";
 import { VaultExportDiscovery } from "./exports/VaultExportDiscovery.js";
+import { AgentIntegrationService } from "./agents/AgentIntegrationService.js";
+import { pluginVaultDirectory } from "./obsidian/pluginPaths.js";
 
 export default class CsvzallPlugin extends Plugin {
   settings: CsvzallPluginSettings = DEFAULT_SETTINGS;
@@ -37,28 +41,36 @@ export default class CsvzallPlugin extends Plugin {
   private csvService!: CsvService;
   private chartService!: ChartService;
   private installerService!: InstallerService;
+  private agentIntegration!: AgentIntegrationService;
   private markdownTables!: MarkdownTableService;
   private exportSettings!: ExportSettingsService;
   private dataStore!: PluginDataStore;
   private reflection!: ExportReflection;
   private readonly reflectionErrors = new SessionErrors();
   private exportsReady = false;
+  private appliedAutosave: AutosaveMode = "off";
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.appliedAutosave = this.settings.autosaveMode;
     this.createServices();
     await this.reflection.initialize();
     await this.installerService.ensureBundledCsvzall();
+    void this.agentIntegration.refresh().catch((error: unknown) => new Notice(`Agent integration: ${error instanceof Error ? error.message : String(error)}`));
     await this.chartService.reloadChartConfig();
 
     this.registerView(VIEW_TYPE_CSVZALL, (leaf) => new CsvzallTableView(leaf, this));
     this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL);
+    const jsonView = this.manifest.id + "-json";
+    this.registerView(jsonView, leaf => new CsvzallTableView(leaf, this, jsonView));
+    registerJsonExtension(this, jsonView, this.settings.defaultJsonViewer);
     this.registerView(VIEW_TYPE_CSVZALL_EXPORTS, (leaf) => new CsvzallExportsView(leaf, this.exportSettings));
     this.addSettingTab(new CsvzallSettingTab(this, {
       getSettings: () => this.settings,
       saveSettings: () => this.saveSettings(),
       eventLog: this.eventLog,
       installer: this.installerService,
+      agents: this.agentIntegration,
       exports: this.exportSettings,
       openExports: () => openExportsView(this.app),
     }));
@@ -78,6 +90,7 @@ export default class CsvzallPlugin extends Plugin {
 
   onunload(): void {
     this.exportsReady = false;
+    this.agentIntegration?.stop();
     this.reflection?.stop();
     this.chartService?.scheduler.clear();
     this.markdownTables?.unload();
@@ -85,7 +98,13 @@ export default class CsvzallPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.dataStore = new PluginDataStore({ load: () => this.loadData(), save: value => this.saveData(value),
+    const directory = pluginVaultDirectory(this.app.vault.configDir, { id: this.manifest.id, dir: this.manifest.dir });
+    const adapter = this.app.vault.adapter;
+    this.dataStore = new PluginDataStore({ load: async () => {
+      const data: unknown = await this.loadData();
+      if (data === undefined && await adapter.stat(`${directory}/data.json`)) throw new Error("Could not read existing csvzall plugin data.");
+      return data;
+    }, save: value => this.saveData(value), directoryAvailable: async () => (await adapter.stat(directory))?.type === "folder",
       loadLocal: (): unknown => this.app.loadLocalStorage(`${this.manifest.id}:${this.app.vault.configDir}:device-settings`),
       saveLocal: value => this.app.saveLocalStorage(`${this.manifest.id}:${this.app.vault.configDir}:device-settings`, value) });
     this.settings = await this.dataStore.initialize();
@@ -93,11 +112,20 @@ export default class CsvzallPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.dataStore.saveSettings(this.settings);
+    this.applyAutosave();
+  }
+
+  private applyAutosave(): void {
+    if (this.appliedAutosave === this.settings.autosaveMode) return;
+    this.appliedAutosave = this.settings.autosaveMode;
+    updateViewerAutosave(this.app.workspace, VIEW_TYPE_CSVZALL);
+    updateViewerAutosave(this.app.workspace, this.manifest.id + "-json");
   }
 
   async onExternalSettingsChange(): Promise<void> {
     try {
       await this.dataStore.externalSettings(this.settings);
+      this.applyAutosave();
       await this.reflection.reconcile();
     } catch (error) { this.reportReflectionError(error); }
   }
@@ -140,8 +168,11 @@ export default class CsvzallPlugin extends Plugin {
 
   private createServices(): void {
     const discovery = new VaultExportDiscovery(this.app);
+    this.filesystem = new ObsidianFilesystem(this.app, this.manifest);
+    const pluginDirectory = pluginVaultDirectory(this.app.vault.configDir, { id: this.manifest.id, dir: this.manifest.dir });
     this.reflection = new ExportReflection({ adapter: this.app.vault.adapter, store: this.dataStore,
-      localDirectory: `${this.app.vault.configDir}/plugins/${this.manifest.id}/export-sync-local`,
+      localDirectory: `${pluginDirectory}/export-sync-local`,
+      createLocalDirectory: this.filesystem.getPluginDataDir() ? () => this.filesystem.createPluginSubdirectory("export-sync-local") : undefined,
       folders: () => { discovery.restart(); discovery.step(); return discovery.takeFolders(); },
       deferDiscovery: true,
       directFolders: true,
@@ -156,13 +187,10 @@ export default class CsvzallPlugin extends Plugin {
       () => this.settings,
       () => this.saveSettings(),
     );
-    this.filesystem = new ObsidianFilesystem(this.app, this.manifest);
     this.processService = new CsvzallProcessService(
       () => this.settings,
       this.eventLog,
       () => this.installerService.getExecutablePath(),
-      // Each caller prepares its own chart/SQL scope before executing a command.
-      () => Promise.resolve(),
     );
     this.csvService = new CsvService(
       this.app,
@@ -185,6 +213,7 @@ export default class CsvzallPlugin extends Plugin {
       this.eventLog,
       this.filesystem,
     );
+    this.agentIntegration = new AgentIntegrationService(this.app, this.filesystem, this.installerService);
     this.markdownTables = new MarkdownTableService(this.app, this.filesystem, this.processService, this.eventLog, this.reflection, {
       syntax: () => this.settings.exportSyntax,
       saveSyntax: async syntax => { if (this.settings.exportSyntax !== syntax) { this.settings.exportSyntax = syntax; await this.saveSettings(); } },

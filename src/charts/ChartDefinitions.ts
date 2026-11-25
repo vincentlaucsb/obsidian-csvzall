@@ -3,19 +3,26 @@ import type { ChartDefinition, ChartFormPayload } from "./chart-form.mjs";
 import { resolveChartPath } from "../chartAutomation.js";
 import { directConfig } from "../exports/paths.js";
 import { parentVaultPath } from "../utils/paths.js";
+import validateObject, { isArray, isString } from "../utils/validateObject.js";
 
 interface ChartConfig { charts: ChartDefinition[]; [key: string]: unknown }
 export interface SavedChart { configPath: string; definition: ChartDefinition; source: string }
 
+const hasChartList = validateObject({ charts: isArray });
+const hasChartFields = validateObject({
+  id: (value): value is string => isString(value) && value.length > 0,
+  input: isString,
+  type: isString,
+});
+
 export function parseChartDefinitions(text: string, path: string): ChartConfig {
   const value: unknown = JSON.parse(text);
-  if (!value || typeof value !== "object" || !("charts" in value) || !Array.isArray(value.charts)) {
+  if (!hasChartList(value)) {
     throw new Error(`Invalid charts array in ${path}.`);
   }
   const ids = new Set<string>();
-  for (const item of value.charts as unknown[]) {
-    if (!item || typeof item !== "object" || !("id" in item) || typeof item.id !== "string" || !item.id || ids.has(item.id) ||
-      !("input" in item) || typeof item.input !== "string" || !("type" in item) || typeof item.type !== "string") {
+  for (const item of value.charts) {
+    if (!hasChartFields(item) || ids.has(item.id)) {
       throw new Error(`Invalid or duplicate chart definition in ${path}.`);
     }
     ids.add(item.id);
@@ -112,11 +119,12 @@ export class ChartDefinitions {
       const entry = config.charts.find(candidate => candidate.id === chart.definition.id);
       if (!entry || JSON.stringify(entry) !== JSON.stringify(chart.definition)) throw new Error("The chart changed. Reopen Configure and try again.");
       const options: Record<string, unknown> = { ...entry.options };
-      const keys = payload.type === "heatmap" ? ["title", "date", "value", "label", "orientation", "start", "end", "lookback"] :
-        payload.type === "bar" ? ["title", "label", "value", "presentation", "colorScheme"] :
-        payload.type === "line" ? ["title", "x", "y", "series", "colorScheme"] : ["columns", "sql"];
+      const keys = payload.type === "heatmap" ? ["title", "date", "value", "label", "orientation", "start", "end", "lookback", "sql"] :
+        payload.type === "bar" ? ["title", "label", "value", "presentation", "colorScheme", "sql"] :
+        payload.type === "line" ? ["title", "x", "y", "series", "colorScheme", "sql"] : ["columns", "sql"];
       for (const key of keys as Array<keyof ChartFormPayload>) {
         const value = payload[key];
+        if (key === "sql" && payload.type !== "markdown-table" && !value && !payload.clearSql) continue;
         if (value === "") delete options[key];
         else options[key] = value;
       }
@@ -125,14 +133,13 @@ export class ChartDefinitions {
         const scalarKey = payload.type === "line" ? "y" : "value";
         const scalar = payload[scalarKey];
         const columns = payload.values.length ? payload.values : scalar ? [scalar] : [];
-        // The form edits two slots. Keep every series it cannot represent,
-        // including metadata on a single series serialized by the form as scalar.
+        // Keep metadata for retained columns; the form represents every series.
         if (payload.values.length || previousValues.length) {
           const values = [...columns.map(column => {
             const previous = previousValues.find(value =>
               !!value && typeof value === "object" && "column" in value && value.column === column);
             return { ...(previous && typeof previous === "object" ? previous : {}), column };
-          }), ...previousValues.slice(2)];
+          })];
           options.values = values;
           delete options[scalarKey];
           if (values.length === 0) delete options.values;

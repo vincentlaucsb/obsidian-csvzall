@@ -3,6 +3,7 @@ import { validateSource, type TableRecipe } from './managedTables.js';
 import type { DeleteReason } from '../exports/revisions.js';
 import { ancestorConfigPaths, configPathForFolder, configRoot, directConfig, relativeReference } from '../exports/paths.js';
 import { parentVaultPath, resolveVaultRelativePath } from '../utils/paths.js';
+import validateObject, { arrayOf, isArray, isBoolean, isString, optional } from '../utils/validateObject.js';
 
 export const EXPORT_CONFIG_PATH = configPathForFolder('', 'exports');
 
@@ -46,18 +47,28 @@ function resolvePath(configPath: string, input: string): string {
   return resolved;
 }
 
+const hasExportList = validateObject({ exports: isArray });
+const isTableId = (value: unknown): value is string => isString(value) && /^[\w-]+$/.test(value);
+const hasTableFields = validateObject({
+  id: isTableId,
+  input: isString,
+  format: optional(value => value === 'table' || value === 'value'),
+  legacyTableId: optional(isTableId),
+  output: optional(isString),
+  runOnSave: optional(isBoolean),
+});
+const hasTableOptions = validateObject({
+  sql: optional(isString),
+  columns: optional(arrayOf(isString)),
+});
+
 export function parseExportDefinitions(text: string, path: string): TableConfig {
   const value: unknown = JSON.parse(text);
-  if (!value || typeof value !== 'object' || !('exports' in value) || !Array.isArray(value.exports)) throw new Error(`Invalid exports array in ${path}.`);
+  if (!hasExportList(value)) throw new Error(`Invalid exports array in ${path}.`);
   const ids = new Set<string>(), legacyIds = new Set<string>();
-  for (const item of value.exports as unknown[]) {
-    if (!item || typeof item !== 'object') throw new Error(`Invalid table definition in ${path}.`);
-    const entry = item as Partial<TableDefinition>;
-    if (typeof entry.id !== 'string' || !/^[\w-]+$/.test(entry.id) || ids.has(entry.id) || typeof entry.input !== 'string' ||
-      (entry.format !== undefined && entry.format !== 'table' && entry.format !== 'value') ||
-      (entry.legacyTableId !== undefined && (typeof entry.legacyTableId !== 'string' || !/^[\w-]+$/.test(entry.legacyTableId))) ||
-      (entry.output !== undefined && typeof entry.output !== 'string') ||
-      (entry.runOnSave !== undefined && typeof entry.runOnSave !== 'boolean')) throw new Error(`Invalid or duplicate table definition in ${path}.`);
+  for (const entry of value.exports) {
+    if (!entry || typeof entry !== 'object') throw new Error(`Invalid table definition in ${path}.`);
+    if (!hasTableFields(entry) || ids.has(entry.id)) throw new Error(`Invalid or duplicate table definition in ${path}.`);
     ids.add(entry.id);
     if (entry.legacyTableId !== undefined) {
       if (legacyIds.has(entry.legacyTableId)) throw new Error(`Invalid or duplicate legacy table binding in ${path}.`);
@@ -65,10 +76,7 @@ export function parseExportDefinitions(text: string, path: string): TableConfig 
     }
     validateSource(resolvePath(path, entry.input));
     if (entry.output !== undefined && !/\.md$/i.test(resolvePath(path, entry.output))) throw new Error(`Invalid table output in ${path}.`);
-    const options = entry.options;
-    if (options !== undefined && (!options || typeof options !== 'object' || Array.isArray(options) ||
-      (options.sql !== undefined && typeof options.sql !== 'string') ||
-      (options.columns !== undefined && (!Array.isArray(options.columns) || !options.columns.every((column: unknown) => typeof column === 'string'))))) {
+    if ('options' in entry && entry.options !== undefined && !hasTableOptions(entry.options)) {
       throw new Error(`Invalid table options in ${path}.`);
     }
   }

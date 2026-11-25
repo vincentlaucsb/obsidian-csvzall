@@ -1,4 +1,4 @@
-import type { Plugin } from "obsidian";
+import { Notice, TFile, type Plugin } from "obsidian";
 import type { ChartService } from "../charts/ChartService.js";
 import type { CsvService } from "../csv/CsvService.js";
 import { chartRunKey } from "../chartAutomation.js";
@@ -42,7 +42,13 @@ export function registerChartCommands(plugin: Plugin, charts: ChartService, csv:
         return false;
       }
       if (!checking) {
-        void plugin.app.workspace.openLinkText(chart.output, "", false);
+        const output = plugin.app.vault.getAbstractFileByPath(chart.output);
+        if (!(output instanceof TFile)) {
+          new Notice(`Generated chart is unavailable: ${chart.output}`);
+          return true;
+        }
+        void plugin.app.workspace.getLeaf(false).openFile(output).catch((error: unknown) =>
+          new Notice(`Could not open the generated chart: ${error instanceof Error ? error.message : String(error)}`));
       }
       return true;
     },

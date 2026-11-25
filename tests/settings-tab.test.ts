@@ -22,6 +22,7 @@ class Control {
   change: (value: any) => Promise<void> = async () => {};
   click: () => Promise<void> = async () => {};
   setValue(value: unknown) { this.value = value; return this; }
+  addOptions(_options: Record<string, string>) { return this; }
   setPlaceholder(_value: string) { return this; }
   setButtonText(value: string) { this.label = value; return this; }
   setDestructive() { return this; }
@@ -42,6 +43,7 @@ class Row extends Element {
   setHeading() { return this; }
   addText(callback: (control: Control) => void) { this.control = new Control(); this.controls.push(this.control); callback(this.control); return this; }
   addToggle(callback: (control: Control) => void) { return this.addText(callback); }
+  addDropdown(callback: (control: Control) => void) { return this.addText(callback); }
   addButton(callback: (control: Control) => void) { return this.addText(callback); }
 }
 
@@ -53,7 +55,7 @@ async function bundle(entry: string, globals: Record<string, unknown> = {}) {
   return module.exports;
 }
 
-async function loadTab() {
+async function loadTab(notices: string[] = []) {
   class BaseTab { containerEl = new Element(); updates = 0; constructor(public app: unknown) {} }
   Object.assign(BaseTab.prototype, {
     update(this: any) {
@@ -69,14 +71,17 @@ async function loadTab() {
     platform: "node", format: "cjs", write: false, external: ["obsidian"] });
   const module = { exports: {} as any };
   runInNewContext(result.outputFiles[0]!.text, { module, exports: module.exports,
-    require: () => ({ PluginSettingTab: BaseTab, Setting: Row, Platform: { isDesktopApp: true } }),
+    require: () => ({ PluginSettingTab: BaseTab, Setting: Row, Platform: { isDesktopApp: true }, Notice: class {
+      constructor(message: string) { notices.push(message); }
+    } }),
     window: { open() {} },
   });
   return module.exports.CsvzallSettingTab;
 }
 
 test("declarative settings persist controls and refresh install/log actions", async () => {
-    const Tab = await loadTab();
+    const notices: string[] = [];
+    const Tab = await loadTab(notices);
     const settings = { ...DEFAULT_SETTINGS, eventLog: [{ level: "error" as const,
       timestamp: "2026-09-13T00:00:00Z", message: "Failed", detail: "Details" }],
       installedCsvzallVersion: "1.0", installedCsvzallAssetName: "binary.zip", csvzallLastUpdateCheckAt: "today" };
@@ -100,10 +105,17 @@ test("declarative settings persist controls and refresh install/log actions", as
     const definitions = tab.getSettingDefinitions();
     assert.equal(tab.containerEl.children.length, 0, "indexing must not render or perform actions");
     assert.equal(installs + saves, 0);
-    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["Custom executable path", "Bundled helper", "Open inside Obsidian", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
+    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["AutoSave", "Use csvzall as the default JSON viewer", "Custom executable path", "Bundled helper", "Open inside Obsidian", "Agent integration", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
     tab.update();
     const row = (name: string): Row => tab.containerEl.children.find((r: Row) => r.name === name);
-    assert.equal(tab.containerEl.children.length, 10);
+    assert.equal(tab.containerEl.children.length, 13);
+    const jsonToggle = row("Use csvzall as the default JSON viewer").control!;
+    assert.equal(jsonToggle.value, true);
+    await jsonToggle.change(false);
+    assert.equal(settings.defaultJsonViewer, false);
+    assert.equal(row("AutoSave").control!.value, "off");
+    await row("AutoSave").control!.change("hidden");
+    assert.equal(settings.autosaveMode, "hidden");
     assert.equal(row("Custom executable path").control!.value, "");
     await row("Custom executable path").control!.change('"C:/csvzall.exe"');
     assert.equal(settings.csvzallPath, "C:/csvzall.exe");
@@ -115,7 +127,7 @@ test("declarative settings persist controls and refresh install/log actions", as
     assert.equal(settings.startupTimeoutMs, 3000);
     await row("Startup timeout").control!.change("invalid");
     assert.equal(settings.startupTimeoutMs, DEFAULT_SETTINGS.startupTimeoutMs);
-    assert.equal(saves, 4);
+    assert.equal(saves, 6);
     const pending = row("Bundled helper").control!.click();
     assert.equal(row("Bundled helper").control!.disabled, true);
     finishInstall(); await pending;
@@ -123,13 +135,14 @@ test("declarative settings persist controls and refresh install/log actions", as
     assert.equal(row("Bundled helper").control!.label, "Use bundled helper");
     rejectInstall = true;
     const failed = row("Bundled helper").control!.click();
-    finishInstall(); await assert.rejects(failed, /extraction failed/);
+    finishInstall(); await failed;
+    assert.match(notices.at(-1)!, /extraction failed/);
     assert.equal(row("Bundled helper").control!.disabled, false);
     assert.equal(row("Chart and error log").descEl.children[0]!.children.length, 1);
     await row("Chart and error log").control!.click();
     assert.equal(row("Chart and error log").control!.disabled, true);
     assert.equal(row("Chart and error log").descEl.children[0]!.children[0]!.options.text, "No csvzall events yet.");
-    assert.equal(tab.containerEl.children.length, 10, "refresh must not duplicate rows");
+    assert.equal(tab.containerEl.children.length, 13, "refresh must not duplicate rows");
     assert.ok(tab.updates > 1);
 });
 
@@ -150,6 +163,30 @@ test('settings show only an export summary and open the exports tab from Configu
   await row.controls[0]!.click();
   assert.equal(opened, 1); assert.equal(closed, 1);
   assert.equal(row.children.length, 0, 'settings must not render per-file export rows');
+});
+
+test('agent setup actions stay lazy and disable duplicate clicks until completion', async () => {
+  const Tab = await loadTab();
+  const calls: string[] = [];
+  let finish: () => void = () => {};
+  const tab = new Tab({ app: {} }, { getSettings: () => DEFAULT_SETTINGS,
+    exports: { list: async () => [] }, agents: {
+      enable: async () => { calls.push('enable'); await new Promise<void>(resolve => { finish = resolve; }); },
+      remove: async () => { calls.push('remove'); },
+      testConnection: async () => { calls.push('test'); return 'help'; },
+    } });
+  tab.getSettingDefinitions();
+  assert.deepEqual(calls, []);
+  tab.update();
+  const controls = () => (tab.containerEl.children.find((r: Row) => r.name === 'Agent integration') as Row).controls;
+  const pending = controls()[0]!.click();
+  assert.ok(controls().every(control => control.disabled));
+  await controls()[0]!.click();
+  assert.deepEqual(calls, ['enable']);
+  finish(); await pending;
+  assert.ok(controls().every(control => !control.disabled));
+  await controls()[1]!.click(); await controls()[2]!.click();
+  assert.deepEqual(calls, ['enable', 'test', 'remove']);
 });
 
 test('Configure still opens the exports tab when the settings modal API is unavailable', async () => {

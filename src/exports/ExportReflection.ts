@@ -7,14 +7,32 @@ import {
 import { historicalValue, localizeRecords, type ExportReference, type ReferenceScan } from "./localFolders.js";
 import { absoluteReference, ancestorConfigPaths, configPathForFolder, configRoot, directConfig, relativeReference } from "./paths.js";
 import { parentVaultPath } from "../utils/paths.js";
+import { hasErrorCode } from "../utils/errors.js";
 import { ExportDefinitions } from "../markdown/ExportDefinitions.js";
+import validateObject, { arrayOf, isBoolean, isNumber, isString, literal, optional } from "../utils/validateObject.js";
 
 interface Baseline { text: string; mtime: number; scope?: string }
-interface Journal { version: 1; origin: string; records: JsonObject; files: Record<string, Baseline>; backups: Record<string, string>; renames: Array<{ from: string; to: string }> }
+export interface PendingExportRename { from: string; to: string; rewriteNotes?: boolean; configReady?: boolean; rewrittenBlocks?: string[] }
+interface Journal { version: 1; origin: string; records: JsonObject; files: Record<string, Baseline>; backups: Record<string, string>; renames: PendingExportRename[] }
+const hasJournalFields = validateObject({
+  version: literal(1), origin: isString, records: object, files: object, backups: object,
+});
+const hasValidMoves = validateObject({
+  renames: optional(arrayOf(validateObject<PendingExportRename>({
+    from: isString, to: isString, rewriteNotes: optional(isBoolean), configReady: optional(isBoolean), rewrittenBlocks: optional(arrayOf(isString)),
+  }))),
+});
+const hasBaselineFields = validateObject({ text: isString, mtime: isNumber });
+const hasValidScope = validateObject({
+  scope: optional((value): value is string => isString(value) && configPath(value)),
+});
+const missingChartPollLimit = 3;
+const emptyChartDocument = canonical({ metadata: {}, order: [] });
 export interface ReflectionOptions {
   adapter: DataAdapter;
   store: PluginDataStore;
   localDirectory: string;
+  createLocalDirectory?(): Promise<void>;
   folders(): string[];
   report(error: unknown): void;
   changed(): void;
@@ -30,11 +48,13 @@ export class ExportReflection {
   private readonly edits = new Map<string, DeleteReason>();
   private readonly blocked = new Set<string>();
   private running: Promise<void> | null = null;
+  private journalWrites: Promise<void> = Promise.resolve();
   private scopedRun = false;
   private stopped = false;
   private initialized = false;
   private localizationPending = false;
   private pollCursor = 0;
+  private readonly missingChartPolls = new Map<string, number>();
 
   constructor(private readonly options: ReflectionOptions) {}
   stop(): void { this.stopped = true; }
@@ -44,16 +64,22 @@ export class ExportReflection {
 
   async initialize(): Promise<void> {
     const path = `${this.options.localDirectory}/state.json`;
-    if (await this.options.adapter.exists(path)) {
-      const saved: unknown = JSON.parse(await this.options.adapter.read(path));
-      if (!object(saved) || saved.version !== 1 || typeof saved.origin !== "string" || !object(saved.records) || !object(saved.files) || !object(saved.backups)) {
+    let text: string | undefined;
+    try {
+      if (await this.options.adapter.stat(path)) text = await this.options.adapter.read(path);
+    } catch (error) {
+      if (!hasErrorCode(error, "ENOENT")) throw error;
+    }
+    if (text !== undefined) {
+      const saved: unknown = JSON.parse(text);
+      if (!hasJournalFields(saved)) {
         throw new Error("Invalid local export Sync journal. The existing journal has been kept.");
       }
       readRevisions(saved.records);
-      if (saved.renames !== undefined && (!Array.isArray(saved.renames) || saved.renames.some((move: unknown) => !object(move) || typeof move.from !== "string" || typeof move.to !== "string"))) throw new Error("Invalid pending export moves.");
+      if (!hasValidMoves(saved)) throw new Error("Invalid pending export moves.");
       for (const [path, baseline] of Object.entries(saved.files)) {
-        if (!configPath(path) || !object(baseline) || typeof baseline.text !== "string" || typeof baseline.mtime !== "number") throw new Error("Invalid local export baseline.");
-        if (baseline.scope !== undefined && (typeof baseline.scope !== "string" || !configPath(baseline.scope))) throw new Error("Invalid moved export baseline.");
+        if (!configPath(path) || !hasBaselineFields(baseline)) throw new Error("Invalid local export baseline.");
+        if (!hasValidScope(baseline)) throw new Error("Invalid moved export baseline.");
         parseDocument(baseline.text, baseline.scope ?? path);
       }
       Object.assign(this.state, saved);
@@ -63,7 +89,46 @@ export class ExportReflection {
   }
 
   knownConfigPaths(): string[] {
-    return [...new Set([...Object.keys(this.state.files), ...[...readRevisions(this.state.records).values()].map(record => record.path)])];
+    return this.activePaths(winners(readRevisions(this.state.records).values()).values());
+  }
+
+  private activePaths(records: Iterable<Revision>): string[] {
+    const paths = new Set(Object.keys(this.state.files));
+    for (const record of records) {
+      if (record.value !== null || !record.path.endsWith("charts.json")) paths.add(record.path);
+    }
+    return [...paths];
+  }
+
+  private async retireMissingChartPath(path: string, records: Map<string, Revision>): Promise<void> {
+    const baseline = this.state.files[path];
+    if (!baseline || baseline.scope || !path.endsWith("charts.json")) return;
+    const parent = configRoot(path);
+    const document = records.get(identity({ path, id: "document" }));
+    if (!parent || !document || (document.value !== null && canonical(document.value) !== emptyChartDocument) ||
+        [...records.values()].some(record => record.path === path && record.id !== "document" && record.value !== null) ||
+        await this.options.adapter.stat(parent) !== null) {
+      this.missingChartPolls.delete(path);
+      return;
+    }
+    const misses = (this.missingChartPolls.get(path) ?? 0) + 1;
+    if (misses < missingChartPollLimit) {
+      this.missingChartPolls.set(path, misses);
+      return;
+    }
+    this.missingChartPolls.delete(path);
+    if (this.stopped || this.edits.has(path) || this.state.renames.some(move =>
+      path.startsWith(move.from + "/") || path.startsWith(move.to + "/"))) return;
+    if (document.value !== null) {
+      const previous = parseDocument(baseline.text, path);
+      if (previous.size !== 1 || canonical(previous.get("document")) !== emptyChartDocument) return;
+      // Supersede just the empty document we observed. A later offline edit
+      // keeps its original timestamp and wins even if it arrives after cleanup.
+      const retired: Revision = { ...document, value: null, reason: "entry-removed",
+        counter: document.counter + 1, origin: this.state.origin };
+      this.state.records[revisionKey(retired)] = retired;
+    }
+    delete this.state.files[path];
   }
 
   /** Called after a verified plugin mutation, before its next consumer runs. */
@@ -98,7 +163,7 @@ export class ExportReflection {
     if (this.running) await this.waitForIdle();
     if (this.stopped || !this.initialized) return;
     // Pending moves must finish in their original scopes before a viewer opens.
-    if (this.state.renames.length) await this.reconcile();
+    if (this.state.renames.some(move => !move.configReady)) await this.reconcile();
     if (this.running) await this.waitForIdle();
     if (this.stopped) return;
     const paths = new Set(ancestorConfigPaths(source, "charts"));
@@ -112,10 +177,20 @@ export class ExportReflection {
     await this.startRun(new Set(ancestorConfigPaths(note, 'exports')), id ? [{ note, id, legacy }] : []);
   }
 
-  private async journal(): Promise<void> {
+  private journal(): Promise<void> {
+    // A scoped poll can start while a moved block is being checkpointed.
+    const write = this.journalWrites.then(() => this.writeJournal());
+    this.journalWrites = write.catch(() => {});
+    return write;
+  }
+
+  private async writeJournal(): Promise<void> {
     if (this.stopped) throw new Error("Export reflection stopped.");
     const { adapter, localDirectory } = this.options;
-    if (!await adapter.exists(localDirectory)) await adapter.mkdir(localDirectory);
+    if (!await adapter.exists(localDirectory)) {
+      if (this.options.createLocalDirectory) await this.options.createLocalDirectory();
+      else await adapter.mkdir(localDirectory);
+    }
     const text = JSON.stringify(this.state) + "\n";
     if (await adapter.exists(`${localDirectory}/state.json`) && await adapter.read(`${localDirectory}/state.json`) === text) return;
     const temporary = `${localDirectory}/state-${crypto.randomUUID()}.json`;
@@ -151,7 +226,14 @@ export class ExportReflection {
     const scoped = chartPaths !== undefined;
     if (!chartPaths && !this.options.deferDiscovery) this.blocked.clear();
     const pending = [];
-    for (const move of this.state.renames) if (!await this.applyRename(move.from, move.to)) pending.push(move);
+    const noteMovesReady: PendingExportRename[] = [];
+    for (const move of this.state.renames) {
+      if (!move.configReady && !await this.applyRename(move.from, move.to)) pending.push(move);
+      else if (move.rewriteNotes) {
+        pending.push(move);
+        if (!move.configReady) noteMovesReady.push(move);
+      }
+    }
     this.state.renames = pending;
     const incoming = await store.read();
     for (const [key, revision] of readRevisions(incoming)) this.state.records[key] = revision;
@@ -166,7 +248,9 @@ export class ExportReflection {
       } catch (error) { sqlComplete = false; this.options.report(error); }
     }
     if (!chartPaths) this.localizationPending = !sqlComplete;
-    const known = [...new Set([...Object.keys(this.state.files), ...[...currentWinners.values()].map(record => record.path)])];
+    // A remote deletion can retire a path while this device is still waiting
+    // for its owner. Revisit blocked paths so the last failure can clear.
+    const known = [...new Set([...this.activePaths(currentWinners.values()), ...this.blocked])];
     const batch = this.options.deferDiscovery && !chartPaths ? Array.from({ length: Math.min(16, known.length) }, (_, index) => known[(this.pollCursor + index) % known.length]!) : known;
     if (!chartPaths && known.length) this.pollCursor = (this.pollCursor + batch.length) % known.length;
     const paths = chartPaths ?? new Set(batch);
@@ -195,7 +279,11 @@ export class ExportReflection {
         if (this.usesDirectFolders && path.endsWith('exports.json')) await new ExportDefinitions(adapter, () => this.stopped).migrateFolder(configRoot(path));
         const text = await adapter.exists(path) ? await adapter.read(path) : null;
         snapshots.set(path, text);
-        if (text === null) continue; // Absence is never a deletion instruction.
+        if (text === null) {
+          if (!scoped) await this.retireMissingChartPath(path, currentWinners);
+          continue;
+        }
+        this.missingChartPolls.delete(path);
         const stat = await adapter.stat(path);
         if (await adapter.read(path) !== text) throw new Error(`${path} is still being written. Reflection will retry.`);
         const previous = this.state.files[path];
@@ -228,7 +316,11 @@ export class ExportReflection {
           this.state.records[revisionKey(revision)] = revision;
         }
         this.state.backups[path] ??= text;
-      } catch (error) { this.blocked.add(path); this.options.report(error); }
+      } catch (error) {
+        this.missingChartPolls.delete(path);
+        this.blocked.add(path);
+        if (!path.endsWith("charts.json") || !hasErrorCode(error, "ENOENT")) this.options.report(error);
+      }
     }
     if (this.stopped) return;
     const localize = (): number => {
@@ -254,7 +346,9 @@ export class ExportReflection {
         if (attempt === 2) throw new Error("Export configurations are still arriving. Localization will retry.");
       }
     }
-    const reduced = winners([...readRevisions(this.state.records).values()].filter(record => !chartPaths || chartPaths.has(record.path)));
+    const finalHistory = [...readRevisions(this.state.records).values()];
+    const finalWinners = winners(finalHistory);
+    const reduced = chartPaths ? new Map([...finalWinners].filter(([, record]) => chartPaths.has(record.path))) : finalWinners;
     const staged = new Map(reduced);
     const retired = [...reduced.values()].filter(record => record.reason === "relocated" && !record.value);
     // Preserve inherited bytes until all direct destinations are verified. This
@@ -263,12 +357,12 @@ export class ExportReflection {
       if (this.blocked.has(record.path)) continue;
       const snapshot = snapshots.get(record.path);
       if (!snapshot || !parseDocument(snapshot, record.path).has(record.id)) continue;
-      const original = historicalValue(record, [...readRevisions(this.state.records).values()]);
+      const original = historicalValue(record, finalHistory);
       if (original) staged.set(identity(record), original);
     }
-    let changed = [...winners(readRevisions(this.state.records).values())].some(([key, record]) => canonical(previousWinners.get(key)?.value ?? null) !== canonical(record.value));
+    let changed = [...finalWinners].some(([key, record]) => canonical(previousWinners.get(key)?.value ?? null) !== canonical(record.value));
     for (const path of new Set([...staged.values()].map(record => record.path))) changed = await this.materialize(path, staged, snapshots) || changed;
-    await this.journal();
+    if (retired.length) await this.journal();
     for (const path of new Set(retired.map(record => record.path))) {
       const moves = retired.filter(record => record.path === path);
       let ready = true;
@@ -282,6 +376,7 @@ export class ExportReflection {
       }
       if (ready) changed = await this.materialize(path, reduced, snapshots) || changed;
     }
+    for (const move of noteMovesReady) move.configReady = true;
     await this.journal();
     if (changed && !this.stopped) this.options.changed();
   }
@@ -319,6 +414,7 @@ export class ExportReflection {
       }
       const finalText = same ? snapshot : text;
       this.state.files[path] = { text: finalText, mtime: (await adapter.stat(path))?.mtime ?? 0 };
+      this.missingChartPolls.delete(path);
       snapshots.set(path, finalText);
       this.edits.delete(path);
       return !same;
@@ -330,11 +426,39 @@ export class ExportReflection {
   }
 
   /** A vault rename is explicit evidence: move scoped identities, never resurrect old scopes. */
-  async renamed(oldPath: string, newPath: string): Promise<void> {
-    if (this.running) await this.running;
-    this.state.renames.push({ from: oldPath, to: newPath });
+  async renamed(oldPath: string, newPath: string, rewriteNotes = false): Promise<void> {
+    while (this.running) await this.running.catch(() => {});
+    this.state.renames.push({ from: oldPath, to: newPath, ...(rewriteNotes ? { rewriteNotes } : {}) });
     await this.journal();
     await this.reconcile();
+  }
+
+  get hasNoteRenames(): boolean { return this.state.renames.some(move => move.rewriteNotes); }
+
+  nextNoteRename(): Readonly<PendingExportRename> | undefined {
+    const first = this.state.renames.find(move => move.rewriteNotes);
+    if (this.running || !first?.configReady) return undefined;
+    for (const path of this.blocked) if (path.startsWith(`${first.from}/`) || path.startsWith(`${first.to}/`)) return undefined;
+    return first;
+  }
+
+  async finishNoteRename(move: Readonly<PendingExportRename>): Promise<void> {
+    while (this.running) await this.running.catch(() => {});
+    const index = this.state.renames.indexOf(move);
+    if (index === -1) return;
+    this.state.renames.splice(index, 1);
+    try { await this.journal(); }
+    catch (error) { this.state.renames.splice(index, 0, move); throw error; }
+  }
+
+  /** Persist the rebased target before changing a moved note; a retry may see either version. */
+  async rememberRewrittenBlock(move: PendingExportRename, target: string): Promise<void> {
+    while (this.running) await this.running.catch(() => {});
+    if (move.rewrittenBlocks?.includes(target)) return;
+    const previous = move.rewrittenBlocks;
+    move.rewrittenBlocks = [...(previous ?? []), target];
+    try { await this.journal(); }
+    catch (error) { move.rewrittenBlocks = previous; throw error; }
   }
 
   private async applyRename(oldPath: string, newPath: string): Promise<boolean> {
@@ -377,6 +501,7 @@ export class ExportReflection {
     }
     const records = winners(readRevisions(this.state.records).values());
     const time = this.options.now?.() ?? Date.now();
+    const checkedDestinations = new Set<string>();
     for (const record of records.values()) {
       const originalValue = record.value ?? (record.reason === "relocated" ? historicalValue(record, [...readRevisions(this.state.records).values()])?.value : undefined);
       if (!originalValue) continue;
@@ -406,11 +531,17 @@ export class ExportReflection {
       }
       if (path === record.path && canonical(value) === canonical(record.value)) continue;
       if (path !== record.path) {
+        const { adapter } = this.options;
+        if (!this.state.files[path] && !checkedDestinations.has(path)) {
+          if (await adapter.exists(path)) {
+            // The destination may carry edits that the import pass has not read yet.
+            throw new Error(`${path} appeared while handling rename. Reflection will retry.`);
+          }
+          checkedDestinations.add(path);
+        }
+        // Keep destination I/O above this point so a retry cannot see only the deletion.
         const removed = this.revision(record.path, record.id, null, time, true, "explicit");
         this.state.records[revisionKey(removed)] = removed;
-        if (!this.state.files[path] && await this.options.adapter.exists(path)) {
-          this.state.files[path] = { text: await this.options.adapter.read(path), mtime: (await this.options.adapter.stat(path))?.mtime ?? 0, scope: record.path };
-        }
       }
       const moved = this.revision(path, record.id, value, time, true);
       const lineage = record.relocatedFrom ?? [...readRevisions(this.state.records).values()].find(item => identity(item) === identity(record) && item.relocatedFrom)?.relocatedFrom;

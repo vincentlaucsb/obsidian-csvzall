@@ -2,8 +2,11 @@ import { Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type { Plugin, SettingDefinitionRender } from "obsidian";
 import type { EventLog } from "../logging/EventLog.js";
 import type { InstallerService } from "../installer/InstallerService.js";
+import type { AgentIntegrationService } from "../agents/AgentIntegrationService.js";
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
+import { autosaveSetting } from "./autosave.js";
+import { jsonViewerSetting } from "./jsonViewer.js";
 import type { ExportSettingsService } from "./ExportSettingsService.js";
 import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledPayloads.generated.js";
 import { loadExports } from "./exportList.js";
@@ -18,12 +21,14 @@ export interface CsvzallSettingTabServices {
   saveSettings(): Promise<void>;
   eventLog: EventLog;
   installer: InstallerService;
+  agents: Pick<AgentIntegrationService, "enable" | "remove" | "testConnection">;
   exports: Pick<ExportSettingsService, "list">;
   openExports(): Promise<void>;
 }
 
 export class CsvzallSettingTab extends PluginSettingTab {
   private installing = false;
+  private agentAction = false;
   private exportsRevision = 0;
 
   constructor(
@@ -39,15 +44,33 @@ export class CsvzallSettingTab extends PluginSettingTab {
     this.update();
   }
 
+  private async persistSettings(): Promise<void> {
+    try { await this.services.saveSettings(); }
+    catch (error) { new Notice(`Could not save csvzall settings: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
   private async useBundledHelper(): Promise<void> {
     if (this.installing) return;
     this.installing = true;
     this.refreshSettings();
     try { await this.services.installer.installDesktopCsvzall(); }
+    catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
     finally {
       this.installing = false;
       this.refreshSettings();
     }
+  }
+
+  private async runAgentAction(action: "enable" | "remove" | "testConnection"): Promise<void> {
+    if (this.agentAction) return;
+    this.agentAction = true;
+    this.refreshSettings();
+    try {
+      await this.services.agents[action]();
+      new Notice(action === "testConnection" ? "Bundled helper ran successfully with PATH empty." :
+        action === "remove" ? "Agent integration disabled; unchanged generated files removed." : "Agent skills installed. Open a new agent chat in the vault root.");
+    } catch (error) { new Notice(error instanceof Error ? error.message : String(error)); }
+    finally { this.agentAction = false; this.refreshSettings(); }
   }
 
   getSettingDefinitions(): Array<Omit<SettingDefinitionRender, "render"> & { render: (setting: Setting) => void }> {
@@ -55,6 +78,14 @@ export class CsvzallSettingTab extends PluginSettingTab {
     const usesBundled = settings.csvzallExecutableMode === "bundled";
     const csvzallInstallDesc = `csvzall ${BUNDLED_CSVZALL_VERSION} is included with this plugin and updates with it. Restore its files or switch back from a custom executable without downloading anything.`;
     return [
+      autosaveSetting(settings.autosaveMode, async mode => {
+        this.services.getSettings().autosaveMode = mode;
+        await this.persistSettings();
+      }),
+      jsonViewerSetting(settings.defaultJsonViewer, async enabled => {
+        this.services.getSettings().defaultJsonViewer = enabled;
+        await this.persistSettings();
+      }),
       {
         name: "Custom executable path",
         desc: "Leave empty to use the bundled helper. Set an absolute path or a command on PATH to manage csvzall independently.",
@@ -77,7 +108,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
                 }
                 nextSettings.csvzallPath = nextPath;
                 nextSettings.csvzallExecutableMode = "custom";
-                await this.services.saveSettings();
+                await this.persistSettings();
               }),
           );
         },
@@ -105,9 +136,22 @@ export class CsvzallSettingTab extends PluginSettingTab {
               .setValue(settings.openInObsidian)
               .onChange(async (value) => {
                 this.services.getSettings().openInObsidian = value;
-                await this.services.saveSettings();
+                await this.persistSettings();
               }),
           );
+        },
+      },
+
+      {
+        name: "Agent integration",
+        desc: "Install csvzall/SKILL.md in this vault's .agents/skills, .claude/skills, and .opencode/skills folders for Copilot, Claude Code, and Codex. Uses the bundled helper, independently of your custom executable. No PATH setup needed. Edited or linked skills are preserved.",
+        render: setting => {
+          setting.addButton(button => button.setButtonText("Enable or repair").setDisabled(this.agentAction || !Platform.isDesktopApp)
+            .onClick(() => this.runAgentAction("enable")));
+          setting.addButton(button => button.setButtonText("Test connection").setDisabled(this.agentAction || !Platform.isDesktopApp)
+            .onClick(() => this.runAgentAction("testConnection")));
+          setting.addButton(button => button.setButtonText("Remove").setDestructive().setDisabled(this.agentAction || !Platform.isDesktopApp)
+            .onClick(() => this.runAgentAction("remove")));
         },
       },
 
@@ -123,7 +167,7 @@ export class CsvzallSettingTab extends PluginSettingTab {
                 const parsed = Number.parseInt(value, 10);
                 this.services.getSettings().startupTimeoutMs =
                   Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.startupTimeoutMs;
-                await this.services.saveSettings();
+                await this.persistSettings();
               }),
           );
         },
@@ -160,8 +204,9 @@ export class CsvzallSettingTab extends PluginSettingTab {
               .setButtonText("Clear")
               .setDisabled(settings.eventLog.length === 0)
               .onClick(async () => {
-                await this.services.eventLog.clear();
-                this.refreshSettings();
+                try { await this.services.eventLog.clear(); }
+                catch (error) { new Notice(`Could not clear the csvzall log: ${error instanceof Error ? error.message : String(error)}`); }
+                finally { this.refreshSettings(); }
               }),
           );
           this.renderLog(setting.descEl);

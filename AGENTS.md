@@ -1,11 +1,20 @@
 # Repository Guide
 
+## Product scope and examples
+
+- csvzall is a general-purpose CSV app. Use domain-neutral language in shared UI, including labels, help text, placeholders, and defaults. Describe what the feature does using terms such as dates, numeric values, and series.
+- Keep product documentation centered on reusable CSV workflows. Use neutral examples for general guides. Put domain-specific recipes, such as workout charts, in clearly labeled, optional examples when explicitly requested. Reproducing a user's use case does not make it the default example for the feature.
+
 ## Scope and performance
 
+- Open CSVs directly into the table on desktop and Lite. Keep the initial load free of loading screens, modal progress dialogs, and grid loading overlays. Show open failures in the viewer and keep explicit save or reset feedback scoped to those actions.
+- For CSV-open performance, measure from the plugin's file-open handler to the first frame containing actual CSV values. Use helper readiness and iframe navigation as intermediate timings. A loading indicator does not complete this measurement.
 - Keep work proportional to the user's operation. Startup and opening a CSV must not trigger or wait for vault-wide discovery, reconciliation, or migration. Prepare only the affected file and its relevant export configuration.
 - Prefer direct lookups, known export definitions, cached results, and file events. Schedule required broader maintenance separately in bounded, incremental work; an async startup callback does not make a whole-vault scan acceptable.
 - When missing or incomplete information makes cleanup unsafe, defer that cleanup and preserve existing content. Do not expand a foreground operation to establish global certainty.
 - Validate affected state at the mutation boundary, including concurrent edits. Reuse completed discovery and validation while their inputs remain unchanged.
+- A cached path or existence probe does not guarantee the next I/O will succeed. Handle disappearance at the operation that requires the path. Treat confirmed absence of optional state separately from unreadable files or failed mutations. Create only directories the feature owns.
+- Keep startup and detached UI or background work recoverable when a path disappears. Diagnostic persistence must not mask the original result. Complete fallible destination reads before recording a source deletion or publishing a locator.
 - Tie new safeguards and recovery machinery to concrete failure modes. Use existing guards where possible; avoid speculative confirmations, fallback layers, and repeated validation.
 - Apply these boundaries to the requirements below and linked design plans. Keep each operation responsive while enforcing the guarantees relevant to the state it reads or changes.
 
@@ -26,6 +35,7 @@
 - `src/process/`: `csvzall` child-process startup, command execution, viewer sessions, and process failure handling.
 - `src/installer.ts`: Pure download, release asset selection, checksum verification, ZIP extraction, and binary install logic.
 - `src/installer/`: Obsidian-facing installer service glue.
+- `src/agents/`: Desktop agent skill installation, local ownership, and bundled-helper discovery. Keep this integration out of mobile and shared utilities.
 - `src/installer/archive.ts` and `src/installer/bundledInstall.ts`: Offline archive extraction, integrity checks, and pinned native helper materialization. Keep the legacy downloader out of the desktop runtime dependency graph.
 - `src/logging/`: Event log mutation helpers.
 - `src/exports/`: Desktop export reflection, revision ordering, and local configuration reconstruction.
@@ -79,6 +89,8 @@ global preflight checks for unrelated operations.
 
 ## Viewer theme design
 
+- Keep shared CSV and JSON typography, spacing and palette defaults in upstream `src/viewer/modules/viewer-theme.css`. Use Obsidian’s preferred text size, including its accessibility scale, for grid cells and JSON code. Use its monospace font for code and its UI sizes and spacing for shared controls. Lite’s in-process JSON editor inherits the same Obsidian variables directly.
+- Send resolved host lengths through the existing theme bridge and keep its sender and receiver allowlists aligned. Check actual cell and code text at the same size in standalone and hosted viewers, and verify that changing the host text size preserves focus and unsaved edits.
 - Matching the active Obsidian theme is intentional product behavior for embedded desktop and mobile CSV viewers. Use the host's resolved colors, accent, interface font, and light/dark mode, including live theme changes, rather than choosing the OS palette independently.
 - Keep synchronization in the versioned iframe `postMessage` bridge. Do not persist theme snapshots in the vault or require a CLI restart, CSV reload, or grid recreation for theme changes. Preserve active edits and focus.
 - Keep standalone csvzall usable without Obsidian: without a host theme message, the viewer retains its system-aware appearance. Maintain this fallback in the shared upstream receiver and packaged WASM assets.
@@ -100,6 +112,7 @@ global preflight checks for unrelated operations.
 ## Mobile WASM Viewer Notes
 
 - Keep the hosted viewer layout stable during AG Grid editing, particularly with Android's keyboard open. Use edit lifecycle hooks for visibility; avoid focus-driven keyboard shims and viewport-height clamping. Detailed examples and constraints are in [the viewer maintenance guide](docs/wasm-viewer-refresh.md#mobile-runtime-and-editing-constraints).
+- Lite imports the canonical JSON formatter from upstream `src/viewer/modules/json-document.mjs` as `src/views/jsonDocument.mjs`. Keep their bytes identical when refreshing it.
 - Change shared runtime behavior upstream, then run `npm run refresh:wasm-viewer`. Preserve compiled JavaScript bytes and align capability/digest checks with the imported source; never repair minified bundles.
 - Lite is a native-helper-free WASM viewer/editor on desktop and mobile. Keep desktop services, installers, child processes, Node, and Electron out of its source and bundle. Retain the desktop plugin's `isDesktopOnly: true`, one CSV handler per desktop, and mobile-only gating for keyboard/navigation UI.
 - Preserve `csvzall Lite` branding, the `csvzall-mobile` plugin/view/command identifiers, and the `obsidian-csvzall-mobile` repository name. Mobile versions remain independent in `mobile-src/manifest.json`.
@@ -123,10 +136,14 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 
 ## Version Locations
 
+- `src/agents/AgentIntegration.ts` local `Installation.version` and generated `agent-runtime/<platform>-<arch>.json` `version`: agent integration ownership and locator schemas (currently 1), independent of plugin releases. Locator `helperVersion` and `executableSha256` identify the prepared bundled helper, independently of the plugin version.
+
 - `manifest.json`: Obsidian plugin version and minimum supported Obsidian app version.
 - `versions.json`: Obsidian plugin compatibility map from plugin version to minimum supported Obsidian app version.
 - `package.json`: npm package version.
 - `package.json` `engines.node`: supported Node.js versions for the lint/build toolchain.
+- `package.json` `esbuild` and `native-binaries/build.json` `tools.esbuild`: pinned host bundler for native viewer assets. Keep both aligned with the version required by the pinned csvzall source.
+- `package.json` `@lezer/json`: the shared JSON editor grammar pin keeps its serialized parser compatible with the CodeMirror runtime in Lite's minimum Obsidian version.
 - `package.json` `overrides.moment`: patched transitive dependency version, independent of plugin releases.
 - `package.json` `overrides["minimatch@>=7 <11.0.1"]`: patched lint-toolchain dependency version, independent of plugin releases.
 - Ignored `.test-build/obsidian-review/complete.json` `guidanceCommit`: official documentation revision used for a remediation run, independent of plugin releases.
@@ -139,13 +156,15 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `scripts/build-windows-sync-test.mjs` generated `development-identity.json` `helperVersion`: local Windows-only test helper version, independent of release pins. Its generated plugin manifest is marked `csvzallDevelopmentBuild`; never publish it as a release. Native preparation smoke tests must acknowledge Obsidian mode version 1 and verify host-owned save automation.
 - `mobile-src/manifest.json`: generated mobile plugin version and minimum supported Obsidian app version.
 - `src/exports/revisions.ts` `SYNC_SCHEMA` and reflected `Revision.version`: export reflection schema in plugin `data.json`, independent of plugin releases. `src/exports/ExportReflection.ts` local journal `version` is its device-local persistence schema.
-- Upstream native viewer startup JSON `obsidianMode.version`: host-owned chart automation protocol, validated by `src/process/CsvzallProcessService.ts`, independent of plugin releases.
-- Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases.
+- Native JSON viewer startup sets `viewer` to `json`. The hosted `json-file-modified` message (version 1) refreshes clean JSON editors after vault changes. The `json-autosave-ready` and `json-autosave-settings` messages (version 1) apply the plugin’s AutoSave policy to the native JSON pane. Lite uses the same controller directly in its JSON view.
+- Upstream native viewer startup JSON `obsidianMode.version`: host-owned chart automation protocol, validated by `src/process/CsvzallProcess.ts`, independent of plugin releases.
+- Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases. Layout v2 links one shared worker script containing WASM. Each CSV iframe constructs its own worker. The import metadata pins the entry and worker scripts by SHA-256.
 - Upstream `src/viewer_wasm/web/src/host-bridge.js` `HOST_CAPABILITIES` and `scripts/wasm-viewer-contract.mjs` `requiredHostCapabilities`: versioned viewer capabilities, including compact layout, shared shell, editing, and host save protocols. Packaging requires the corresponding source implementation.
 - `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
-- `src/views/CsvzallTableView.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
+- `src/views/ViewerFrameSession.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
+- `src/views/ViewerFrameSession.ts` and the upstream viewer use version 1 of `csv-autosave-ready`, `csv-autosave-settings`, `csv-file-modified`, and `csv-recovery-request` / `csv-recovery-result`. Lite advertises `csvzall-host-csv-autosave-v1` and includes the session's source revision in open, reload, and save messages.
 - `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.
-- `src/views/CsvzallTableView.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
+- `src/views/ViewerFrameSession.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
 
 Before choosing or changing a release version, check GitHub releases and remote
 tags. A version in local metadata or a preparation PR is only a release candidate;

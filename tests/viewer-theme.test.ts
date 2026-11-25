@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { viewerThemeMessage, synchronizeViewerTheme } from "../src/views/viewerTheme.js";
 
 test("theme snapshots include only supported, computed, nonempty variables", () => {
-  const message = viewerThemeMessage({ getPropertyValue: name => name === "--text-normal" ? " rgb(1, 2, 3) " : "" }, true);
+  const message = viewerThemeMessage({ getPropertyValue: name => name === "--text-normal" ? " rgb(1, 2, 3) " : "" }, true, assert.fail);
   assert.deepEqual(message, { source: "obsidian-csvzall", type: "theme", version: 1, mode: "dark", variables: { "--text-normal": "rgb(1, 2, 3)" } });
-  assert.equal(viewerThemeMessage({ getPropertyValue: () => "" }, false).mode, "light");
+  assert.equal(viewerThemeMessage({ getPropertyValue: () => "" }, false, assert.fail).mode, "light");
+  const sizes: Record<string, string> = { "--font-text-size": "16px", "--font-preferred-size": "calc(16px * 1.5)", "--size-4-2": "8px" };
+  assert.deepEqual(viewerThemeMessage({ getPropertyValue: name => sizes[name] ?? "" }, false, value => {
+    assert.equal(value, "calc(16px * 1.5)");
+    return "24px";
+  }).variables, { "--font-text-size": "16px", "--font-preferred-size": "24px", "--size-4-2": "8px" });
 });
 
 test("theme sync coalesces changes, resends on readiness/reload, uses the view window, and disposes", () => {

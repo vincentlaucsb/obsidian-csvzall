@@ -28,11 +28,11 @@ export class ExportRenderer {
     return value.format === 'value' ? scalarMarkdown(markdown) : markdown.replace(/\r\n?/g, '\n');
   }
 
-  async loadColumns(source: string): Promise<string[]> {
+  async loadColumns(source: string, sql = ""): Promise<string[]> {
     if (this.signal.aborted) throw new Error('Plugin unloaded.');
     const root = this.filesystem.getVaultRoot();
     if (!root) throw new Error('Export generation requires a local desktop vault.');
     return csvHeader(await this.processService.captureCommand(['sql', 'query', '--csv', this.sourceFile(source).path,
-      '--format', 'csv', '--sql', 'SELECT * FROM data LIMIT 0'], root));
+      '--format', 'csv', '--sql', tableQuery({ sql, columns: [] }, 0)], root));
   }
 }

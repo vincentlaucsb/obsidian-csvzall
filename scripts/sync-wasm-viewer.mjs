@@ -11,7 +11,7 @@ import {
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { requireHostIntegration, requireEmbeddedAssets } from "./wasm-viewer-contract.mjs";
+import { requireHostIntegration, readEmbeddedWorker } from "./wasm-viewer-contract.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -59,6 +59,9 @@ if (!existsSync(sourceDir)) {
 
 requireFile(resolve(sourceDir, "index.html"));
 requireFile(resolve(sourceDir, "assets"));
+const autosaveSource = resolve(sourceRepoRoot, "src/viewer/modules/autosave.mjs");
+requireFile(autosaveSource);
+const autosaveModule = readFileSync(autosaveSource, "utf8").replace(/\r\n/g, "\n");
 
 // Reject incompatible input before replacing the last known-good packaged viewer.
 const sourceBundleName = readdirSync(resolve(sourceDir, "assets")).find(name => /^index-.*\.js$/.test(name));
@@ -66,7 +69,7 @@ if (!sourceBundleName) fail("missing source JavaScript bundle");
 const sourceBundle = readFileSync(resolve(sourceDir, "assets", sourceBundleName));
 requireHostIntegration(sourceBundle.toString("utf8"));
 const sourceHtml = readFileSync(resolve(sourceDir, "index.html"), "utf8");
-requireEmbeddedAssets(sourceHtml, sourceBundle.toString("utf8"));
+const sourceWorker = readEmbeddedWorker(sourceHtml, sourceDir);
 if (!sourceHtml.includes("./assets/")) fail("source index.html must use relative ./assets/ paths");
 
 if (!outputDir.startsWith(repoRoot) || basename(outputDir) !== "wasm-viewer") {
@@ -87,6 +90,7 @@ const metadata = {
   sourceRef: runGit(["rev-parse", "--abbrev-ref", "HEAD"], sourceRepoRoot) || "unknown",
   sourceDirty: Boolean(runGit(["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules"], sourceRepoRoot)),
   javascriptSha256: createHash("sha256").update(sourceBundle).digest("hex"),
+  workerSha256: createHash("sha256").update(sourceWorker).digest("hex"),
   sourcePath: relative(sourceRepoRoot, sourceDir).replace(/\\/g, "/"),
   sourceDist: sourceDir,
   syncedAt: new Date().toISOString(),
@@ -102,4 +106,5 @@ if (!indexHtml.includes("./assets/")) {
   fail("synced index.html does not reference relative ./assets/ paths");
 }
 
-console.log(`Synced WASM viewer assets from ${sourceDir}`);
+writeFileSync(resolve(repoRoot, "src/views/autosave.mjs"), autosaveModule);
+console.log(`Synced WASM viewer assets and the shared AutoSave module from ${sourceDir}`);
