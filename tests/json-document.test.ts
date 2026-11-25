@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JsonDocument } from "../src/views/jsonDocument.js";
+import { JsonDocument } from "../src/views/jsonDocument.mjs";
 
 test("compact JSON opens indented and saves edited tokens with original framing", () => {
   const source = '\uFEFF{"id":9007199254740993,"tag":"\\u0041","tag":"a b,]","n":1.00,"items":[{},true,null]}\r\n';

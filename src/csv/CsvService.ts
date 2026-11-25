@@ -52,7 +52,7 @@ export class CsvService {
     try {
       const fullPath = this.filesystem.getFullPath(file);
       if (!fullPath) throw new Error("csvzall can only open files from a local filesystem vault.");
-      if (this.reflection) {
+      if (this.reflection && !path.toLowerCase().endsWith(".json")) {
         await this.reflection.prepareViewer(file.path);
         if (!isCurrent() || !mayContinue()) return;
       }

@@ -73,6 +73,26 @@ test("an unavailable log destination cannot replace the original operation resul
   assert.deepEqual(settings.eventLog, []);
 });
 
+test("opening JSON routes its vault path to the helper and skips CSV chart preparation", async () => {
+  const { CsvService } = await loadService("src/csv/CsvService.ts");
+  const file = { path: "Notes/preferences.JSON", basename: "preferences" };
+  const view = new FakeView(), leaf = { view };
+  view.file = file;
+  const server = { url: "http://127.0.0.1:1234/?token=test", stopping: false };
+  let bound = false;
+  const service = new CsvService({}, () => ({}), {}, { getFullPath: () => "/vault/" + file.path }, {
+    viewerContinuation: () => () => true,
+    startViewer: async (path: string, target: unknown) => {
+      assert.equal(path, "/vault/" + file.path); assert.equal(target, leaf);
+      return server;
+    },
+    bindLeafToServer: () => { bound = true; },
+  }, { prepareViewer: () => { throw new Error("JSON must not access CSV configuration"); } });
+  await service.openCsvInLeaf(file, leaf);
+  assert.equal(bound, true);
+  assert.deepEqual(view.displayed, [server.url]);
+});
+
 test("only the helper launch failure offers reinstall when a path disappears", async () => {
   const { CsvService } = await loadService("src/csv/CsvService.ts");
   const missing = Object.assign(new Error("path disappeared"), { code: "ENOENT" });
@@ -117,6 +137,36 @@ test("process failures reject with Error objects even for untyped event payloads
     const pending = command ? service.runCommand([], ".", "test") : service.startViewer("a.csv");
     child.emit("error", "untyped failure");
     await assert.rejects(pending, { name: "Error", message: "untyped failure" });
+    service.unload();
+  }
+});
+
+test("separate stdout records cannot combine an obsolete CSV URL with a JSON acknowledgment", async () => {
+  const child = childProcess(); let started = false;
+  const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => { started = true; return child; });
+  const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {}, undefined, async () => {});
+  service.captureCommand = async () => "--obsidian";
+  const pending = service.startViewer("file.json");
+  while (!started) await Promise.resolve();
+  child.stdout.emit("data", Buffer.from('{"url":"http://127.0.0.1:1234/?token=test"}\n{"viewer":"json","obsidianMode":{"version":1,"chartAutomation":"host"}}\n'));
+  await assert.rejects(pending, /did not start a JSON editor/);
+  assert.equal(child.killed, true);
+  service.unload();
+});
+
+test("desktop JSON startup requires the native editor before exposing its URL", async () => {
+  for (const supported of [false, true]) {
+    const child = childProcess(); let started = false;
+    const { CsvzallProcessService } = await loadService("src/process/CsvzallProcessService.ts", () => { started = true; return child; });
+    const service = new CsvzallProcessService(() => ({ csvzallPath: "csvzall", startupTimeoutMs: 30000 }), {}, undefined, async () => {});
+    service.captureCommand = async () => "--obsidian";
+    const pending = service.startViewer("data.JSON");
+    while (!started) await Promise.resolve();
+    const url = "http://127.0.0.1:1234/?token=test";
+    child.stdout.emit("data", Buffer.from(JSON.stringify({ url, viewer: supported ? "json" : undefined,
+      obsidianMode: { version: 1, chartAutomation: "host" } }) + "\n"));
+    if (supported) assert.equal((await pending).url, url);
+    else await assert.rejects(pending, /did not start a JSON editor/);
     service.unload();
   }
 });

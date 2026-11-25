@@ -1,4 +1,4 @@
-function validJson(text: string): boolean {
+function validJson(text) {
   try {
     JSON.parse(text);
     return true;
@@ -9,8 +9,8 @@ function validJson(text: string): boolean {
 
 // The input has already passed strict JSON validation. Copy each token verbatim,
 // including number spellings, duplicate keys, and escapes inside strings.
-function layout(text: string, pretty: boolean): string {
-  const parts: string[] = [];
+function layout(text, pretty) {
+  const parts = [];
   let depth = 0;
   let previous = "";
   let position = 0;
@@ -46,14 +46,9 @@ function layout(text: string, pretty: boolean): string {
 }
 
 export class JsonDocument {
-  readonly display: string;
-  readonly indent: string;
-  private readonly compact: boolean;
-  private readonly bom: string;
-  private readonly eol: string;
-  private readonly suffix: string;
 
-  constructor(readonly source: string) {
+  constructor(source) {
+    this.source = source;
     this.bom = source.startsWith("\uFEFF") ? "\uFEFF" : "";
     const body = source.slice(this.bom.length);
     this.eol = /\r\n|[\r\n]/.exec(body)?.[0] ?? "\n";
@@ -66,7 +61,7 @@ export class JsonDocument {
     this.indent = /\n( +|\t+)\S/.exec(this.display)?.[1] ?? "  ";
   }
 
-  serialize(display: string): string {
+  serialize(display) {
     if (display === this.display) return this.source;
     if (this.compact && validJson(display)) return this.bom + layout(display, false) + this.suffix;
     return this.bom + display.replace(/\n/g, this.eol);

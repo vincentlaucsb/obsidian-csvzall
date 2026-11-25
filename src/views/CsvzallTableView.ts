@@ -120,10 +120,17 @@ export class CsvzallTableView extends FileView {
   }
 
   getIcon(): string {
-    return "table";
+    return this.file?.extension?.toLowerCase() === "json" ? "braces" : "table";
   }
 
   async onOpen(): Promise<void> {
+    if (this.viewType === "csvzall-json") {
+      this.registerEvent(this.app.vault.on("modify", file => {
+        if (file === this.file) this.frame?.contentWindow?.postMessage({
+          source: "obsidian-csvzall", type: "json-file-modified", version: 1,
+        }, "*");
+      }));
+    }
     this.patchLeafNavigation();
     this.render();
   }
@@ -182,7 +189,7 @@ export class CsvzallTableView extends FileView {
           this.frame.blur();
           const warning = this.containerEl.createDiv({ cls: "csvzall-view-error" });
           this.renameWarning = warning;
-          warning.createEl("p", { text: `This CSV moved while it had unsaved edits. Editing is paused to protect the save destination. Move it back to “${this.desktopSourcePath}”, save your edits, then move it again.` });
+          warning.createEl("p", { text: `This file moved while it had unsaved edits. Editing is paused to protect the save destination. Move it back to “${this.desktopSourcePath}”, save your edits, then move it again.` });
           warning.createEl("button", { text: "Discard edits and reopen" }).addEventListener("click", () => {
             void this.runProtectedLeafAction(() => this.onLoadFile(file))
               .catch((error: unknown) => new Notice(String(error)));
@@ -508,9 +515,9 @@ export class CsvzallTableView extends FileView {
 
   private async saveBeforeLeaving(): Promise<void> {
     const frame = this.frame;
-    if (!frame?.contentWindow) throw new Error("The CSV viewer is unavailable. Your edits have not been discarded.");
-    if (!this.wasmFile && this.file?.path !== this.desktopSourcePath) throw new Error("Restore the CSV's original path before saving, or discard the edits.");
-    if (this.pendingSave) throw new Error("A CSV save is already in progress.");
+    if (!frame?.contentWindow) throw new Error("The file viewer is unavailable. Your edits have not been discarded.");
+    if (!this.wasmFile && this.file?.path !== this.desktopSourcePath) throw new Error("Restore the file's original path before saving, or discard the edits.");
+    if (this.pendingSave) throw new Error("A save is already in progress.");
     await new Promise<void>((resolve, reject) => {
       const requestId = ++this.nextSaveRequestId;
       const timer = window.setTimeout(() => {
@@ -540,7 +547,7 @@ export class CsvzallTableView extends FileView {
     const reply = data as { source?: unknown; type?: unknown; version?: unknown; requestId?: unknown; success?: unknown; dirty?: unknown; error?: unknown };
     if ((reply.source !== "csvzall-viewer" && reply.source !== "csvzall-wasm-viewer") || reply.type !== "save-response" || reply.version !== 1) return false;
     if (!this.pendingSave || reply.requestId !== this.pendingSave.requestId || typeof reply.success !== "boolean" || typeof reply.dirty !== "boolean") return true;
-    if (!reply.success) this.finishPendingSave(new Error(typeof reply.error === "string" ? reply.error : "Could not save CSV. Your edits are still open."));
+    if (!reply.success) this.finishPendingSave(new Error(typeof reply.error === "string" ? reply.error : "Could not save the file. Your edits are still open."));
     else if (reply.dirty) {
       this.setDirty(true);
       this.finishPendingSave(new Error("New edits arrived while saving. Save again before leaving."));
@@ -576,7 +583,7 @@ export class CsvzallTableView extends FileView {
     if (!data || typeof data !== 'object') return false;
     const message = data as { source?: unknown; type?: unknown; version?: unknown; requestId?: unknown; sql?: unknown; save?: unknown };
     if (message.source !== 'csvzall-viewer' || message.version !== 1) return false;
-    const enabled = !!this.owner.insertQueryIntoNote && !this.wasmFile && Platform.isDesktopApp;
+    const enabled = !!this.owner.insertQueryIntoNote && this.file?.extension?.toLowerCase() !== "json" && !this.wasmFile && Platform.isDesktopApp;
     if (message.type === 'note-export-ready') {
       frame.contentWindow?.postMessage({ source: 'obsidian-csvzall', type: 'note-export-capabilities', version: 1, enabled }, '*');
       return true;
@@ -616,7 +623,7 @@ export class CsvzallTableView extends FileView {
   private removeMessageListener(): void {
     this.exportLifecycle?.abort(); this.exportLifecycle = null;
     this.exportRequest = null; this.completedExports.clear();
-    this.finishPendingSave(new Error("The CSV viewer closed before saving completed."));
+    this.finishPendingSave(new Error("The file viewer closed before saving completed."));
     this.themeCleanup?.();
     this.themeCleanup = null;
     if (this.messageHandler) {

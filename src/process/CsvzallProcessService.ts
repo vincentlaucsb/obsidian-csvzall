@@ -11,10 +11,33 @@ import { CsvzallTableView } from "../views/CsvzallTableView.js";
 import { SessionErrors } from "../logging/SessionErrors.js";
 import {
   extractViewerUrl,
+  isAllowedViewerUrl,
   formatProcessFailure,
   stripOuterQuotes,
   ViewerSessionRegistry,
 } from "../viewerHelpers.js";
+
+function startupUrl(line: string, jsonEditor: boolean, terminated: boolean): string | undefined {
+  let record: unknown;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    if (!terminated) return undefined;
+    // Older helpers may print a plain viewer URL without a mode acknowledgment.
+  }
+  if (record && typeof record === "object" && "url" in record &&
+      typeof record.url === "string" && isAllowedViewerUrl(record.url)) {
+    const mode = "obsidianMode" in record && record.obsidianMode;
+    if (mode && typeof mode === "object" && "version" in mode && mode.version === 1 &&
+        "chartAutomation" in mode && mode.chartAutomation === "host" &&
+        (!jsonEditor || ("viewer" in record && record.viewer === "json"))) return record.url;
+  } else if (!extractViewerUrl(line)) {
+    return undefined;
+  }
+  throw new Error(jsonEditor
+    ? "This helper did not start a JSON editor. Update the custom executable or use the bundled helper."
+    : "This helper does not support Obsidian mode. Update the custom executable or use the bundled helper.");
+}
 
 export class ViewerStartupCancelledError extends Error {}
 
@@ -164,8 +187,10 @@ export class CsvzallProcessService {
     }
     if (this.unloading) throw new ViewerStartupCancelledError("Plugin unloaded");
     if (leaf && this.leafGeneration.get(leaf) !== generation) throw new ViewerStartupCancelledError("Viewer startup cancelled");
+    const jsonEditor = filePath.toLowerCase().endsWith(".json");
+    const hosted = jsonEditor || Boolean(this.beforeCommand);
     const args = ["view", filePath, "--edit", "--no-open", "--startup-json"];
-    if (this.beforeCommand) args.push("--obsidian");
+    if (hosted) args.push("--obsidian");
     const cwd = isAbsolute(executable) ? dirname(executable) : undefined;
     const child = spawn(executable, args, {
       cwd,
@@ -213,28 +238,25 @@ export class CsvzallProcessService {
         resolve(handle);
       };
 
+      const decoder = new StringDecoder("utf8");
+      let pendingLine = "";
       child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8");
-        const url = extractViewerUrl(stdout);
-        if (url) {
-          if (this.beforeCommand) {
-            const acknowledged = stdout.split(/\r?\n/).some(line => {
-              try {
-                const value: unknown = JSON.parse(line);
-                if (!value || typeof value !== "object" || !("obsidianMode" in value)) return false;
-                const mode = value.obsidianMode;
-                return !!mode && typeof mode === "object" && "version" in mode && mode.version === 1 &&
-                  "chartAutomation" in mode && mode.chartAutomation === "host";
-              } catch { return false; }
-            });
-            if (!acknowledged) {
-              if (!stdout.endsWith("\n")) return;
-              fail(new Error("This helper does not support Obsidian mode. Update the custom executable or use the bundled helper."));
-              return;
-            }
+        const text = decoder.write(chunk);
+        stdout = (stdout + text).slice(-8000);
+        if (settled) return;
+        const lines = (pendingLine + text).split("\n");
+        pendingLine = lines.pop() ?? "";
+        try {
+          for (const line of [...lines, pendingLine]) {
+            if (line.length > 65536) throw new Error("Viewer startup record is too long.");
           }
-          finish(url);
-        }
+          for (const line of lines) {
+            const url = hosted ? startupUrl(line, jsonEditor, true) : extractViewerUrl(line);
+            if (url) { finish(url); return; }
+          }
+          const url = hosted ? startupUrl(pendingLine, jsonEditor, false) : extractViewerUrl(pendingLine);
+          if (url) finish(url);
+        } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
@@ -252,8 +274,7 @@ export class CsvzallProcessService {
 
       child.on("exit", (code, signal) => {
         cleanup();
-        const existingUrl = extractViewerUrl(stdout);
-        if (existingUrl && settled) {
+        if (settled) {
           const handle = this.sessions.list().find((candidate: CsvzallServerHandle) => candidate.process === child);
           if (handle) {
             if (!handle.stopping && !this.unloading) {
@@ -273,9 +294,6 @@ export class CsvzallProcessService {
             handle.stopping = true;
             this.sessions.detachHandle(handle);
           }
-          return;
-        }
-        if (settled) {
           return;
         }
         settled = true;

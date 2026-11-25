@@ -235,7 +235,7 @@ test("built plugin launches csvzall view in edit mode", () => {
   assert.match(bundle, /csvzall-viewer/);
   assert.match(bundle, /dirty-state/);
   assert.match(bundle, /Unsaved changes/);
-  assert.match(bundle, /This CSV has unsaved changes\./);
+  assert.match(bundle, /This file has unsaved changes\./);
   assert.match(bundle, /Discard changes/);
   assert.match(bundle, /openFile/);
   assert.match(bundle, /setViewState/);

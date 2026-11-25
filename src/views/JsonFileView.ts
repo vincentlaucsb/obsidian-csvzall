@@ -1,11 +1,12 @@
+import { registerJsonExtension } from "./registerJsonExtension.js";
 import { EditorState, type Text } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { json } from "@codemirror/lang-json";
 import { tags } from "@lezer/highlight";
-import { FileView, Modal, Notice, type Plugin, TFile, type WorkspaceLeaf } from "obsidian";
-import { JsonDocument } from "./jsonDocument.js";
+import { FileView, Modal, Notice, type Plugin, type TFile, type WorkspaceLeaf } from "obsidian";
+import { JsonDocument } from "./jsonDocument.mjs";
 
 const highlighting = HighlightStyle.define([
   { tag: tags.propertyName, color: "var(--code-property)" },
@@ -156,21 +157,5 @@ function reportError(error: unknown): void {
 export function registerJsonView(plugin: Plugin): void {
   const type = plugin.manifest.id + "-json";
   plugin.registerView(type, leaf => new JsonFileView(leaf, type));
-  try {
-    plugin.registerExtensions(["json"], type);
-  } catch (error) {
-    // Obsidian permits only one default handler. Keep JSON reachable when
-    // another plugin already owns the extension.
-    console.warn("csvzall could not register the default JSON view", error);
-    plugin.registerEvent(plugin.app.workspace.on("file-menu", (menu, file) => {
-      if (!(file instanceof TFile) || file.extension.toLowerCase() !== "json") return;
-      menu.addItem(item => item.setTitle("Open in JSON editor").setIcon("braces").onClick(async () => {
-        try {
-          await plugin.app.workspace.getLeaf(true).setViewState({ type, state: { file: file.path }, active: true });
-        } catch (openError) {
-          new Notice(`Could not open JSON: ${openError instanceof Error ? openError.message : String(openError)}`);
-        }
-      }));
-    }));
-  }
+  registerJsonExtension(plugin, type);
 }

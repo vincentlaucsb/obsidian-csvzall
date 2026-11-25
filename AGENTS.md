@@ -103,6 +103,7 @@ global preflight checks for unrelated operations.
 ## Mobile WASM Viewer Notes
 
 - Keep the hosted viewer layout stable during AG Grid editing, particularly with Android's keyboard open. Use edit lifecycle hooks for visibility; avoid focus-driven keyboard shims and viewport-height clamping. Detailed examples and constraints are in [the viewer maintenance guide](docs/wasm-viewer-refresh.md#mobile-runtime-and-editing-constraints).
+- Lite imports the canonical JSON formatter from upstream `src/viewer/modules/json-document.mjs` as `src/views/jsonDocument.mjs`. Keep their bytes identical when refreshing it.
 - Change shared runtime behavior upstream, then run `npm run refresh:wasm-viewer`. Preserve compiled JavaScript bytes and align capability/digest checks with the imported source; never repair minified bundles.
 - Lite is a native-helper-free WASM viewer/editor on desktop and mobile. Keep desktop services, installers, child processes, Node, and Electron out of its source and bundle. Retain the desktop plugin's `isDesktopOnly: true`, one CSV handler per desktop, and mobile-only gating for keyboard/navigation UI.
 - Preserve `csvzall Lite` branding, the `csvzall-mobile` plugin/view/command identifiers, and the `obsidian-csvzall-mobile` repository name. Mobile versions remain independent in `mobile-src/manifest.json`.
@@ -145,6 +146,7 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `scripts/build-windows-sync-test.mjs` generated `development-identity.json` `helperVersion`: local Windows-only test helper version, independent of release pins. Its generated plugin manifest is marked `csvzallDevelopmentBuild`; never publish it as a release. Native preparation smoke tests must acknowledge Obsidian mode version 1 and verify host-owned save automation.
 - `mobile-src/manifest.json`: generated mobile plugin version and minimum supported Obsidian app version.
 - `src/exports/revisions.ts` `SYNC_SCHEMA` and reflected `Revision.version`: export reflection schema in plugin `data.json`, independent of plugin releases. `src/exports/ExportReflection.ts` local journal `version` is its device-local persistence schema.
+- Native JSON viewer startup sets `viewer` to `json`. The hosted `json-file-modified` message (version 1) refreshes clean JSON editors after vault changes.
 - Upstream native viewer startup JSON `obsidianMode.version`: host-owned chart automation protocol, validated by `src/process/CsvzallProcessService.ts`, independent of plugin releases.
 - Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases.
 - Upstream `src/viewer_wasm/web/src/host-bridge.js` `HOST_CAPABILITIES` and `scripts/wasm-viewer-contract.mjs` `requiredHostCapabilities`: versioned viewer capabilities, including compact layout, shared shell, editing, and host save protocols. Packaging requires the corresponding source implementation.

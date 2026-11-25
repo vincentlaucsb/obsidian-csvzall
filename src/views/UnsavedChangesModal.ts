@@ -20,7 +20,7 @@ export class UnsavedChangesModal extends Modal {
     this.closed = false;
     contentEl.empty();
     this.titleEl.setText("Unsaved changes");
-    contentEl.createEl("p", { text: "This CSV has unsaved changes." });
+    contentEl.createEl("p", { text: "This file has unsaved changes." });
 
     const actions = contentEl.createDiv({ cls: "modal-button-container" });
     const saveButton = actions.createEl("button", { text: "Save", cls: "mod-cta", attr: { autofocus: "" } });
