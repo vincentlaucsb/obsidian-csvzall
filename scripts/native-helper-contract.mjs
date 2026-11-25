@@ -22,7 +22,7 @@ export function buildIdentity(root = repositoryRoot) {
   const config = JSON.parse(readFileSync(join(root, "native-binaries/build.json"), "utf8"));
   if (config.schemaVersion !== 1 || config.repository !== "vincentlaucsb/csvzall" ||
       !commitPattern.test(config.sourceCommit) || !/^\d+\.\d+\.\d+$/.test(config.version)) throw new Error("Invalid native helper source pin.");
-  if (![config.tools.cmake, config.tools.ninja, config.tools.python].every(version => /^\d+\.\d+(?:\.\d+)?$/.test(version))) throw new Error("Native build tools must be pinned.");
+  if (![config.tools.cmake, config.tools.ninja, config.tools.python, config.tools.esbuild].every(version => /^\d+\.\d+(?:\.\d+)?$/.test(version))) throw new Error("Native build tools must be pinned.");
   if (Object.keys(config.targets).sort().join() !== Object.keys(bundledTargets).sort().join()) throw new Error("Expected all three native helper targets.");
   for (const [target, settings] of Object.entries(config.targets)) {
     if (`${settings.platform}-${settings.arch}` !== target || typeof settings.runner !== "string") throw new Error(`Invalid helper target ${target}.`);

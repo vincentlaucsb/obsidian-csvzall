@@ -133,6 +133,7 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `versions.json`: Obsidian plugin compatibility map from plugin version to minimum supported Obsidian app version.
 - `package.json`: npm package version.
 - `package.json` `engines.node`: supported Node.js versions for the lint/build toolchain.
+- `package.json` `esbuild` and `native-binaries/build.json` `tools.esbuild`: pinned host bundler for native viewer assets. Keep both aligned with the version required by the pinned csvzall source.
 - `package.json` `@lezer/json`: the shared JSON editor grammar pin keeps its serialized parser compatible with the CodeMirror runtime in Lite's minimum Obsidian version.
 - `package.json` `overrides.moment`: patched transitive dependency version, independent of plugin releases.
 - `package.json` `overrides["minimatch@>=7 <11.0.1"]`: patched lint-toolchain dependency version, independent of plugin releases.
@@ -147,13 +148,13 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `mobile-src/manifest.json`: generated mobile plugin version and minimum supported Obsidian app version.
 - `src/exports/revisions.ts` `SYNC_SCHEMA` and reflected `Revision.version`: export reflection schema in plugin `data.json`, independent of plugin releases. `src/exports/ExportReflection.ts` local journal `version` is its device-local persistence schema.
 - Native JSON viewer startup sets `viewer` to `json`. The hosted `json-file-modified` message (version 1) refreshes clean JSON editors after vault changes.
-- Upstream native viewer startup JSON `obsidianMode.version`: host-owned chart automation protocol, validated by `src/process/CsvzallProcessService.ts`, independent of plugin releases.
+- Upstream native viewer startup JSON `obsidianMode.version`: host-owned chart automation protocol, validated by `src/process/CsvzallProcess.ts`, independent of plugin releases.
 - Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases.
 - Upstream `src/viewer_wasm/web/src/host-bridge.js` `HOST_CAPABILITIES` and `scripts/wasm-viewer-contract.mjs` `requiredHostCapabilities`: versioned viewer capabilities, including compact layout, shared shell, editing, and host save protocols. Packaging requires the corresponding source implementation.
 - `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
-- `src/views/CsvzallTableView.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
+- `src/views/ViewerFrameSession.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.
 - `src/views/viewerDocumentation.ts` `open-documentation` `version`: iframe documentation protocol version, emitted by upstream `src/viewer/modules/sql.mjs`; the host accepts only the fixed SQLite capabilities page.
-- `src/views/CsvzallTableView.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
+- `src/views/ViewerFrameSession.ts` and upstream `src/viewer/modules/note-export.mjs` `version`: note-export capability, insertion request and response protocol, independent of plugin releases.
 
 Before choosing or changing a release version, check GitHub releases and remote
 tags. A version in local metadata or a preparation PR is only a release candidate;

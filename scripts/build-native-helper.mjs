@@ -132,7 +132,11 @@ export async function buildNativeHelper(target, output, identity = buildIdentity
     readFileSync(join(source, "src/main.cpp"), "utf8").match(/ArgumentParser program\("csvzall",\s*"([\d.]+)"\)/)?.[1],
   ];
   if (versions.some(version => version !== config.version)) throw new Error("Pinned csvzall source version markers disagree with the build configuration.");
-  const options = { ...config.cmakeOptions, ...settings.cmakeOptions, FETCHCONTENT_FULLY_DISCONNECTED: "ON" };
+  const esbuild = join(repositoryRoot, "node_modules", "@esbuild", target, target === "win32-x64" ? "esbuild.exe" : "bin/esbuild");
+  if (!existsSync(esbuild) || capture(esbuild, ["--version"]) !== config.tools.esbuild) {
+    throw new Error(`Run npm ci to install the pinned esbuild ${config.tools.esbuild} before building helpers.`);
+  }
+  const options = { ...config.cmakeOptions, ...settings.cmakeOptions, FETCHCONTENT_FULLY_DISCONNECTED: "ON", CSVZALL_ESBUILD_EXECUTABLE: esbuild };
   for (const [name, dependency] of Object.entries(config.dependencies)) {
     const destination = join(work, name);
     checkout(dependency.repository, dependency.commit, destination);

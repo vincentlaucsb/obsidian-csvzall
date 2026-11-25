@@ -73,6 +73,9 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Install locked host tools for viewer asset bundling
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build pinned source and smoke-test packaged helper
         if: steps.cache.outputs.cache-hit != 'true'
         run: node scripts/build-native-helper.mjs build ${{ matrix.target }} .test-build/native-results/${{ matrix.target }}

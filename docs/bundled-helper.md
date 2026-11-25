@@ -34,7 +34,8 @@ helper snapshot before release.
 The build identity hashes that complete configuration and the native workflow,
 build, packaging, and verification scripts. It excludes plugin-only changes.
 The dependency checkouts are explicit, and CMake's FetchContent network fallback
-is disabled. Obsidian builds disable PostgreSQL, keychain, and compressed input;
+is disabled. The native recipe passes the host esbuild executable installed by
+`npm ci` to CMake and checks its version against the build pin. Obsidian builds disable PostgreSQL, keychain, and compressed input;
 upstream's runtime dependency guard rejects non-system shared libraries.
 
 Build ownership lives here. csvzall's release workflow publishes its full CLI and
