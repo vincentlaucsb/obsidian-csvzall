@@ -56,6 +56,7 @@ const isCsvReady = validateObject({
   source: value => value === "csvzall-viewer" || value === "csvzall-wasm-viewer",
   type: literal("csv-autosave-ready"), version: literal(1),
 });
+const isJsonReady = validateObject({ ...desktopProtocol, type: literal("json-autosave-ready") });
 const isRecoveryRequest = validateObject({
   source: value => value === "csvzall-viewer" || value === "csvzall-wasm-viewer",
   type: literal("csv-recovery-request"), version: literal(1),
@@ -90,7 +91,7 @@ export class ViewerFrameSession {
   private exportLifecycle: AbortController | null = null;
   private readonly completedExports = new Set<number>();
   private readonly csvSource: WasmCsvSource | null;
-  private csvReady = false;
+  private autosaveReady: "csv" | "json" | null = null;
   private refreshQueued = false;
 
   constructor(readonly frame: HTMLIFrameElement, private readonly host: FrameHost) {
@@ -124,13 +125,18 @@ export class ViewerFrameSession {
     const source = this.frame.contentWindow;
     if (this.disposed || !source || event.source !== source) return;
     if (isCsvReady(event.data)) {
-      this.csvReady = true;
+      this.autosaveReady = "csv";
       this.updateAutosave();
       // The helper may have indexed the file before this iframe was attached.
       if (!this.csvSource) this.fileModified();
       return;
     }
-    if (isRecoveryRequest(event.data) && this.csvReady && this.host.file) {
+    if (isJsonReady(event.data)) {
+      this.autosaveReady = "json";
+      this.updateAutosave();
+      return;
+    }
+    if (isRecoveryRequest(event.data) && this.autosaveReady === "csv" && this.host.file) {
       void this.saveRecovery(this.host.file, event.data.requestId, event.data.edits);
       return;
     }
@@ -152,18 +158,21 @@ export class ViewerFrameSession {
   }
 
   updateAutosave(): void {
-    if (!this.csvReady || this.disposed) return;
+    if (this.disposed || !this.autosaveReady) return;
     const mode = this.host.autosaveMode();
-    this.frame.contentWindow?.postMessage({ source: "obsidian-csvzall", type: "csv-autosave-settings", version: 1,
+    this.frame.contentWindow?.postMessage({ source: "obsidian-csvzall", type: `${this.autosaveReady}-autosave-settings`, version: 1,
       enabled: mode === "on", visible: mode !== "hidden" }, "*");
   }
 
   fileModified(): void {
     const source = this.csvSource;
     if (!source) {
-      if (this.csvReady) this.frame.contentWindow?.postMessage({
-        source: "obsidian-csvzall", type: "csv-file-modified", version: 1,
-      }, "*");
+      const changed = this.autosaveReady ?? (this.host.file?.extension.toLowerCase() === "json" ? "json" : null);
+      if (changed) {
+        this.frame.contentWindow?.postMessage({
+          source: "obsidian-csvzall", type: `${changed}-file-modified`, version: 1,
+        }, "*");
+      }
       return;
     }
     if (this.refreshQueued) return;

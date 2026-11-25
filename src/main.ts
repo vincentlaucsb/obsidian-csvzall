@@ -119,6 +119,7 @@ export default class CsvzallPlugin extends Plugin {
     if (this.appliedAutosave === this.settings.autosaveMode) return;
     this.appliedAutosave = this.settings.autosaveMode;
     updateViewerAutosave(this.app.workspace, VIEW_TYPE_CSVZALL);
+    updateViewerAutosave(this.app.workspace, this.manifest.id + "-json");
   }
 
   async onExternalSettingsChange(): Promise<void> {

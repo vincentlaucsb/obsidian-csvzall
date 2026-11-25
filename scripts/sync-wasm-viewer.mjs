@@ -59,6 +59,9 @@ if (!existsSync(sourceDir)) {
 
 requireFile(resolve(sourceDir, "index.html"));
 requireFile(resolve(sourceDir, "assets"));
+const autosaveSource = resolve(sourceRepoRoot, "src/viewer/modules/autosave.mjs");
+requireFile(autosaveSource);
+const autosaveModule = readFileSync(autosaveSource, "utf8").replace(/\r\n/g, "\n");
 
 // Reject incompatible input before replacing the last known-good packaged viewer.
 const sourceBundleName = readdirSync(resolve(sourceDir, "assets")).find(name => /^index-.*\.js$/.test(name));
@@ -102,4 +105,5 @@ if (!indexHtml.includes("./assets/")) {
   fail("synced index.html does not reference relative ./assets/ paths");
 }
 
-console.log(`Synced WASM viewer assets from ${sourceDir}`);
+writeFileSync(resolve(repoRoot, "src/views/autosave.mjs"), autosaveModule);
+console.log(`Synced WASM viewer assets and the shared AutoSave module from ${sourceDir}`);

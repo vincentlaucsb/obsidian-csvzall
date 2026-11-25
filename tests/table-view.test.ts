@@ -247,14 +247,15 @@ test("Lite rejects a concurrent change at the vault write, reloads its bytes and
 });
 
 test("the ready handshake and global settings changes deliver the AutoSave policy to each viewer", () => {
-  for (const source of ["csvzall-viewer", "csvzall-wasm-viewer"]) {
+  for (const [source, kind] of [["csvzall-viewer", "csv"], ["csvzall-wasm-viewer", "csv"], ["csvzall-viewer", "json"]] as const) {
     const f = fixture();
+    f.file.extension = kind;
     if (source === "csvzall-viewer") f.view.showViewer("a", "http://localhost/");
-    f.send({source, type: "csv-autosave-ready", version: 1});
+    f.send({source, type: `${kind}-autosave-ready`, version: 1});
     for (const mode of ["off", "on", "hidden"]) {
       f.owner.settings.autosaveMode = mode;
       f.view.updateAutosave();
-      assert.equal(f.messages.at(-1).type, "csv-autosave-settings");
+      assert.equal(f.messages.at(-1).type, `${kind}-autosave-settings`);
       assert.equal(f.messages.at(-1).enabled, mode === "on");
       assert.equal(f.messages.at(-1).visible, mode !== "hidden");
     }

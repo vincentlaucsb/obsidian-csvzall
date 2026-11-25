@@ -7,6 +7,8 @@ import { json } from "@codemirror/lang-json";
 import { tags } from "@lezer/highlight";
 import { FileView, Modal, Notice, setIcon, type Plugin, type TFile, type WorkspaceLeaf } from "obsidian";
 import { createEditorToolbar } from "./editorToolbar.mjs";
+import { createAutosave, createAutosaveControl } from "./autosave.mjs";
+import type { AutosaveMode } from "../settings/autosave.js";
 import { JsonDocument } from "./jsonDocument.mjs";
 
 const highlighting = HighlightStyle.define([
@@ -30,15 +32,25 @@ class JsonFileView extends FileView {
   private current: OpenJson | null = null;
   private pending: Promise<void> = Promise.resolve();
   private loadGeneration = 0;
+  private readonly autosave: ReturnType<typeof createAutosave>;
   private readonly toolbar: ReturnType<typeof createEditorToolbar>;
 
-  constructor(leaf: WorkspaceLeaf, private readonly type: string) {
+  constructor(leaf: WorkspaceLeaf, private readonly type: string, private readonly autosaveMode: () => AutosaveMode) {
     super(leaf);
     this.toolbar = createEditorToolbar(this.contentEl.ownerDocument, (button, icon, label) => {
       button.replaceChildren();
       setIcon(button.createSpan({ attr: { "aria-hidden": "true" } }), icon === "restore" ? "rotate-ccw" : "save");
       button.createSpan({ text: label });
     }, "span");
+    const control = createAutosaveControl(this.contentEl.ownerDocument);
+    this.toolbar.edits.append(control.control);
+    this.autosave = createAutosave(control, {
+      win: this.contentEl.ownerDocument.defaultView ?? window,
+      canSave: () => !this.toolbar.save.disabled,
+      save: () => this.saveCurrentDocument(true),
+    });
+    this.register(() => this.autosave.dispose());
+    this.updateAutosave();
     this.contentEl.addClass("csvzall-json-view");
     this.contentEl.append(this.toolbar.header);
     this.toolbar.save.addEventListener("click", () => this.requestSave());
@@ -61,10 +73,17 @@ class JsonFileView extends FileView {
     return super.onRename(file);
   }
 
-  private updateActions(): void {
+  private updateActions(edited = false): void {
     const current = this.current;
     const disabled = !current || current.pendingSaves > 0 || current.editor.dom.inert || current.editor.state.doc.eq(current.saved);
     this.toolbar.reset.disabled = this.toolbar.save.disabled = disabled;
+    if (edited) this.autosave.edited();
+    else this.autosave.schedule();
+  }
+
+  updateAutosave(): void {
+    const mode = this.autosaveMode();
+    this.autosave.setPolicy({ enabled: mode === "on", visible: mode !== "hidden" });
   }
 
   protected async onOpen(): Promise<void> {
@@ -93,7 +112,7 @@ class JsonFileView extends FileView {
         EditorView.contentAttributes.of({ "aria-label": "JSON editor", spellcheck: "false" }),
         EditorView.updateListener.of(update => {
           const current = this.current;
-          if (update.docChanged) this.updateActions();
+          if (update.docChanged) this.updateActions(true);
           if (current?.refreshNeeded && update.docChanged && update.state.doc.eq(current.saved)) {
             void this.enqueue(() => this.refresh(current)).catch(reportError);
           }
@@ -132,14 +151,31 @@ class JsonFileView extends FileView {
   }
 
   private requestSave(): void {
+    void this.saveCurrentDocument().catch(() => {});
+  }
+
+  private async saveCurrentDocument(automatic = false): Promise<void> {
     const current = this.current;
-    if (!current) return;
+    if (!current || this.toolbar.save.disabled) return;
+    this.autosave.cancel();
     current.pendingSaves++;
     this.updateActions();
-    void this.enqueue(() => this.saveDocument(current)).finally(() => {
+    try {
+      await this.enqueue(async () => {
+        if (automatic && (!this.autosave.enabled || current.editor.dom.inert)) return;
+        await this.saveDocument(current);
+      });
+      if (current.refreshNeeded && current.editor.state.doc.eq(current.saved)) {
+        void this.enqueue(() => this.refresh(current)).catch(reportError);
+      }
+    } catch (error) {
+      this.autosave.failed();
+      reportError(error);
+      throw error;
+    } finally {
       current.pendingSaves--;
       this.updateActions();
-    }).catch(reportError);
+    }
   }
 
   private async saveDocument(current: OpenJson): Promise<void> {
@@ -160,6 +196,7 @@ class JsonFileView extends FileView {
     this.loadGeneration++;
     const current = this.current;
     if (!current || file !== current.file) return;
+    this.autosave.cancel();
     current.editor.dom.inert = true;
     this.updateActions();
     try {
@@ -193,8 +230,14 @@ function reportError(error: unknown): void {
   new Notice(error instanceof Error ? error.message : String(error));
 }
 
-export function registerJsonView(plugin: Plugin, useAsDefault: boolean): void {
+export function updateJsonAutosave(plugin: Plugin): void {
+  for (const leaf of plugin.app.workspace.getLeavesOfType(plugin.manifest.id + "-json")) {
+    if (leaf.view instanceof JsonFileView) leaf.view.updateAutosave();
+  }
+}
+
+export function registerJsonView(plugin: Plugin, useAsDefault: boolean, autosaveMode: () => AutosaveMode): void {
   const type = plugin.manifest.id + "-json";
-  plugin.registerView(type, leaf => new JsonFileView(leaf, type));
+  plugin.registerView(type, leaf => new JsonFileView(leaf, type, autosaveMode));
   registerJsonExtension(plugin, type, useAsDefault);
 }

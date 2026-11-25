@@ -76,11 +76,7 @@ export class CsvzallTableView extends FileView {
   async onOpen(): Promise<void> {
     this.registerEvent(this.app.vault.on("modify", file => {
       if (file !== this.file) return;
-      if (this.viewType === "csvzall-json") {
-        this.frame?.contentWindow?.postMessage({
-          source: "obsidian-csvzall", type: "json-file-modified", version: 1,
-        }, "*");
-      } else this.session?.fileModified();
+      this.session?.fileModified();
     }));
     this.patchLeafNavigation();
     this.render();

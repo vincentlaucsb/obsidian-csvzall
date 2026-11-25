@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
-import { registerJsonView } from "../src/views/JsonFileView.js";
+import { registerJsonView, updateJsonAutosave } from "../src/views/JsonFileView.js";
 import { CSV_EXTENSIONS, isCsv, nextCsvPath } from "../src/csv/csvFiles.js";
 import { parentVaultPath } from "../src/utils/paths.js";
 import { CsvzallTableView, updateViewerAutosave } from "../src/views/CsvzallTableView.js";
@@ -36,7 +36,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       (leaf) => new CsvzallTableView(leaf, this, VIEW_TYPE_CSVZALL_MOBILE),
     );
     this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL_MOBILE);
-    registerJsonView(this, this.settings.defaultJsonViewer);
+    registerJsonView(this, this.settings.defaultJsonViewer, () => this.settings.autosaveMode);
     this.addRibbonIcon("table", "New CSV", () => void this.createCsvInActiveFolder());
     this.registerCsvCommands();
     this.registerCsvFileMenu();
@@ -56,6 +56,7 @@ export default class CsvzallMobilePlugin extends Plugin {
     if (this.settings.autosaveMode === mode) return;
     this.settings.autosaveMode = mode;
     updateViewerAutosave(this.app.workspace, VIEW_TYPE_CSVZALL_MOBILE);
+    updateJsonAutosave(this);
   }
 
   saveSettings(patch: Partial<CsvzallMobilePlugin["settings"]>): Promise<void> {

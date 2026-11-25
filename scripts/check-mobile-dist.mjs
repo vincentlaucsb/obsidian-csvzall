@@ -36,6 +36,8 @@ const requiredFiles = [
   "src/views/ViewerFrameSession.ts",
   "src/views/viewerDocumentation.ts",
   "src/views/JsonFileView.ts",
+  "src/views/autosave.mjs",
+  "src/views/autosave.d.mts",
   "src/views/editorToolbar.mjs",
   "src/views/editorToolbar.d.mts",
   "src/views/registerJsonExtension.ts",

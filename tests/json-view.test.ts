@@ -11,7 +11,7 @@ const cm: typeof import("@codemirror/view") = requireModule("@codemirror/view");
 const bundle = buildSync({ entryPoints: ["src/views/JsonFileView.ts"], bundle: true, write: false,
   format: "cjs", platform: "node", packages: "external" }).outputFiles[0]!.text;
 
-function fixture() {
+function fixture(mode: "on" | "off" | "hidden" = "off") {
   const file = { name: "test.json", basename: "test", path: "notes/test.json" };
   let disk = '{"n":1}';
   const writes: string[] = [], copies: string[] = [], notices: string[] = [];
@@ -45,14 +45,27 @@ function fixture() {
     create: async (_path: string, text: string) => { copies.push(text); },
     on: (_event: string, callback: typeof modify) => { modify = callback; },
   };
-  const ownerDocument = { createElement: () => Object.assign(new EventTarget(), {
-    append() {}, replaceChildren() {}, createSpan() { return {}; },
-  }) };
+  const timers = new Map<number, () => void>();
+  let nextTimer = 0;
+  const ownerDocument = {
+    defaultView: {
+      setTimeout(callback: () => void, delay: number) {
+        assert.equal(delay, 800);
+        timers.set(++nextTimer, callback);
+        return nextTimer;
+      },
+      clearTimeout(id: number) { timers.delete(id); },
+    },
+    createElement: () => Object.assign(new EventTarget(), {
+      append() {}, replaceChildren() {}, createSpan() { return {}; }, setAttribute() {},
+    }),
+  };
   class FileView {
     app = { vault };
     file = file;
     contentEl = { ownerDocument, addClass() {}, append() {} };
     registerEvent() {}
+    register() {}
   }
   const module = { exports: {} as any };
   runInNewContext(bundle, { module, exports: module.exports, crypto: { randomUUID: () => "test" },
@@ -65,7 +78,7 @@ function fixture() {
   let view: any;
   module.exports.registerJsonView({ manifest: { id: "csvzall" }, registerExtensions() {},
     app: { workspace: { on() {} } }, registerEvent() {},
-    registerView(_type: string, factory: () => unknown) { view = factory(); } }, true);
+    registerView(_type: string, factory: () => unknown) { view = factory(); } }, true, () => mode);
   function edit(before: string, after: string) {
     const from = editor.state.doc.toString().indexOf(before);
     assert.ok(from >= 0);
@@ -73,7 +86,15 @@ function fixture() {
   }
   const save = () => view.toolbar.save.dispatchEvent(new Event("click"));
   const reset = () => view.toolbar.reset.dispatchEvent(new Event("click"));
-  return { view, file, edit, save, reset, writes, copies, notices, vault, recovery, text: () => editor.state.doc.toString(),
+  return { view, file, edit, save, reset, writes, copies, notices, vault, recovery, timers,
+    policy: (next: typeof mode) => { mode = next; view.updateAutosave(); },
+    tick: () => {
+      assert.equal(timers.size, 1);
+      const [callback] = timers.values();
+      timers.clear();
+      callback!();
+    },
+    text: () => editor.state.doc.toString(),
     open: async () => { await view.onOpen(); await view.onLoadFile(file); },
     external: (text: string) => { disk = text; modify(file); },
     atWrite: (callback: () => Promise<void>) => { atWrite = callback; },
@@ -169,4 +190,32 @@ test("a new JSON file stays editable while the previous file finishes recovery",
   f.edit("3", "4"); f.save(); await f.settle();
   assert.deepEqual(f.copies, ['{"n":2}']);
   assert.deepEqual(f.writes, ['{"n":4}']);
+});
+
+test("Lite AutoSave debounces edits, honors the policy while queued, and checks disk inside the manual save path", async () => {
+  const f = fixture("on"); await f.open();
+  f.edit("1", "2");
+  f.edit("2", "3");
+  assert.deepEqual(f.writes, []);
+  f.tick(); await f.settle();
+  assert.deepEqual(f.writes, ['{"n":3}']);
+  assert.equal(f.timers.size, 0);
+
+  let releaseRead!: () => void;
+  const blockedRead = new Promise<void>(resolve => { releaseRead = resolve; });
+  const read = f.vault.read;
+  f.vault.read = async () => { await blockedRead; return read(); };
+  f.external('{"n":3}'); await f.settle();
+  f.edit("3", "4"); f.tick();
+  f.policy("hidden");
+  releaseRead(); await f.settle();
+  assert.deepEqual(f.writes, ['{"n":3}']);
+
+  f.policy("on");
+  f.atWrite(async () => { f.external('{"n":5}'); });
+  f.tick(); await f.settle();
+  assert.deepEqual(f.writes, ['{"n":3}']);
+  assert.match(f.text(), /"n": 4/);
+  assert.match(f.notices[0]!, /changed on disk/);
+  assert.equal(f.timers.size, 0);
 });

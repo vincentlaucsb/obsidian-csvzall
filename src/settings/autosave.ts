@@ -9,7 +9,7 @@ export function autosaveMode(value: unknown): AutosaveMode {
 export function autosaveSetting(mode: AutosaveMode, change: (mode: AutosaveMode) => Promise<void>) {
   return {
     name: "AutoSave",
-    desc: "Choose how AutoSave starts in CSV and TSV panes. Hiding the switch keeps AutoSave off.",
+    desc: "Choose how AutoSave starts in CSV, TSV, and JSON panes. Hiding the switch keeps AutoSave off.",
     render(setting: Setting): void {
       setting.addDropdown(dropdown => dropdown.addOptions({
         off: "Off by default", on: "On by default", hidden: "Hide switch",
