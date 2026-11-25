@@ -2,18 +2,17 @@ export function createAutosaveControl(doc) {
   const control = doc.createElement('label');
   control.className = 'autosave-control';
   control.hidden = true;
-  const title = doc.createElement('span');
-  title.textContent = 'AutoSave';
   const toggle = doc.createElement('span');
   toggle.className = 'autosave-switch';
   const input = doc.createElement('input');
   input.type = 'checkbox';
   input.setAttribute('role', 'switch');
+  input.setAttribute('aria-label', 'AutoSave');
   const value = doc.createElement('span');
   value.setAttribute('aria-hidden', 'true');
-  value.textContent = 'Off';
+  value.textContent = 'AutoSave Off';
   toggle.append(input, value);
-  control.append(title, toggle);
+  control.append(toggle);
   return { control, input, value };
 }
 
@@ -40,7 +39,7 @@ export function createAutosave({ control, input, value }, { win, canSave, save }
     if (!policy.visible) override = undefined;
     enabled = policy.visible && (override ?? policy.enabled);
     input.checked = enabled;
-    value.textContent = enabled ? 'On' : 'Off';
+    value.textContent = enabled ? 'AutoSave On' : 'AutoSave Off';
     schedule();
   }
   function change() {
