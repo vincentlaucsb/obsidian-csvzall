@@ -22,7 +22,7 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
       "csvzall-compact-layout-v1",
       "csvzall-host-integration-v1", "csvzall-save-ack-v1", "csvzall-host-save-request-v1", "csvzall-edit-revision-v1",
       "csvzall-obsidian-keyboard-lifecycle-v2", "csvzall-obsidian-viewport-resize-v2",
-      "theme-ready", "data-csvzall-dialog-dismiss-v1",
+      "theme-ready", "discard-edits-dialog",
     ]);
     writeFileSync(bundlePath, bundle);
     writeFileSync(join(assets, "index-fixture.css"), "body { color: black; }");
@@ -47,6 +47,11 @@ test("viewer packaging leaves JavaScript untouched, is repeatable, and rejects u
     writeFileSync(bundlePath, olderBundle);
     assert.throws(prepare, /missing source capabilities csvzall-csv-options-v1/);
     assert.equal(readFileSync(bundlePath, "utf8"), olderBundle);
+    assert.equal(readFileSync(htmlPath, "utf8"), html);
+    const legacyDialog = bundle.replace("discard-edits-dialog", "data-csvzall-dialog-dismiss-v1");
+    writeFileSync(bundlePath, legacyDialog);
+    assert.throws(prepare, /missing source capabilities discard-edits-dialog/);
+    assert.equal(readFileSync(bundlePath, "utf8"), legacyDialog);
     assert.equal(readFileSync(htmlPath, "utf8"), html);
     writeFileSync(bundlePath, 'console.log("legacy bundle");');
     assert.throws(prepare, /Unsupported WASM viewer/);

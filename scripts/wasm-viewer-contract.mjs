@@ -1,4 +1,4 @@
-// Stable capabilities are emitted by the upstream source bridge's ready message.
+// Required capabilities from the upstream host bridge and shared viewer.
 export const requiredHostCapabilities = [
   "csvzall-host-mobile-ui-v1",
   "csvzall-csv-options-v1",
@@ -12,7 +12,7 @@ export const requiredHostCapabilities = [
   "csvzall-obsidian-keyboard-lifecycle-v2",
   "csvzall-obsidian-viewport-resize-v2",
   "theme-ready",
-  "data-csvzall-dialog-dismiss-v1",
+  "discard-edits-dialog",
 ];
 
 export function requireHostIntegration(bundle) {

@@ -1,11 +1,11 @@
-const CACHE_NAME = "csvzall-viewer-eb4691420c11";
+const CACHE_NAME = "csvzall-viewer-ffb358603ce1";
 const PRECACHE_URLS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
-  "./assets/index-Bf50pHi6.js",
+  "./assets/index-BsmGArAZ.js",
   "./assets/index-Dd4OfrqB.css"
 ];
 
