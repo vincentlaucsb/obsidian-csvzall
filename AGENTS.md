@@ -1,5 +1,10 @@
 # Repository Guide
 
+## Product scope and examples
+
+- csvzall is a general-purpose CSV app. Use domain-neutral language in shared UI, including labels, help text, placeholders, and defaults. Describe what the feature does using terms such as dates, numeric values, and series.
+- Keep product documentation centered on reusable CSV workflows. Use neutral examples for general guides. Put domain-specific recipes, such as workout charts, in clearly labeled, optional examples when explicitly requested. Reproducing a user's use case does not make it the default example for the feature.
+
 ## Scope and performance
 
 - Open CSVs directly into the table on desktop and Lite. Keep the initial load free of loading screens, modal progress dialogs, and grid loading overlays. Show open failures in the viewer and keep explicit save or reset feedback scoped to those actions.
