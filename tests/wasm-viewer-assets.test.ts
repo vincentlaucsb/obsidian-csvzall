@@ -18,7 +18,7 @@ test("packaged WASM viewer assets are mobile-generation-ready", () => {
   assert.equal(assets.some((name) => name.endsWith(".js")), true);
   assert.equal(assets.some((name) => name.endsWith(".css")), false);
   assert.equal(assets.filter((name) => name.endsWith(".wasm")).length, 0);
-  assert.equal(assets.filter((name) => /^csv-worker-/.test(name)).length, 0);
+  assert.equal(assets.filter((name) => /^csv-worker-/.test(name)).length, 1);
   execFileSync(process.execPath, ["scripts/check-wasm-viewer.mjs"], { stdio: "pipe" });
 
   const indexHtml = readFileSync(join(viewerDir, "index.html"), "utf8");

@@ -54,16 +54,25 @@ The confirmation uses a dialog inside that iframe.
 
 Install this repository's dependencies with `npm ci`. In the csvzall checkout,
 install `src/viewer_wasm/web` dependencies with `npm install` and build the WASM core
-using its documented Emscripten build workflow. The web build expects
+using the same Release configuration as upstream CI:
+
+```sh
+emcmake cmake -S . -B out/build/wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+cmake --build out/build/wasm --target csvzall_viewer_wasm --parallel
+```
+
+The web build expects
 `out/build/wasm/csvzall_viewer_wasm.js` and `csvzall_viewer_wasm.wasm`.
 Rebuild that core whenever its C++ inputs change; this refresh command rebuilds
-the web application using those existing core artifacts.
+the web application using those existing core artifacts. A production Vite
+build can still embed an unoptimized WASM core if CMake's build type was empty.
 
-The refresh uses Vite's `embedded` mode (`dist-embedded/`). This source build
-inlines the worker and WASM engine; the plugin creates Blob document/script URLs
-from its bundled assets because desktop Obsidian blocks JavaScript served through
-vault resource URLs. The standalone upstream release still uses the normal
-split-asset build. Compiled JavaScript is imported byte-for-byte in both cases.
+The refresh uses Vite's `embedded` mode (`dist-embedded/`). Its HTML links
+the viewer entry and the CSV worker script, which contains the WASM engine.
+Lite creates Blob URLs for both when it prepares the viewer document. Each
+pane constructs its own worker from the shared script URL. The plugin revokes
+the document and asset URLs on unload. The standalone build keeps its ordinary
+asset URLs. Packaging preserves the upstream JavaScript bytes.
 
 ## One refresh command
 
@@ -99,8 +108,8 @@ their controls. Dialect preservation and automatic header safeguards remain
 active on every platform.
 
 `wasm-viewer/csvzall-wasm-viewer.json` records the source commit, dirty-checkout
-status, and imported JavaScript SHA-256. Asset validation ensures that the
-packaged JavaScript still matches that digest. Commit upstream changes before
+status, and SHA-256 digests for the viewer entry and worker scripts. Asset
+validation checks both digests. Commit upstream changes before
 the final refresh so the recorded revision is reproducible. Review the generated
 asset diff, then commit it with the plugin integration in the companion PR.
 

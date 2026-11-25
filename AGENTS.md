@@ -2,6 +2,8 @@
 
 ## Scope and performance
 
+- Open CSVs directly into the table on desktop and Lite. Keep the initial load free of loading screens, modal progress dialogs, and grid loading overlays. Show open failures in the viewer and keep explicit save or reset feedback scoped to those actions.
+- For CSV-open performance, measure from the plugin's file-open handler to the first frame containing actual CSV values. Use helper readiness and iframe navigation as intermediate timings. A loading indicator does not complete this measurement.
 - Keep work proportional to the user's operation. Startup and opening a CSV must not trigger or wait for vault-wide discovery, reconciliation, or migration. Prepare only the affected file and its relevant export configuration.
 - Prefer direct lookups, known export definitions, cached results, and file events. Schedule required broader maintenance separately in bounded, incremental work; an async startup callback does not make a whole-vault scan acceptable.
 - When missing or incomplete information makes cleanup unsafe, defer that cleanup and preserve existing content. Do not expand a foreground operation to establish global certainty.
@@ -151,7 +153,7 @@ and [mobile demo-vault guidance](docs/mobile-demo-vault.md).
 - `src/exports/revisions.ts` `SYNC_SCHEMA` and reflected `Revision.version`: export reflection schema in plugin `data.json`, independent of plugin releases. `src/exports/ExportReflection.ts` local journal `version` is its device-local persistence schema.
 - Native JSON viewer startup sets `viewer` to `json`. The hosted `json-file-modified` message (version 1) refreshes clean JSON editors after vault changes. The `json-autosave-ready` and `json-autosave-settings` messages (version 1) apply the plugin’s AutoSave policy to the native JSON pane. Lite uses the same controller directly in its JSON view.
 - Upstream native viewer startup JSON `obsidianMode.version`: host-owned chart automation protocol, validated by `src/process/CsvzallProcess.ts`, independent of plugin releases.
-- Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases.
+- Upstream embedded viewer HTML `csvzall-embedded-assets` meta content: source build layout contract, independent of plugin releases. Layout v2 links one shared worker script containing WASM. Each CSV iframe constructs its own worker. The import metadata pins the entry and worker scripts by SHA-256.
 - Upstream `src/viewer_wasm/web/src/host-bridge.js` `HOST_CAPABILITIES` and `scripts/wasm-viewer-contract.mjs` `requiredHostCapabilities`: versioned viewer capabilities, including compact layout, shared shell, editing, and host save protocols. Packaging requires the corresponding source implementation.
 - `src/markdown/managedTables.ts` `TableRecipe.version`: legacy inline table recipe schema version (read for migration), independent of plugin releases.
 - `src/views/ViewerFrameSession.ts` `save-request`/`save-response` `version`: iframe save protocol version, also implemented by the native and WASM viewer source bridges.

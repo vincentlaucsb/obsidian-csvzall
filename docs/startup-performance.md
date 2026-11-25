@@ -266,3 +266,86 @@ regressions remain required.
 
 The hybrid storage model and Sync prerequisites are unchanged; see
 [Obsidian's Sync settings guidance](https://obsidian.md/help/sync/settings).
+
+## Lite first populated frame, November 24, 2026
+
+The Lite file-open path showed an “Opening CSV” modal while the WASM worker
+indexed the file. Removing the modal exposed the table directly. Profiling also
+found that the installed demo worker used a WASM core compiled with an empty
+CMake build type. Its SHA-256 matched the local unoptimized build. Rebuilding
+the same C++ source and pinned csv-parser with CMake Release reduced the core
+from 957,627 to 491,939 bytes and shortened the first-page critical path.
+
+The comparison used the actual packaged Lite plugin and worker in Chromium on
+Windows, a 393 × 851 touch viewport and 4× renderer CPU throttling. A small
+Obsidian API fixture registered the plugin and opened a fresh pane. The vault
+read used a preloaded Blob. Timing started at the view's `onLoadFile` handler
+after plugin activation and ended at the first animation frame with the
+expected first cell visible and no modal open. These measurements exclude app
+launch and device storage latency. No physical phone was profiled.
+
+Each CSV had one warmup per build and 12 measured triplets with build order
+rotated and reversed. Times below are medians in milliseconds. The source
+comparison used the demo's original plugin host with viewer base `696e66a`
+and the non-modal source change `0a63b97`.
+
+| Fixture | Original | No dialog, original core | No dialog, Release core | Median saving within triplets, original to Release |
+| --- | ---: | ---: | ---: | ---: |
+| Mobile Productivity Tracker, 40 rows, 589 bytes | 1,367 | 1,245 | 893 | 482 (11/12 faster) |
+| Synthetic, 100,000 rows, 2,678,913 bytes | 1,694 | 1,864 | 913 | 798 (12/12 faster) |
+
+On the 100,000-row file, the worker's open request through schema reply fell
+from 791 ms with the no-dialog control to 56 ms with Release. The first page
+request through reply fell from 58 ms to 9 ms. On the 40-row file the same
+stages fell from 336 ms to 22 ms and from 36 ms to 7 ms. Separate runs of the
+no-dialog change alone were variable. The Release comparison accounts for
+most of the repeatable improvement.
+
+After integration with the shared JSON AutoSave changes, a separate run loaded
+the exact plugin installed in the mobile demo vault (viewer `ad2d587`).
+Across eight alternating pairs per file, the 40-row median went from 1,124 ms
+to 761 ms and the 100,000-row median from 1,580 ms to 848 ms. The new build
+won 7/8 small-file pairs and 8/8 large-file pairs. The large file's worker
+open round trip went from 672 ms to 48 ms. The loading dialog appeared on
+every baseline open and on none of the integrated build's opens.
+
+With the optimized core, the large fixture spent 609 ms before the viewer
+sent the open request to the worker and 157 ms from schema reply to the grid requesting
+rows. The vault read completed in 119 ms and overlapped iframe startup. A
+separate 12-pair experiment sent worker initialization before constructing the
+grid. Its first frame was faster in only 6/12 small-file pairs and 7/12
+large-file pairs, so the installed viewer keeps the existing scheduling.
+
+### Sharing the Lite worker script URL
+
+The control (`ad2d587`) loads the worker code inside each iframe's entry
+script. The candidate (`4e22824`) emits the same Release worker as a separate
+asset. Lite prepares its Blob URL with the cached viewer document during
+plugin activation. Each pane creates an independent worker using that URL.
+Plugin unload revokes the shared URL.
+
+This experiment used the same emulated viewport, renderer throttling, and
+first-visible-cell endpoint described above. Each session activated the
+packaged plugin once, opened two distinct CSVs in succession, and kept both
+panes mounted. Both file orders were exercised, alternating which build ran
+first. After warmups, each table entry has 16 matched control/candidate
+pairs. Activation was timed separately. Fixture bytes were already available
+in memory before opening either file.
+
+| File and position | Control median | Shared URL median | Median saving within pairs | Shared URL faster |
+| --- | ---: | ---: | ---: | ---: |
+| 40 rows, first open | 719.5 ms | 669.4 ms | 44.8 ms | 12/16 |
+| 40 rows, second open | 336.8 ms | 328.3 ms | 13.3 ms | 10/16 |
+| 100,000 rows, first open | 759.2 ms | 761.1 ms | −11.2 ms | 7/16 |
+| 100,000 rows, second open | 370.6 ms | 372.9 ms | −4.5 ms | 7/16 |
+
+Median plugin activation took 54.5 ms for the control and 55.1 ms for the
+candidate. The small file benefited most on its first open. Neither position
+showed a repeatable first-frame gain on the large file. The second open was
+already much faster in the control, so the difference between first and second
+opens cannot be attributed to sharing the URL.
+
+After each two-pane run, the harness checked both first rows, edited the first
+file through its worker, and read both workers again. The second file retained
+its own value. It also verified two distinct worker objects and a single shared
+script URL in the candidate. The control created a distinct URL per pane.

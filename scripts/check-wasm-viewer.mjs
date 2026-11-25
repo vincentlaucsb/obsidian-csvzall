@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { requireHostIntegration, requireEmbeddedAssets } from "./wasm-viewer-contract.mjs";
+import { requireHostIntegration, readEmbeddedWorker } from "./wasm-viewer-contract.mjs";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -70,7 +70,7 @@ const stylesheetBundleName = assets.find((name) => /^index-.*\.css$/.test(name))
 
 const indexBundle = readFileSync(join(assetsDir, indexBundleName), "utf8");
 requireHostIntegration(indexBundle);
-requireEmbeddedAssets(indexHtml, indexBundle);
+const worker = readEmbeddedWorker(indexHtml, viewerDir);
 const stylesheetBundle = stylesheetBundleName ?
   readFileSync(join(assetsDir, stylesheetBundleName), "utf8") :
   (indexHtml.match(/<style data-csvzall-inline-viewer-style>\n?([\s\S]*?)\n?<\/style>/u)?.[1] ?? "");
@@ -109,6 +109,9 @@ if (!/body\[data-host-mode\]\s*\{[^}]*height:\s*100%/.test(stylesheetBundle)) {
 }
 
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+if (metadata.workerSha256 !== createHash("sha256").update(worker).digest("hex")) {
+  fail("compiled worker differs from the imported upstream build");
+}
 if (metadata.javascriptSha256 !== createHash("sha256").update(indexBundle).digest("hex")) {
   fail("compiled JavaScript differs from the imported upstream bundle; refresh from source instead of patching it");
 }
@@ -118,4 +121,4 @@ for (const field of ["sourceRepo", "sourceCommit", "sourcePath", "syncedAt"]) {
   }
 }
 
-console.log("WASM viewer assets OK (inline worker and validated WASM engine).");
+console.log("WASM viewer assets OK (shared worker script and validated WASM engine).");
