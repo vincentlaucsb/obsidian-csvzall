@@ -119,3 +119,21 @@ test("a closing pane offers selectable recovery text if the folder disappears", 
   assert.equal(f.recovery.value, '{"n":2}');
   assert.deepEqual(f.writes, []);
 });
+
+test("a new JSON file stays editable while the previous file finishes recovery", async () => {
+  const f = fixture(); await f.open(); f.edit("1", "2");
+  f.external('{"n":3}');
+  let resumeCopy!: () => void, copyStarted!: () => void;
+  const started = new Promise<void>(resolve => { copyStarted = resolve; });
+  const blocked = new Promise<void>(resolve => { resumeCopy = resolve; });
+  f.vault.create = async (_path, text) => { copyStarted(); await blocked; f.copies.push(text); };
+  const closing = f.view.onUnloadFile(f.file);
+  await started;
+  const next = { name: "next.json", basename: "next", path: "notes/next.json" };
+  f.view.file = next;
+  await f.view.onLoadFile(next);
+  resumeCopy(); await closing;
+  f.edit("3", "4"); f.save(); await f.settle();
+  assert.deepEqual(f.copies, ['{"n":2}']);
+  assert.deepEqual(f.writes, ['{"n":4}']);
+});

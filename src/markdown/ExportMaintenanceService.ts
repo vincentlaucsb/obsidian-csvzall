@@ -1,5 +1,6 @@
 import { TFile, TFolder, type App } from 'obsidian';
-import type { ExportReflection } from '../exports/ExportReflection.js';
+import { createHash } from 'crypto';
+import type { ExportReflection, PendingExportRename } from '../exports/ExportReflection.js';
 import type { ExportReference, ReferenceScan } from '../exports/localFolders.js';
 import { syncStatus } from '../obsidian/syncStatus.js';
 import { findManagedTables, replaceManagedTable, shortenManagedTable, tableBody, type ManagedTable, type TableRecipe } from './managedTables.js';
@@ -9,9 +10,13 @@ import type { ExportRenderer } from './ExportRenderer.js';
 import type { ExportReporter } from './exportReporting.js';
 import { fencedTableText } from './fencedTables.js';
 import { canonicalFenceRecipe, exportDefinitionId, fenceRecipe, resolveFencedExport } from './fencedExports.js';
-import { rebaseSqlSource } from './sqlSources.js';
+import { csvSqlReferences, rebaseSqlSource, relativeCsvSource } from './sqlSources.js';
 import { VaultExportDiscovery } from '../exports/VaultExportDiscovery.js';
 import { configRoot, directConfig } from '../exports/paths.js';
+
+function renameBlockTarget(note: string, id: string, reference: string): string {
+  return createHash('sha256').update(JSON.stringify([note, id, reference])).digest('hex');
+}
 
 export interface MaintenanceRefreshActions {
   index(file: TFile): Promise<boolean>;
@@ -79,8 +84,9 @@ export class ExportMaintenanceService {
     const reflection = this.reflection;
     const move = reflection?.nextNoteRename();
     if (this.signal.aborted || !reflection || !move) return;
-    this.sourceRenameWork = this.renameSource(move.from, move.to)
-      .then(() => reflection.finishNoteRename(move)).finally(() => { this.sourceRenameWork = undefined; });
+    this.sourceRenameWork = this.renameSource(move.from, move.to, move)
+      .then(async complete => { if (complete && !this.signal.aborted) await reflection.finishNoteRename(move); })
+      .finally(() => { this.sourceRenameWork = undefined; });
     await this.sourceRenameWork;
   }
 
@@ -205,56 +211,70 @@ export class ExportMaintenanceService {
     return (await resolveFencedExport(note, canonical, this.definitions, this.reflection, { autoUpdate, cancelled, explicit: true, inherit })).recipe;
   }
 
-  private async renameSource(oldPath: string, path: string): Promise<void> {
+  private async renameSource(oldPath: string, path: string, move?: PendingExportRename): Promise<boolean> {
     this.refresh.sourceChanged(oldPath);
     const files = this.app.vault.getMarkdownFiles();
-    for (const file of files) for (const table of await this.readTablesForRename(file)) {
-      if (!table.fence) continue;
-      try {
-        const noteMoved = file.path === path || file.path.startsWith(`${path}/`);
-        const previousNote = noteMoved ? oldPath + file.path.slice(path.length) : file.path;
-        const previous = fenceRecipe(previousNote, table);
-        const previousSource = previous.source;
-        if (!noteMoved && previousSource !== oldPath && !previousSource.startsWith(`${oldPath}/`)) continue;
-        const saved = this.refresh.bindingsFor(file)?.find(binding => binding.recipe.id === previous.id) ?? await this.definitions.find(previousNote, previous.id);
-        const source = previousSource === oldPath || previousSource.startsWith(`${oldPath}/`) ? path + previousSource.slice(oldPath.length) : previousSource;
-        const recipe = canonicalFenceRecipe(file.path, { ...previous, source, sql: rebaseSqlSource(previous.sql, source) });
-        await resolveFencedExport(file.path, recipe, this.definitions, this.reflection, { autoUpdate: saved?.runOnSave, inherit: saved });
-        await this.notes.replace(file, table, fencedTableText(file.path, recipe, table.body));
-      } catch (error) { await this.report(file, error); }
-    }
-    // Carry bindings when notes move outside the scope of their old config.
+    const failed = new Set<TFile>();
+    const onError = async (file: TFile, error: unknown) => {
+      if (this.app.vault.getAbstractFileByPath(file.path) !== file) return;
+      failed.add(file);
+      await this.report(file, error);
+    };
     for (const file of files) {
-      if (file.path !== path && !file.path.startsWith(`${path}/`)) continue;
-      const previousPath = oldPath + file.path.slice(path.length);
-      for (const table of await this.readTablesForRename(file)) {
-        if (table.recipe || table.fence) continue;
+      const moved = file.path === path || file.path.startsWith(`${path}/`);
+      const previousPath = moved ? oldPath + file.path.slice(path.length) : file.path;
+      let tables: ManagedTable[];
+      try { tables = findManagedTables(await this.notes.textFor(file)); }
+      catch (error) { await onError(file, error); continue; }
+      for (const table of tables) {
         try {
-          const previous = this.refresh.bindingsFor(file)?.find(binding => binding.recipe.id === table.id) ?? await this.resolveDefinition(previousPath, table.id);
-          const source = previous.recipe.source;
-          const recipe = { ...previous.recipe, source: source === oldPath || source.startsWith(`${oldPath}/`) ? path + source.slice(oldPath.length) : source };
-          // If its configuration moved too, rename() below adjusts its paths.
-          if (previous.configPath.startsWith(`${oldPath}/`)) continue;
-          const saved = await this.definitions.save(file.path, recipe, undefined, previous.runOnSave);
-          await this.notes.replace(file, table, shortenManagedTable(table, saved.id));
-        } catch (error) { await this.report(file, error); }
+          if (table.fence) await this.renameFence(file, table, previousPath, oldPath, path, moved ? move : undefined);
+          else if (moved && !table.recipe) await this.renameBinding(file, table, previousPath, oldPath, path, move);
+        } catch (error) { await onError(file, error); }
       }
     }
     for (const file of files) {
+      if (failed.has(file)) continue;
       try { await this.prepare(file); } catch (error) { await this.report(file, error); }
     }
     if (!this.reflection) await this.definitions.rename(files.map(file => file.path), oldPath, path);
     for (const file of files) {
+      if (failed.has(file)) continue;
       try { await this.refresh.index(file); } catch (error) { await this.report(file, error); }
     }
+    return failed.size === 0;
   }
 
-  private async readTablesForRename(file: TFile): Promise<ManagedTable[]> {
-    try { return findManagedTables(await this.notes.textFor(file)); }
-    catch (error) {
-      if (this.app.vault.getAbstractFileByPath(file.path) === file) await this.report(file, error);
-      return [];
+  private async renameFence(file: TFile, table: ManagedTable, previousPath: string, oldPath: string, path: string, move?: PendingExportRename): Promise<void> {
+    const reference = move && table.fence && !table.fence.legacy ? csvSqlReferences(table.fence.sql)[0]?.name : undefined;
+    if (reference && move?.rewrittenBlocks?.includes(renameBlockTarget(file.path, table.id, reference))) return;
+    const previous = fenceRecipe(previousPath, table);
+    const previousSource = previous.source;
+    if (previousPath === file.path && previousSource !== oldPath && !previousSource.startsWith(`${oldPath}/`)) return;
+    const saved = this.refresh.bindingsFor(file)?.find(binding => binding.recipe.id === previous.id) ?? await this.definitions.find(previousPath, previous.id);
+    const source = previousSource === oldPath || previousSource.startsWith(`${oldPath}/`) ? path + previousSource.slice(oldPath.length) : previousSource;
+    const recipe = canonicalFenceRecipe(file.path, { ...previous, source, sql: rebaseSqlSource(previous.sql, source) });
+    await resolveFencedExport(file.path, recipe, this.definitions, this.reflection, { autoUpdate: saved?.runOnSave, inherit: saved });
+    const replacement = fencedTableText(file.path, recipe, table.body);
+    if (move && this.reflection) {
+      const target = relativeCsvSource(file.path, source);
+      if (reference !== target) await this.reflection.rememberRewrittenBlock(move, renameBlockTarget(file.path, table.id, target));
     }
+    await this.notes.replace(file, table, replacement);
+  }
+
+  private async renameBinding(file: TFile, table: ManagedTable, previousPath: string, oldPath: string, path: string, move?: PendingExportRename): Promise<void> {
+    if (move?.rewrittenBlocks?.includes(renameBlockTarget(file.path, table.id, table.marker))) return;
+    const previous = this.refresh.bindingsFor(file)?.find(binding => binding.recipe.id === table.id) ?? await this.resolveDefinition(previousPath, table.id);
+    const source = previous.recipe.source;
+    const recipe = { ...previous.recipe, source: source === oldPath || source.startsWith(`${oldPath}/`) ? path + source.slice(oldPath.length) : source };
+    // If its configuration moved too, rename() below adjusts its paths.
+    if (previous.configPath.startsWith(`${oldPath}/`)) return;
+    const saved = await this.definitions.save(file.path, recipe, undefined, previous.runOnSave);
+    if (move && this.reflection && saved.id !== table.id) {
+      await this.reflection.rememberRewrittenBlock(move, renameBlockTarget(file.path, saved.id, 'export'));
+    }
+    await this.notes.replace(file, table, shortenManagedTable(table, saved.id));
   }
 
   async listExports(folders: string[]): Promise<SavedExport[]> {

@@ -146,7 +146,7 @@ class JsonFileView extends FileView {
       }
     }
     current.editor.destroy();
-    this.current = null;
+    if (this.current === current) this.current = null;
   }
 }
 

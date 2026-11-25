@@ -114,7 +114,7 @@ async function harness(reflection?: any, clock?: ReturnType<typeof fakeClock>) {
     captureCommand: async (args: string[]) => { queries.push(args); return await query(); },
   }, { record: async (_level: string, _message: string, detail: string) => { errors.push(detail); } }, reflection);
   const settle = () => new Promise<void>(resolve => setImmediate(resolve));
-  return { service, note, queries, errors, configs, adapter, syncReady() { syncing = false; },
+  return { service, note, queries, errors, configs, adapter, vault: app.vault, syncReady() { syncing = false; },
     addNote(path: string, body: string) { const file = new FakeFile(path); extraNotes.set(file, body); return { file, get text() { return extraNotes.get(file)!; }, set text(value: string) { extraNotes.set(file, value); } }; },
     failWrites(value = true) { failWrite = value; },
     async reindex() { await service.refreshes.initialize(); }, get text() { return text; }, set text(value: string) { text = value; },
@@ -628,6 +628,56 @@ test('deferred chained folder renames rebase fenced SQL in move order', async ()
     await f.service.pruneDeadExports();
     assert.match(f.text, /Final\/tasks\.csv/);
     assert.match(f.text, /\| Old \|/);
+  } finally { f.service.unload(); }
+});
+
+test('a pending move retries live note failures and preserves rebased notes and later edits', async () => {
+  type Move = { from: string; to: string; rewrittenBlocks?: string[] };
+  let pending: Move | undefined;
+  const reflection = {
+    renamed: async (from: string, to: string) => { pending = { from, to }; },
+    get hasNoteRenames() { return !!pending; },
+    nextNoteRename: () => pending,
+    rememberRewrittenBlock: async (move: Move, target: string) => {
+      if (!move.rewrittenBlocks?.includes(target)) (move.rewrittenBlocks ??= []).push(target);
+    },
+    finishNoteRename: async (move: Move) => { assert.equal(move, pending); pending = undefined; },
+    reconcile: async () => {}, edited: async () => {}, assertReady() {}, assertSqlBinding() {},
+  };
+  const f = await harness(reflection);
+  const block = sqlBlock(validSql);
+  f.text = block;
+  f.note.path = 'Archive/Deep/tasks.md';
+  const unreadable = f.addNote('Archive/Deep/unreadable.md', block);
+  const unwritable = f.addNote('Archive/Deep/unwritable.md', block);
+  let fail = true;
+  const read = f.vault.read, process = f.vault.process;
+  f.vault.read = async file => {
+    if (fail && file === unreadable.file) throw new Error('Read busy');
+    return read(file);
+  };
+  f.vault.process = async (file, update) => {
+    if (fail && file === unwritable.file) throw new Error('Write busy');
+    await process(file, update);
+  };
+  const target = 'FROM "../../Data/tasks.csv"';
+  try {
+    await f.service.maintenance.rename('Reports', 'Archive/Deep');
+    assert.ok(pending);
+    assert.ok(f.text.includes(target));
+    assert.equal(unreadable.text, block);
+    assert.equal(unwritable.text, block);
+    // Reload the stored move. Edits made after the first successful rewrite
+    // belong to the note at its current path.
+    pending = structuredClone(pending);
+    f.text = f.text.replace('SELECT title', 'SELECT updated') + '\nNew prose';
+    fail = false;
+    await f.service.pruneDeadExports();
+    assert.equal(pending, undefined, f.errors.join('\n'));
+    assert.ok(f.text.includes('SELECT updated ' + target));
+    assert.ok(f.text.endsWith('New prose'));
+    assert.ok(unreadable.text.includes(target));
+    assert.ok(unwritable.text.includes(target));
   } finally { f.service.unload(); }
 });
 
@@ -1541,4 +1591,15 @@ test('pruning rechecks live edits and preserves concurrent configuration changes
   await f.service.pruneDeadExports();
   assert.equal(JSON.parse(f.configs.get('.csvzall/exports.json')!).exports.length, 1);
   f.service.unload();
+});
+
+
+test('chart query column discovery uses scoped CSV SQL with LIMIT 0 and preserves quoted aliases', async () => {
+  const f = await harness();
+  f.setQuery(async () => '"training,date",exercise,estimated_1rm\n');
+  const columns = await f.service.loadColumns(recipe.source, 'SELECT date AS "training,date", exercise, weight * (1 + reps / 30.0) AS estimated_1rm FROM data;');
+  assert.deepEqual(Array.from(columns), ['training,date', 'exercise', 'estimated_1rm']);
+  assert.deepEqual(Array.from(f.queries[0]!.slice(0, 6)), ['sql', 'query', '--csv', recipe.source, '--format', 'csv']);
+  assert.match(f.queries[0]!.at(-1)!, /SELECT \* FROM \(\nSELECT date AS "training,date"/);
+  assert.match(f.queries[0]!.at(-1)!, /LIMIT 0$/);
 });

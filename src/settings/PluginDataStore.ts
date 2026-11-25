@@ -9,6 +9,11 @@ export interface PluginDataAccess {
 }
 const DEVICE_KEYS = new Set(["csvzallPath", "csvzallExecutableMode", "installedCsvzallVersion", "installedCsvzallAssetName", "csvzallLastUpdateCheckAt"]);
 
+function containsFields(document: JsonObject, fields: JsonObject): boolean {
+  return Object.entries(fields).every(([key, value]) =>
+    Object.prototype.hasOwnProperty.call(document, key) && canonical(document[key]) === canonical(value));
+}
+
 /** All data.json writes pass here, preserving other fields and incoming revisions. */
 export class PluginDataStore {
   private queue: Promise<unknown> = Promise.resolve();
@@ -75,8 +80,15 @@ export class PluginDataStore {
   private persist(patch: JsonObject, latest: JsonObject = {}): Promise<JsonObject> {
     return this.run(async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
-        latest = await this.readDisk() ?? latest;
+        const first = await this.readDisk();
+        latest = first ?? latest;
         this.retain(latest);
+        // An unchanged reflection is already durable in this freshly read file.
+        // retain() verified the content-addressed revisions, including their keys.
+        if (first && !this.deviceMigration &&
+          (!this.access.saveLocal || [...DEVICE_KEYS].every(key => first[key] === undefined)) &&
+          Object.keys(this.retained).every(key => first[key] !== undefined) &&
+          containsFields(first, patch)) return first;
         const disk = await this.readDisk();
         // Merge the most recent settings too; Sync may have run since load().
         latest = disk ?? latest;
@@ -100,7 +112,7 @@ export class PluginDataStore {
           latest = verified;
           this.retain(verified);
           const deviceKeysRemoved = !this.access.saveLocal || [...DEVICE_KEYS].every(key => !Object.prototype.hasOwnProperty.call(verified, key));
-          if (deviceKeysRemoved && Object.entries({ ...this.retained, ...patch }).every(([key, value]) => canonical(verified[key]) === canonical(value))) {
+          if (deviceKeysRemoved && containsFields(verified, { ...this.retained, ...patch })) {
             // Without a source document, publish defaults only after a durable first write.
             if (migration) {
               this.access.saveLocal?.(this.deviceSettings(migration));
