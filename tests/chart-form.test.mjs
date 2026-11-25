@@ -9,6 +9,13 @@ class Element {
   }
   append(...children) { children.forEach(child => this.appendChild(child)); }
   appendChild(child) { if (child.parentElement) child.parentElement.children = child.parentElement.children.filter(node => node !== child); child.parentElement = this; this.children.push(child); return child; }
+  insertBefore(child, reference) {
+    this.appendChild(child);
+    const index = this.children.indexOf(reference);
+    this.children.pop();
+    this.children.splice(index, 0, child);
+    return child;
+  }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(key, value) { this[key] = value; }
   removeAttribute(key) { delete this[key]; }
@@ -41,6 +48,8 @@ test('shared chart controls match the normal dialog and submit existing options'
   const f = fixture({ existingOnly: true });
   await f.form.open();
   assert.equal(f.field('chart-id').value, 'sales');
+  assert.equal(f.field('chart-sql').placeholder, 'SELECT * FROM data');
+  assert.equal(f.field('chart-value-column-label').children[0].textContent, 'Value column');
   assert.equal(f.field('chart-run-on-save').checked, false);
   assert.equal(f.field('chart-value-column-2').value, 'count');
   assert.equal(f.field('new-chart').hidden, true);
