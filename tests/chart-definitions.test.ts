@@ -151,7 +151,7 @@ for (const type of ["bar", "line", "heatmap"]) {
       const chart = (await f.store.list([f.path]))[0]!;
       const scalarKey = type === "line" ? "y" : "value";
       await f.store.update(chart, { type, output: "changed.svg", runOnSave: false, title: "Updated title",
-        values: count === 1 ? [] : ["amount", "count"], [scalarKey]: count === 1 ? "amount" : "" } as unknown as ChartFormPayload, async () => {});
+        values: count === 1 ? [] : ["amount", "count", "profit"], [scalarKey]: count === 1 ? "amount" : "" } as unknown as ChartFormPayload, async () => {});
       const updated = JSON.parse(f.files.get(f.path)!).charts[0];
       assert.deepEqual(updated.options.values, values);
       assert.equal(updated.options.title, "Updated title");
@@ -184,3 +184,23 @@ for (const failure of [false, true]) {
     assert.equal(f.files.size, 3);
   });
 }
+
+
+test('chart SQL can be changed and cleared and represented series can be removed', async () => {
+  const f = fixture(), config = JSON.parse(f.files.get(f.path)!);
+  config.charts[0].options.sql = 'SELECT * FROM data';
+  config.charts[0].options.values = [{ column: 'amount', label: 'Revenue' }, { column: 'count' }, { column: 'profit' }];
+  f.files.set(f.path, JSON.stringify(config));
+  let chart = (await f.store.list([f.path]))[0]!;
+  const payload = { type: 'bar', output: 'sales.svg', runOnSave: false, label: 'name', values: ['amount', 'count'], sql: 'SELECT name, amount, count FROM data' } as unknown as ChartFormPayload;
+  await f.store.update(chart, payload, async () => {});
+  const updated = JSON.parse(f.files.get(f.path)!).charts[0];
+  assert.equal(updated.options.sql, payload.sql);
+  assert.deepEqual(updated.options.values, [{ column: 'amount', label: 'Revenue' }, { column: 'count' }]);
+  chart = (await f.store.list([f.path]))[0]!;
+  await f.store.update(chart, { ...payload, sql: '' }, async () => {});
+  assert.equal(JSON.parse(f.files.get(f.path)!).charts[0].options.sql, payload.sql);
+  chart = (await f.store.list([f.path]))[0]!;
+  await f.store.update(chart, { ...payload, sql: '', clearSql: true }, async () => {});
+  assert.equal(JSON.parse(f.files.get(f.path)!).charts[0].options.sql, undefined);
+});

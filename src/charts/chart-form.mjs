@@ -11,7 +11,7 @@ function stripCsvExtension(value) {
 }
 
 function populateColumnSelect(select, columns, { optional = false, preferred = '' } = {}) {
-  select.textContent = '';
+  select.replaceChildren();
   if (optional) {
     const empty = select.ownerDocument.createElement('option');
     empty.value = '';
@@ -61,6 +61,7 @@ export function mountChartForm(root, options) {
   const chartId = root.querySelector('#chart-id');
   const chartTitleField = root.querySelector('#chart-title-field');
   const chartTitle = root.querySelector('#chart-title');
+  let currentColumns = [...schema.columns];
   const chartColumnGrid = root.querySelector('#chart-column-grid');
   const chartPrimaryColumnLabel = root.querySelector('#chart-primary-column-label');
   const chartValueColumnLabel = root.querySelector('#chart-value-column-label');
@@ -71,6 +72,38 @@ export function mountChartForm(root, options) {
   const chartValueColumn = root.querySelector('#chart-value-column');
   const chartValueColumn2 = root.querySelector('#chart-value-column-2');
   const chartLabelColumn = root.querySelector('#chart-label-column');
+  const extraValues = doc.createElement('div');
+  extraValues.className = 'dialog-grid';
+  extraValues.setAttribute('style', 'grid-column: 1 / -1');
+  chartColumnGrid.append(extraValues);
+  const extraValueSelects = [];
+  const addValue = doc.createElement('button');
+  addValue.type = 'button'; addValue.id = 'chart-add-value'; addValue.textContent = 'Add value column';
+  chartColumnGrid.append(addValue);
+  const addValueColumn = (preferred = '') => {
+    const label = doc.createElement('label');
+    const title = doc.createElement('span'); title.textContent = `Value column ${extraValueSelects.length + 3}`;
+    const select = doc.createElement('select');
+    populateColumnSelect(select, currentColumns, { optional: true, preferred });
+    label.append(title, select); extraValues.append(label); extraValueSelects.push(select);
+    on(select, 'change', updateColorSchemeVisibility);
+  };
+  on(addValue, 'click', () => { addValueColumn(); clearPreview(); });
+  const querySection = doc.createElement('fieldset'); querySection.id = 'chart-query-section'; querySection.className = 'chart-range';
+  const queryLegend = doc.createElement('legend'); queryLegend.textContent = 'Calculate chart data with SQL';
+  const queryHelp = doc.createElement('p');
+  queryHelp.textContent = 'Optional: query table data, then load result columns. For workout logs, return a date, estimated 1RM value, and exercise name; choose the exercise as the series column to plot any number of exercises. ISO dates and timestamps use elapsed days from the first UTC date on the X axis.';
+  const queryLabel = doc.createElement('label');
+  const queryTitle = doc.createElement('span'); queryTitle.textContent = 'SQLite query';
+  const chartQuery = doc.createElement('textarea'); chartQuery.id = 'chart-sql'; chartQuery.rows = 6;
+  chartQuery.placeholder = 'SELECT date, exercise, MAX(weight * (1.0 + reps / 30.0)) AS estimated_1rm FROM data GROUP BY date, exercise ORDER BY date';
+  queryLabel.append(queryTitle, chartQuery);
+  const loadQueryColumns = doc.createElement('button'); loadQueryColumns.id = 'chart-load-query-columns';
+  loadQueryColumns.type = 'button'; loadQueryColumns.textContent = 'Load result columns';
+  querySection.append(queryLegend, queryHelp, queryLabel, loadQueryColumns);
+  chartColumnGrid.parentElement.insertBefore(querySection, chartColumnGrid);
+  let queryRevision = 0;
+  on(chartQuery, 'input', () => { ++queryRevision; clearPreview(); });
   const chartLayoutSection = root.querySelector('#chart-layout-section');
   const chartRangeSection = root.querySelector('#chart-range-section');
   const chartRangeFixed = root.querySelector('#chart-range-fixed');
@@ -119,9 +152,9 @@ export function mountChartForm(root, options) {
   let currentCharts = [];
   let selectedChartId = '';
   populateColumnSelect(chartDateColumn, schema.columns, { preferred: guessedDateColumn() });
-  populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn() });
-  populateColumnSelect(chartValueColumn2, schema.columns, { optional: true });
-  populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn() });
+  populateColumnSelect(chartValueColumn, currentColumns, { optional: true, preferred: guessedValueColumn() });
+  populateColumnSelect(chartValueColumn2, currentColumns, { optional: true });
+  populateColumnSelect(chartLabelColumn, currentColumns, { optional: true, preferred: guessedLabelColumn() });
 
   const chartValidationFields = [
     chartType,
@@ -251,6 +284,7 @@ export function mountChartForm(root, options) {
     chartType.value = type;
     chartFormTitle.textContent = chartTypeTitle(type);
     const markdown = type === 'markdown-table';
+    querySection.hidden = markdown;
     chartTitleField.hidden = markdown;
     chartColumnGrid.hidden = markdown;
     chartMarkdownTableSection.hidden = !markdown;
@@ -289,7 +323,7 @@ export function mountChartForm(root, options) {
   };
 
   const selectedValueColumns = () => {
-    return [chartValueColumn.value, chartValueColumn2.value].filter(Boolean);
+    return [...new Set([chartValueColumn.value, chartValueColumn2.value, ...extraValueSelects.map(select => select.value)].filter(Boolean))];
   };
 
   const updateColorSchemeVisibility = () => {
@@ -298,16 +332,21 @@ export function mountChartForm(root, options) {
   };
 
   const refreshChartColumnOptions = (values = {}) => {
-    populateColumnSelect(chartDateColumn, schema.columns, { preferred: values.date ?? guessedDateColumn() });
-    populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: values.value ?? guessedValueColumn() });
-    populateColumnSelect(chartValueColumn2, schema.columns, { optional: true, preferred: values.value2 ?? '' });
-    populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: values.label ?? guessedLabelColumn() });
+    currentColumns = [...new Set([...schema.columns, ...(values.availableColumns ?? []), values.date, values.value, values.value2, values.label, ...(values.extraValues ?? [])].filter(Boolean))];
+    populateColumnSelect(chartDateColumn, currentColumns, { preferred: values.date ?? guessedDateColumn() });
+    populateColumnSelect(chartValueColumn, currentColumns, { optional: true, preferred: values.value ?? guessedValueColumn() });
+    populateColumnSelect(chartValueColumn2, currentColumns, { optional: true, preferred: values.value2 ?? '' });
+    populateColumnSelect(chartLabelColumn, currentColumns, { optional: true, preferred: values.label ?? guessedLabelColumn() });
     tableForm.setColumns(schema.columns, values.columns ?? []);
   };
 
   const applyChartValues = (values) => {
     clearPreview();
+    ++queryRevision;
+    chartQuery.value = values.sql ?? '';
+    extraValues.replaceChildren(); extraValueSelects.length = 0;
     refreshChartColumnOptions(values);
+    for (const column of values.extraValues ?? []) addValueColumn(column);
     setChartType(values.type ?? 'heatmap');
     chartId.value = values.id ?? '';
     chartTitle.value = values.title ?? '';
@@ -342,6 +381,7 @@ export function mountChartForm(root, options) {
       date: chart.options?.date ?? chart.options?.label ?? chart.options?.x ?? '',
       value: optionValues(chart.options, type === 'line' ? 'y' : 'value')[0] ?? '',
       value2: optionValues(chart.options, type === 'line' ? 'y' : 'value')[1] ?? '',
+      extraValues: optionValues(chart.options, type === 'line' ? 'y' : 'value').slice(2),
       label: chart.options?.label ?? chart.options?.series ?? '',
       orientation: chart.options?.orientation ?? 'months-horizontal',
       presentation: chart.options?.presentation ?? 'stacked',
@@ -428,6 +468,27 @@ export function mountChartForm(root, options) {
     clearChartError();
     renderChartList();
   });
+  on(loadQueryColumns, 'click', async () => {
+    const revision = ++queryRevision;
+    const sql = chartQuery.value.trim();
+    loadQueryColumns.disabled = true;
+    try {
+      const columns = sql ? (options.loadQueryColumns
+        ? await options.loadQueryColumns(sql)
+        : (await postJson('/api/sql-query', { sql: tableQuery({ sql }, 0) })).columns) : schema.columns;
+      if (disposed || revision !== queryRevision) return;
+      if (!Array.isArray(columns) || !columns.length) throw new Error('The query returned no columns.');
+      const values = { date: chartDateColumn.value, value: chartValueColumn.value, value2: chartValueColumn2.value, label: chartLabelColumn.value };
+      currentColumns = columns;
+      for (const [select, key, optional] of [[chartDateColumn, 'date', false], [chartValueColumn, 'value', true], [chartValueColumn2, 'value2', true], [chartLabelColumn, 'label', true]]) {
+        populateColumnSelect(select, columns, { optional, preferred: values[key] });
+      }
+      for (const select of extraValueSelects) populateColumnSelect(select, columns, { optional: true, preferred: select.value });
+      clearPreview(); clearChartError(); updateColorSchemeVisibility();
+    } catch (error) {
+      if (!disposed && revision === queryRevision) showChartError(error instanceof Error ? error.message : 'Could not load query columns.');
+    } finally { if (!disposed) loadQueryColumns.disabled = false; }
+  });
   on(chartRangeFixed, 'change', () => setRangeMode('fixed'));
   on(chartRangeRolling, 'change', () => setRangeMode('rolling'));
   on(chartValueColumn, 'change', updateColorSchemeVisibility);
@@ -474,7 +535,8 @@ export function mountChartForm(root, options) {
       presentation: chartType.value === 'bar' ? chartPresentation.value : '',
       colorScheme: (chartType.value === 'bar' || chartType.value === 'line') ? chartColorScheme.value : '',
       columns: markdown.columns,
-      sql: markdown.sql,
+      sql: chartType.value === 'markdown-table' ? markdown.sql : chartQuery.value.trim(),
+      clearSql: chartType.value !== 'markdown-table' && !chartQuery.value.trim(),
       start: chartRangeRolling.checked ? '' : chartStart.value,
       end: chartRangeRolling.checked ? '' : chartEnd.value,
       lookback: chartType.value === 'heatmap' && chartRangeRolling.checked ? currentLookback() : '',
@@ -537,6 +599,7 @@ export function mountChartForm(root, options) {
     open,
     dispose() {
       disposed = true;
+      ++queryRevision;
       ++previewRevision;
       tableForm.dispose();
       for (const remove of listeners) remove();

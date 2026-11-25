@@ -37,6 +37,7 @@ export class ChartOptionsModal extends Modal {
     root.querySelector('button[type="submit"]')?.classList.add("mod-cta");
     this.form = mountChartForm(root, {
       schema: { file: this.chart.source, columns }, existingOnly: true,
+      loadQueryColumns: sql => this.tables.loadColumns(this.chart.source, sql),
       previewTable: value => this.tables.render({ ...value, source: this.chart.source, format: "table" }, 20),
       previewChart: value => this.definitions.preview(this.chart, value, async temporary => {
         if (this.closed) throw new Error("Chart options closed.");

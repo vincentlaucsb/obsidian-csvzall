@@ -17,6 +17,7 @@ import { SessionErrors } from "../logging/SessionErrors.js";
 import type { ExportReflection } from "../exports/ExportReflection.js";
 import { directConfig } from "../exports/paths.js";
 import { normalizeVaultPath } from "../utils/paths.js";
+import { hasErrorCode } from "../utils/errors.js";
 
 export class ChartService {
   readonly scheduler: ChartRunScheduler;
@@ -63,10 +64,12 @@ export class ChartService {
       const charts: ConfiguredChart[] = [];
       for (const configPath of configPaths) {
         try {
-        const text = await this.app.vault.adapter.read(configPath);
-        this.reflection?.assertReady(configPath);
-        charts.push(...parseChartConfigText(text, configPath).filter(chart => !this.reflection?.usesDirectFolders || directConfig(chart.input, "charts") === configPath));
-        } catch (error) { await this.reportConfigError(error, configPath); }
+          const text = await this.app.vault.adapter.read(configPath);
+          this.reflection?.assertReady(configPath);
+          charts.push(...parseChartConfigText(text, configPath).filter(chart => !this.reflection?.usesDirectFolders || directConfig(chart.input, "charts") === configPath));
+        } catch (error) {
+          if (!hasErrorCode(error, "ENOENT")) await this.reportConfigError(error, configPath);
+        }
       }
       this.charts = charts;
     } catch (error) {
