@@ -39,6 +39,9 @@ original bytes immediately before calling the vault binary writer.
 When the file changes during editing, the recovery action creates a sibling
 JSON file containing local editing operations. The viewer keeps the edits
 open until the user chooses to discard them and reload.
+Exercise Cancel and Discard in an iframe with the same sandbox as
+`CsvzallTableView` (`allow-scripts allow-same-origin allow-forms`).
+The confirmation uses a dialog inside that iframe.
 
 ## Prerequisites
 
