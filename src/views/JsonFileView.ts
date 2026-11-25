@@ -193,8 +193,8 @@ function reportError(error: unknown): void {
   new Notice(error instanceof Error ? error.message : String(error));
 }
 
-export function registerJsonView(plugin: Plugin): void {
+export function registerJsonView(plugin: Plugin, useAsDefault: boolean): void {
   const type = plugin.manifest.id + "-json";
   plugin.registerView(type, leaf => new JsonFileView(leaf, type));
-  registerJsonExtension(plugin, type);
+  registerJsonExtension(plugin, type, useAsDefault);
 }

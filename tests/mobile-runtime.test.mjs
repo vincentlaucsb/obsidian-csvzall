@@ -10,7 +10,7 @@ const compiled = buildSync({
   external: ["obsidian", "./WasmViewerSession.js", "../src/views/CsvzallTableView.js"],
 }).outputFiles[0].text;
 
-function fixture(isMobileApp) {
+function fixture(isMobileApp, jsonClaimed = false) {
   const views = [], extensions = [], commands = [], menus = [], notices = [], opened = [], writes = [];
   let releases = 0, activeFile = null;
   class TFile {
@@ -27,7 +27,10 @@ function fixture(isMobileApp) {
     async saveData(value) { this.data = value; }
     addSettingTab(tab) { this.tab = tab; }
     registerView(...args) { views.push(args); }
-    registerExtensions(...args) { extensions.push(args); }
+    registerExtensions(...args) {
+      extensions.push(args);
+      if (jsonClaimed && args[0].includes("json")) throw new Error("JSON already registered");
+    }
     addRibbonIcon() {}
     addCommand(command) { commands.push(command); }
     registerEvent() {}
@@ -67,7 +70,7 @@ for (const mobile of [false, true]) test(`bundled plugin registers and opens the
   assert.deepEqual(Array.from(f.extensions[1][0]), ["json"]);
   assert.equal(f.extensions[1][1], "csvzall-mobile-json");
   assert.equal(f.commands.length, 2);
-  assert.equal(f.menus.length, 1);
+  assert.equal(f.menus.length, 2);
   const file = new f.TFile("Tasks.csv");
   await f.plugin.openCsvInLeaf(file, f.leaf);
   assert.equal(f.leaf.view.shown[1], "resource://bundled-viewer/index.html");
@@ -88,9 +91,39 @@ test("Lite loads and saves all three AutoSave modes and retains unrelated plugin
   await f.plugin.onload();
   assert.equal(f.plugin.settings.autosaveMode, "off");
   for (const mode of ["hidden", "on", "off"]) {
-    await f.plugin.setAutosaveMode(mode);
+    await f.plugin.saveSettings({ autosaveMode: mode });
     assert.equal(f.plugin.settings.autosaveMode, mode);
     assert.equal(f.plugin.data.autosaveMode, mode);
+    assert.equal(f.plugin.data.custom, 42);
+  }
+});
+
+function fileMenu(f, file) {
+  const items = [];
+  for (const listener of f.menus) listener({ addItem(build) {
+    const item = { setTitle(title) { this.title = title; return this; }, setIcon() { return this; },
+      onClick(click) { this.click = click; return this; } };
+    build(item); items.push(item);
+  } }, file);
+  return items;
+}
+
+test("Lite keeps Open in csvzall available with JSON enabled, disabled, or already claimed", async () => {
+  for (const [enabled, claimed] of [[true, false], [false, false], [false, true], [true, true]]) {
+    const f = fixture(true, claimed);
+    f.plugin.data = { defaultJsonViewer: enabled, custom: 42 };
+    await f.plugin.onload();
+    assert.equal(f.extensions.some(([extensions]) => extensions.includes("json")), enabled);
+    assert.equal(f.plugin.settings.defaultJsonViewer, enabled);
+    const items = fileMenu(f, new f.TFile("notes/Config.JSON"));
+    assert.deepEqual(items.map(item => item.title), ["Open in csvzall"]);
+    await items[0].click();
+    assert.equal(f.opened[0].type, "csvzall-mobile-json");
+    assert.equal(f.opened[0].state.file, "notes/Config.JSON");
+    assert.deepEqual(fileMenu(f, new f.TFile("Config.md")), []);
+    await f.plugin.saveSettings({ defaultJsonViewer: !enabled });
+    await f.plugin.saveSettings({ autosaveMode: "on" });
+    assert.equal(f.plugin.data.defaultJsonViewer, !enabled);
     assert.equal(f.plugin.data.custom, 42);
   }
 });
@@ -115,14 +148,8 @@ test("TSV files use the same command and context menu on desktop and mobile", as
       assert.equal(command.checkCallback(true), true);
       command.checkCallback(false);
       assert.equal(f.opened.at(-1).state.file, `Tasks.${extension}`);
-      const items = [];
-      f.menus[0]({ addItem() { items.push("open"); return this; } }, { extension });
-      assert.equal(items.length, 0, "non-TFile values remain excluded");
-      f.menus[0]({ addItem(callback) {
-        const item = { setTitle() { return item; }, setIcon() { return item; }, onClick(fn) { items.push(fn); } };
-        callback(item);
-      } }, new f.TFile(`Tasks.${extension}`));
-      assert.equal(items.length, 1);
+      assert.equal(fileMenu(f, { extension }).length, 0, "non-TFile values remain excluded");
+      assert.equal(fileMenu(f, new f.TFile(`Tasks.${extension}`)).length, 1);
     }
     f.setFile(new f.TFile("Note.md"));
     assert.equal(command.checkCallback(true), false);

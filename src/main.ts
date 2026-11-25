@@ -63,7 +63,7 @@ export default class CsvzallPlugin extends Plugin {
     this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL);
     const jsonView = this.manifest.id + "-json";
     this.registerView(jsonView, leaf => new CsvzallTableView(leaf, this, jsonView));
-    registerJsonExtension(this, jsonView);
+    registerJsonExtension(this, jsonView, this.settings.defaultJsonViewer);
     this.registerView(VIEW_TYPE_CSVZALL_EXPORTS, (leaf) => new CsvzallExportsView(leaf, this.exportSettings));
     this.addSettingTab(new CsvzallSettingTab(this, {
       getSettings: () => this.settings,

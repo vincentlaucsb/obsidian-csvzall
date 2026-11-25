@@ -5,7 +5,8 @@ import { parentVaultPath } from "../src/utils/paths.js";
 import { CsvzallTableView, updateViewerAutosave } from "../src/views/CsvzallTableView.js";
 import { autosaveMode, type AutosaveMode } from "../src/settings/autosave.js";
 import { isRecord } from "../src/utils/validateObject.js";
-import { AutosaveSettingsTab } from "./AutosaveSettingsTab.js";
+import { LiteSettingsTab } from "./LiteSettingsTab.js";
+import { defaultJsonViewer } from "../src/settings/jsonViewer.js";
 import { openPluginSettings } from "../src/obsidian/settingsModal.js";
 import {
   embeddedWasmViewerUrl,
@@ -17,12 +18,12 @@ const DEFAULT_CSV_TEXT = "column\n";
 
 export default class CsvzallMobilePlugin extends Plugin {
   private assetError = "";
-  settings: { autosaveMode: AutosaveMode } = { autosaveMode: "off" };
+  settings: { autosaveMode: AutosaveMode; defaultJsonViewer: boolean } = { autosaveMode: "off", defaultJsonViewer: true };
   private settingsWrite = Promise.resolve();
 
   async onload(): Promise<void> {
     await this.onExternalSettingsChange();
-    this.addSettingTab(new AutosaveSettingsTab(this, mode => this.setAutosaveMode(mode)));
+    this.addSettingTab(new LiteSettingsTab(this));
     try {
       embeddedWasmViewerUrl();
     } catch (error) {
@@ -35,7 +36,7 @@ export default class CsvzallMobilePlugin extends Plugin {
       (leaf) => new CsvzallTableView(leaf, this, VIEW_TYPE_CSVZALL_MOBILE),
     );
     this.registerExtensions(CSV_EXTENSIONS, VIEW_TYPE_CSVZALL_MOBILE);
-    registerJsonView(this);
+    registerJsonView(this, this.settings.defaultJsonViewer);
     this.addRibbonIcon("table", "New CSV", () => void this.createCsvInActiveFolder());
     this.registerCsvCommands();
     this.registerCsvFileMenu();
@@ -44,9 +45,10 @@ export default class CsvzallMobilePlugin extends Plugin {
   async onExternalSettingsChange(): Promise<void> {
     try {
       const data: unknown = await this.loadData();
+      this.settings.defaultJsonViewer = defaultJsonViewer(isRecord(data) ? data.defaultJsonViewer : undefined);
       this.applyAutosave(autosaveMode(isRecord(data) ? data.autosaveMode : undefined));
     } catch (error) {
-      new Notice(`Could not read AutoSave settings: ${error instanceof Error ? error.message : String(error)}`);
+      new Notice(`Could not read csvzall Lite settings: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -56,13 +58,14 @@ export default class CsvzallMobilePlugin extends Plugin {
     updateViewerAutosave(this.app.workspace, VIEW_TYPE_CSVZALL_MOBILE);
   }
 
-  private setAutosaveMode(mode: AutosaveMode): Promise<void> {
+  saveSettings(patch: Partial<CsvzallMobilePlugin["settings"]>): Promise<void> {
     this.settingsWrite = this.settingsWrite.then(async () => {
       const data: unknown = await this.loadData();
-      await this.saveData({ ...(isRecord(data) ? data : {}), autosaveMode: mode });
-      this.applyAutosave(mode);
+      await this.saveData({ ...(isRecord(data) ? data : {}), ...patch });
+      if (patch.autosaveMode !== undefined) this.applyAutosave(patch.autosaveMode);
+      if (patch.defaultJsonViewer !== undefined) this.settings.defaultJsonViewer = patch.defaultJsonViewer;
     }).catch((error: unknown) => {
-      new Notice(`Could not save AutoSave settings: ${error instanceof Error ? error.message : String(error)}`);
+      new Notice(`Could not save csvzall Lite settings: ${error instanceof Error ? error.message : String(error)}`);
     });
     return this.settingsWrite;
   }

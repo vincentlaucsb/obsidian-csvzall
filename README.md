@@ -22,6 +22,7 @@ For mobile devices, install
 - Refreshes the table when the file changes elsewhere and shows when those changes loaded. If you have edits in progress, the viewer keeps them open.
 - Turn on **AutoSave** in a pane to save after editing. Plugin settings let you start with it on, start with it off, or hide the switch.
 - Opens JSON in the native csvzall editor on desktop and a helper-free editor in Lite, both with syntax highlighting. Compact JSON expands for reading and saves compactly after edits.
+  To keep another viewer as your default, turn off **Use csvzall as the default JSON viewer** and reload Obsidian. Choose **Open in csvzall** from a JSON file’s menu whenever you want to use this editor.
 - Adds command palette and context-menu actions to create and open CSV/TSV files and configure, refresh, or delete exports.
 - Generates exports that update automatically when the source file changes:
   - Bar, line, and heatmap charts.

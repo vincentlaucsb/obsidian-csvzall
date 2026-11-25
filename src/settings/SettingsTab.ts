@@ -6,6 +6,7 @@ import type { AgentIntegrationService } from "../agents/AgentIntegrationService.
 import { stripOuterQuotes } from "../viewerHelpers.js";
 import { DEFAULT_SETTINGS, MAX_EVENT_LOG_ENTRIES, type CsvzallPluginSettings } from "./settings.js";
 import { autosaveSetting } from "./autosave.js";
+import { jsonViewerSetting } from "./jsonViewer.js";
 import type { ExportSettingsService } from "./ExportSettingsService.js";
 import { BUNDLED_CSVZALL_VERSION } from "../installer/bundledPayloads.generated.js";
 import { loadExports } from "./exportList.js";
@@ -79,6 +80,10 @@ export class CsvzallSettingTab extends PluginSettingTab {
     return [
       autosaveSetting(settings.autosaveMode, async mode => {
         this.services.getSettings().autosaveMode = mode;
+        await this.persistSettings();
+      }),
+      jsonViewerSetting(settings.defaultJsonViewer, async enabled => {
+        this.services.getSettings().defaultJsonViewer = enabled;
         await this.persistSettings();
       }),
       {

@@ -105,10 +105,14 @@ test("declarative settings persist controls and refresh install/log actions", as
     const definitions = tab.getSettingDefinitions();
     assert.equal(tab.containerEl.children.length, 0, "indexing must not render or perform actions");
     assert.equal(installs + saves, 0);
-    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["AutoSave", "Custom executable path", "Bundled helper", "Open inside Obsidian", "Agent integration", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
+    assert.deepEqual(Array.from(definitions, (d: any) => d.name), ["AutoSave", "Use csvzall as the default JSON viewer", "Custom executable path", "Bundled helper", "Open inside Obsidian", "Agent integration", "Startup timeout", "Report a bug", "Exports", "Export sync", "Saved exports", "Log", "Chart and error log"]);
     tab.update();
     const row = (name: string): Row => tab.containerEl.children.find((r: Row) => r.name === name);
-    assert.equal(tab.containerEl.children.length, 12);
+    assert.equal(tab.containerEl.children.length, 13);
+    const jsonToggle = row("Use csvzall as the default JSON viewer").control!;
+    assert.equal(jsonToggle.value, true);
+    await jsonToggle.change(false);
+    assert.equal(settings.defaultJsonViewer, false);
     assert.equal(row("AutoSave").control!.value, "off");
     await row("AutoSave").control!.change("hidden");
     assert.equal(settings.autosaveMode, "hidden");
@@ -123,7 +127,7 @@ test("declarative settings persist controls and refresh install/log actions", as
     assert.equal(settings.startupTimeoutMs, 3000);
     await row("Startup timeout").control!.change("invalid");
     assert.equal(settings.startupTimeoutMs, DEFAULT_SETTINGS.startupTimeoutMs);
-    assert.equal(saves, 5);
+    assert.equal(saves, 6);
     const pending = row("Bundled helper").control!.click();
     assert.equal(row("Bundled helper").control!.disabled, true);
     finishInstall(); await pending;
@@ -138,7 +142,7 @@ test("declarative settings persist controls and refresh install/log actions", as
     await row("Chart and error log").control!.click();
     assert.equal(row("Chart and error log").control!.disabled, true);
     assert.equal(row("Chart and error log").descEl.children[0]!.children[0]!.options.text, "No csvzall events yet.");
-    assert.equal(tab.containerEl.children.length, 12, "refresh must not duplicate rows");
+    assert.equal(tab.containerEl.children.length, 13, "refresh must not duplicate rows");
     assert.ok(tab.updates > 1);
 });
 

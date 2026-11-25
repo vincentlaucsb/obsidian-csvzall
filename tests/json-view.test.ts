@@ -64,7 +64,8 @@ function fixture() {
     } });
   let view: any;
   module.exports.registerJsonView({ manifest: { id: "csvzall" }, registerExtensions() {},
-    registerView(_type: string, factory: () => unknown) { view = factory(); } });
+    app: { workspace: { on() {} } }, registerEvent() {},
+    registerView(_type: string, factory: () => unknown) { view = factory(); } }, true);
   function edit(before: string, after: string) {
     const from = editor.state.doc.toString().indexOf(before);
     assert.ok(from >= 0);

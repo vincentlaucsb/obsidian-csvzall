@@ -1,5 +1,6 @@
 import validateObject, { isString, optional } from "../utils/validateObject.js";
 import { autosaveMode, type AutosaveMode } from "./autosave.js";
+import { defaultJsonViewer } from "./jsonViewer.js";
 
 export const MAX_EVENT_LOG_ENTRIES = 100;
 
@@ -17,6 +18,7 @@ export interface CsvzallPluginSettings {
   installedCsvzallAssetName: string;
   csvzallLastUpdateCheckAt: string;
   openInObsidian: boolean;
+  defaultJsonViewer: boolean;
   autosaveMode: AutosaveMode;
   exportSyntax: 'comment' | 'code';
   startupTimeoutMs: number;
@@ -37,6 +39,7 @@ export const DEFAULT_SETTINGS: CsvzallPluginSettings = {
   installedCsvzallAssetName: "",
   csvzallLastUpdateCheckAt: "",
   openInObsidian: true,
+  defaultJsonViewer: true,
   autosaveMode: "off",
   exportSyntax: 'comment',
   startupTimeoutMs: 10000,
@@ -56,6 +59,7 @@ export function normalizeSettings(data: unknown): CsvzallPluginSettings {
     ...DEFAULT_SETTINGS,
     csvzallExecutableMode: mode,
     autosaveMode: autosaveMode(candidate.autosaveMode),
+    defaultJsonViewer: defaultJsonViewer(candidate.defaultJsonViewer),
     csvzallPath: typeof candidate.csvzallPath === "string" && candidate.csvzallPath.trim() ?
       candidate.csvzallPath : DEFAULT_SETTINGS.csvzallPath,
     openInObsidian: typeof candidate.openInObsidian === "boolean" ?
