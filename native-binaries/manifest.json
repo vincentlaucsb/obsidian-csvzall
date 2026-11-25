@@ -1,23 +1,23 @@
 {
   "version": "0.10.0",
   "repository": "vincentlaucsb/csvzall",
-  "sourceCommit": "696e66a62f744ce633fcf4856d216f19c0dde618",
-  "buildKey": "7051e06dda735848b47d24d898eb0053754203fec81cf8b28cad146f237a70eb",
+  "sourceCommit": "e75eda7f706e7199967b8d7fa92636c7bacd3b61",
+  "buildKey": "d23025da3d102de04ed1967526d51a3fce79f4bf4bc9ed31f80c72dfb7c4066a",
   "assets": {
     "linux-x64": {
       "assetName": "csvzall-0.10.0-obsidian-linux-x64.tar.gz",
-      "sha256": "6c48c6bcdf1334304b478f30724e7271eb996995ced6b175ae359c7fb5d2fde7",
-      "executableSha256": "64e428f25fbf6cdb4c3280a073c58eb7ea856951fad9dee95d5f757ae27c604d"
+      "sha256": "56e3659adb1f8a3b58d0d125815cde06f5529b9284fd5984b01cfb33b45002a7",
+      "executableSha256": "6031a4012e416ee9fcfdffcd1416d8cb7b258a03ede21acd502775438f8828e3"
     },
     "darwin-arm64": {
       "assetName": "csvzall-0.10.0-obsidian-macos-arm64.tar.gz",
-      "sha256": "92c18386310f6fb4fa16c02cc46237134983edce4be2d3f32d5b56f86ab4357a",
-      "executableSha256": "69350faaa67ab3d61d05e5bbb024a6882df2c010928a027c71ebd80583361f3f"
+      "sha256": "80c0b649b715aa58c5b7329819c7908a94f27b07051e08132b224a93907dfecd",
+      "executableSha256": "b02c89906376b1858b476b098cb344e212675c4d7cc7bca5c1e3928981cb6763"
     },
     "win32-x64": {
       "assetName": "csvzall-0.10.0-obsidian-windows-x64.zip",
-      "sha256": "941fb216acc1e704033c5f6652453e1d6958addc441c8fd4d69652622acf2a76",
-      "executableSha256": "09b945fb9eb6204f5d1b283b5b4722a880e41f49a03af5de336917d93fdf3ec6"
+      "sha256": "ce749e68047c9860234e0ba5bd87fd5d284a1b0882c1919e6c9dfc74249c9510",
+      "executableSha256": "bbc92075c87a32c3441a57d77f96eba45318ae767c4c2d671f69000511cd4b0e"
     }
   }
 }
