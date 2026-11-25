@@ -57,7 +57,8 @@ function packagedWorker() {
     request, check,
     open: text => check("open", { name: "fixture.csv", buffer: new TextEncoder().encode(text).buffer }),
     async save() {
-      const saved = await check("save");
+      const saved = await check("prepareSave");
+      await check("finishSave", { saveId: saved.saveId, commit: true });
       return new TextDecoder("utf-8", { ignoreBOM: true }).decode(new Uint8Array(saved.buffer, saved.byteOffset, saved.byteLength));
     },
   };
