@@ -34,7 +34,7 @@ export function obsidianStartupUrl(line) {
   return startup.url;
 }
 
-export async function smokeNativeHelper(binary, version, work) {
+export async function smokeNativeHelper(binary, version, work, { checkExternalEdits = false } = {}) {
   if (!capture(binary, ["--version"]).includes(version)) throw new Error("Native helper version smoke test failed.");
   const csv = join(work, "smoke data.csv");
   writeFileSync(csv, "name,value\nexample,42\n");
@@ -66,9 +66,10 @@ export async function smokeNativeHelper(binary, version, work) {
     const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!response.ok || !(await response.text()).toLowerCase().includes("csvzall")) throw new Error("Native viewer HTTP smoke test failed.");
     const startup = new URL(url);
+    const request = (path, body) => fetch(new URL(path, startup), { method: "POST", signal: AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json", "X-Session-Token": startup.searchParams.get("token") }, body: JSON.stringify(body) });
     const post = async (path, body) => {
-      const result = await fetch(new URL(path, startup), { method: "POST", signal: AbortSignal.timeout(15000),
-        headers: { "Content-Type": "application/json", "X-Session-Token": startup.searchParams.get("token") }, body: JSON.stringify(body) });
+      const result = await request(path, body);
       if (!result.ok) throw new Error(`Native hosted viewer smoke failed: ${path}: ${await result.text()}`);
       return result.json();
     };
@@ -79,6 +80,15 @@ export async function smokeNativeHelper(binary, version, work) {
     }
     await post("/api/chart-config/generate", { id: "smoke-table" });
     if (!readFileSync(join(work, "charts/smoke.md"), "utf8").includes("second")) throw new Error("Native Obsidian mode must retain explicit chart generation.");
+    if (checkExternalEdits) {
+      if ((await post("/api/reload", { checkOnly: true })).changed) throw new Error("The viewer mistook its save for an external edit.");
+      await post("/api/edit-cell", { row: 0, column: "value", value: "local" });
+      const external = "name,value\nchanged,24\n";
+      writeFileSync(csv, external);
+      const conflict = await request("/api/save", {});
+      if (conflict.status !== 409 || readFileSync(csv, "utf8") !== external) throw new Error("A stale save must preserve the external CSV.");
+      if (!(await post("/api/reload", {})).changed) throw new Error("The viewer failed to load the changed source.");
+    }
   } finally { child.kill(); await closed; }
 }
 
@@ -94,7 +104,7 @@ export async function verifyNativeHelper(directory, target, identity = buildIden
     const bytes = readFileSync(binary);
     if (sha256(bytes) !== receipt.executableSha256) throw new Error("Native executable checksum mismatch.");
     assertArchitecture(bytes, target);
-    await smokeNativeHelper(binary, identity.config.version, work);
+    await smokeNativeHelper(binary, identity.config.version, work, { checkExternalEdits: true });
   } finally {
     if (dirname(work) !== temporaryRoot) throw new Error("Unexpected native smoke directory.");
     rmSync(work, { recursive: true, force: true });
